@@ -40,8 +40,8 @@ import asyncio, threading, csv, re, shutil  # noqa: F401,E401
 # ============================================================================
 #  ตั้งค่า — แก้ 2 บรรทัดนี้ให้ชี้ repo ของคุณ
 # ============================================================================
-GITHUB_USER = 'CHANGE-ME'
-GITHUB_REPO = 'tr-plus-ultra'
+GITHUB_USER = 'Neon7117'
+GITHUB_REPO = 'TR-Plus-Ultra'
 BRANCH = 'main'
 
 MANIFEST_URL = f'https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{BRANCH}/version.json'
