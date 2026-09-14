@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.1 : ค้นหาไอเทมบนหลังบ้าน HoF เว็บใหม่ (aztek-tools-v2)
+V0.2 : ค้นหาไอเทม + นำเข้าจากไฟล์ Excel ต้นฉบับ (เลือกชีท/จับคู่คอลัมน์ได้)
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -13,6 +13,7 @@ import re
 import csv
 import json
 import asyncio
+import queue
 import threading
 import traceback
 from datetime import datetime
@@ -60,6 +61,19 @@ SEL = {
 COL = {'id': 0, 'name': 1, 'type': 2, 'kind': 3}
 
 TMPL_HEADERS = ['ItemKind', 'ItemName', 'duration', 'trade', 'qty']
+
+# ---- ชื่อคอลัมน์ที่ยอมรับได้ (ชีทแต่ละใบใช้ชื่อไม่เหมือนกัน) ----
+# เรียงตามลำดับความสำคัญ ตัวแรกที่เจอจะถูกเลือกเป็นค่าเริ่มต้น
+ALIAS = {
+    'kind': ['itemkind', 'fditemnum', 'item kind', 'fditemid', 'itemid', 'fditemkind'],
+    'name': ['itemname', 'display name', 'displayname', 'ชื่อไอเทม', 'ชื่อ', 'item name'],
+    'dur':  ['duration', 'ระยะเวลาของขวัญ', 'ระยะเวลา', 'durationindex', 'วัน'],
+    'trade': ['trade', 'แลกเปลี่ยน', 'แลกเปลี่ยนได้', 'tradeable'],
+    'qty':  ['qty', 'quantity', 'จำนวน'],
+}
+# แถวที่ถือว่าเป็น "หัวตาราง" ต้องมีคำใดคำหนึ่งนี้
+HEADER_MARKERS = ('itemkind', 'fditemnum', 'fditemkind')
+SCAN_ROWS = 400        # ลึกสุดที่จะไล่หาหัวตารางในแต่ละชีท
 
 APP_VERSION = globals().get('TRPU_VERSION') or 'dev'
 DATA_DIR = globals().get('TRPU_DATA_DIR') or os.path.join(
@@ -140,7 +154,7 @@ def norm_bool(v):
 def build_template(path):
     notes = [
         'ItemKind = รหัสไอเท็ม (ช่องค้นหาหลัก)   |   ItemName = ใส่เพื่อกรองชื่อซ้ำอีกชั้น (ไม่บังคับ)',
-        'duration : เว้นว่าง = เฉพาะไอเท็มถาวร  |  ใส่ตัวเลข = จำนวนวันนั้น (เช่น 15)  |  any = ไม่กรอง',
+        'duration : เว้นว่าง / any = ไม่กรอง  |  ใส่คำว่า ถาวร = เฉพาะไอเท็มถาวร  |  ใส่ตัวเลข = จำนวนวันนั้น (เช่น 15)',
         'trade : Any / Yes / No        qty : เว้นว่าง = ไม่กรอง หรือใส่ค่าที่ต้องตรงเป๊ะ',
         'กรอกรายการตั้งแต่แถวที่ 5 ลงมา',
     ]
@@ -162,7 +176,7 @@ def build_template(path):
             cell.font = Font(color='FFFFFF' if search_col else '0D1117', bold=True)
             cell.alignment = Alignment(horizontal='center')
             ws.column_dimensions[cell.column_letter].width = [14, 30, 12, 10, 10][col - 1]
-        ws.append(['40852', '', '', 'No', '1'])
+        ws.append(['40852', '', 'ถาวร', 'No', '1'])
         ws.append(['40852', '', '15', 'Yes', ''])
         ws.append(['40852', '', 'any', 'Any', ''])
         ws.add_data_validation(DataValidation(
@@ -172,52 +186,177 @@ def build_template(path):
     with open(path, 'w', newline='', encoding='utf-8-sig') as f:
         w = csv.writer(f)
         w.writerow(TMPL_HEADERS)
-        w.writerow(['40852', '', '', 'No', '1'])
+        w.writerow(['40852', '', 'ถาวร', 'No', '1'])
 
 
 def read_template(path):
+    """อ่านไฟล์ CSV แบบ template ง่ายๆ (ไฟล์ Excel ใช้หน้าต่างนำเข้าแทน)"""
     rows = []
-
-    def mk(d):
-        return {
-            'kind': str(d.get('ItemKind', '') or '').strip(),
-            'name': str(d.get('ItemName', '') or '').strip(),
-            'dur': str(d.get('duration', '') or '').strip(),
-            'trade': norm_bool(d.get('trade', '')),
-            'qty': str(d.get('qty', '') or '').strip(),
-        }
-
-    if path.lower().endswith(('.xlsx', '.xlsm')):
-        if not XLSX_OK:
-            raise RuntimeError('เครื่องนี้อ่านไฟล์ Excel ไม่ได้ ลองใช้ .csv แทน')
-        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        ws = wb.active
-        header_row, headers = None, []
-        for r in ws.iter_rows(min_row=1, max_row=30):
-            vals = [str(c.value or '').strip() for c in r]
-            if 'ItemKind' in vals:
-                header_row, headers = r[0].row, vals
-                break
-        if header_row is None:
-            wb.close()
-            raise RuntimeError('ไม่พบหัวคอลัมน์ ItemKind ในไฟล์')
-        idx = {h: i for i, h in enumerate(headers) if h}
-        for raw in ws.iter_rows(min_row=header_row + 1, values_only=True):
-            if not any(raw):
-                continue
-            d = {h: (raw[i] if i < len(raw) else '') for h, i in idx.items()}
-            row = mk(d)
-            if row['kind'] or row['name']:
-                rows.append(row)
-        wb.close()
-        return rows
-
     with open(path, 'r', encoding='utf-8-sig', errors='replace') as f:
-        for d in csv.DictReader(f):
-            row = mk(d)
-            if row['kind'] or row['name']:
+        reader = csv.DictReader(f)
+        headers = reader.fieldnames or []
+        cmap = {k: guess_column(headers, k) for k in ('kind', 'name', 'dur', 'trade', 'qty')}
+        for d in reader:
+            cells = [str(d.get(h, '') or '') for h in headers]
+            row = cells_to_row(cells, cmap)
+            if row:
                 rows.append(row)
     return rows
+
+
+# ============================================================================
+#  [3.5] อ่านไฟล์ Excel ต้นฉบับ (ชีทเยอะ หัวตารางอยู่ลึก และมีหลายบล็อกต่อชีท)
+# ============================================================================
+def num_str(v):
+    """แปลงค่าจากเซลล์เป็นข้อความ — ตัด .0 ที่ Excel ติดมากับตัวเลข"""
+    if v is None:
+        return ''
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    s = str(v).strip()
+    m = re.fullmatch(r'(\d+)\.0+', s)
+    return m.group(1) if m else s
+
+
+def dur_from_text(v):
+    """'ถาวร' → ''(ถาวร) · '7 วัน' → '7' · ว่าง → 'any'"""
+    s = num_str(v).strip()
+    if not s:
+        return 'any'
+    if 'ถาวร' in s or 'permanent' in s.lower():
+        return ''
+    m = re.search(r'(\d+)', s)
+    return m.group(1) if m else 'any'
+
+
+def _norm_h(s):
+    return re.sub(r'[\s_\-]', '', str(s or '')).strip().lower()
+
+
+def _is_marker_cell(c):
+    """เซลล์นี้เป็น 'ชื่อคอลัมน์' จริงไหม — ต้องสั้นและขึ้นต้นด้วยคำหลัก
+       (กันบรรทัดคำอธิบายยาวๆ ที่บังเอิญมีคำว่า ItemKind อยู่ในประโยค)"""
+    h = _norm_h(c)
+    if not h or len(h) > 24:
+        return False
+    return any(h == m or h.startswith(m) for m in HEADER_MARKERS)
+
+
+def is_header_row(cells):
+    if sum(1 for c in cells if _norm_h(c)) < 2:      # หัวตารางต้องมีอย่างน้อย 2 ช่อง
+        return False
+    return any(_is_marker_cell(c) for c in cells)
+
+
+def guess_column(headers, key):
+    """เดาว่าคอลัมน์ไหนคือ key ('kind'/'name'/…) คืน index หรือ -1 ถ้าไม่เจอ"""
+    hs = [_norm_h(h) for h in headers]
+    for want in ALIAS.get(key, []):
+        w = _norm_h(want)
+        for i, h in enumerate(hs):
+            if h == w:
+                return i
+    for want in ALIAS.get(key, []):
+        w = _norm_h(want)
+        for i, h in enumerate(hs):
+            if h and (w in h or h in w):
+                return i
+    return -1
+
+
+def cells_to_row(cells, cmap):
+    """แปลงข้อมูล 1 แถว + การจับคู่คอลัมน์ → เงื่อนไขค้นหา 1 รายการ"""
+    def get(k):
+        i = cmap.get(k, -1)
+        return str(cells[i]).strip() if 0 <= i < len(cells) else ''
+
+    kind = num_str(get('kind'))
+    name = get('name')
+    if cmap.get('kind', -1) >= 0:
+        if not re.fullmatch(r'\d+', kind):      # ตัดแถวหมายเหตุ/ยอดรวมทิ้ง
+            return None
+    elif not name:
+        return None
+    return {
+        'kind': kind,
+        'name': name,
+        'dur': dur_from_text(get('dur')) if cmap.get('dur', -1) >= 0 else 'any',
+        'trade': norm_bool(get('trade')) if cmap.get('trade', -1) >= 0 else 'any',
+        'qty': get('qty') if cmap.get('qty', -1) >= 0 else '',
+    }
+
+
+def open_workbook(path):
+    """เปิดไฟล์ Excel ครั้งเดียวแล้วใช้ซ้ำ — ไฟล์ใหญ่การเปิดใหม่ทุกครั้งช้ามาก"""
+    return openpyxl.load_workbook(path, read_only=True, data_only=True)
+
+
+def scan_sheets_wb(wb, progress=None):
+    """คืน [(ชื่อชีท, จำนวนบล็อกตารางไอเทมที่เจอ)]"""
+    out = []
+    names = wb.sheetnames
+    for k, name in enumerate(names):
+        n = 0
+        try:
+            for row in wb[name].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True):
+                if row and is_header_row(row):
+                    n += 1
+        except Exception:
+            n = 0
+        out.append((name, n))
+        if progress:
+            progress(k + 1, len(names), name)
+    return out
+
+
+def scan_sheets(path):
+    wb = open_workbook(path)
+    try:
+        return scan_sheets_wb(wb)
+    finally:
+        wb.close()
+
+
+def parse_sheet_wb(wb, sheet):
+    """อ่านชีทเดียว คืน (headers, blocks)
+       blocks = [{'row': แถวหัวตาราง, 'headers': [...], 'data': [[cell, …], …]}]"""
+    rows = [list(r) if r else []
+            for r in wb[sheet].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True)]
+
+    blocks, i = [], 0
+    while i < len(rows):
+        if rows[i] and is_header_row(rows[i]):
+            headers = [num_str(c) for c in rows[i]]
+            data, j = [], i + 1
+            while j < len(rows) and len(data) < 500:
+                r = rows[j]
+                if not r or is_header_row(r) or not any(num_str(c) for c in r):
+                    break
+                data.append([num_str(c) for c in r])
+                j += 1
+            blocks.append({'row': i + 1, 'headers': headers, 'data': data})
+            i = max(j, i + 1)
+        else:
+            i += 1
+    return (blocks[0]['headers'] if blocks else []), blocks
+
+
+def parse_sheet(path, sheet):
+    wb = open_workbook(path)
+    try:
+        return parse_sheet_wb(wb, sheet)
+    finally:
+        wb.close()
+
+
+def blocks_to_rows(blocks, cmap):
+    out = []
+    for b in blocks:
+        for cells in b['data']:
+            row = cells_to_row(cells, cmap)
+            if row:
+                out.append(row)
+    return out
 
 
 # ============================================================================
@@ -332,6 +471,271 @@ JS_CLICK_ROW = """
   }
   return false;
 }"""
+
+
+# ============================================================================
+#  [5.5] หน้าต่างนำเข้า Excel — เลือกชีท + จับคู่คอลัมน์ + ดูตัวอย่างก่อน
+# ============================================================================
+class ImportDialog:
+    FIELDS = [
+        ('kind',  'ItemKind  *จำเป็น'),
+        ('name',  'ชื่อไอเทม'),
+        ('dur',   'ระยะเวลา'),
+        ('trade', 'แลกเปลี่ยนได้'),
+        ('qty',   'จำนวน'),
+    ]
+
+    def __init__(self, parent, path):
+        self.path = path
+        self.result = None
+        self.sheet_name = ''
+        self.headers = []
+        self.blocks = []
+        self.sheets = []
+
+        self.top = tk.Toplevel(parent)
+        self.top.title('นำเข้าจาก Excel')
+        self.top.configure(bg=C['bg'])
+        self.top.geometry('1000x640')
+        self.top.transient(parent)
+        self.top.grab_set()
+
+        head = tk.Frame(self.top, bg=C['card'], height=56)
+        head.pack(fill='x')
+        head.pack_propagate(False)
+        tk.Label(head, text='นำเข้าจาก Excel', bg=C['card'], fg=C['fg'],
+                 font=('Segoe UI', 13, 'bold')).pack(side='left', padx=18)
+        tk.Label(head, text=os.path.basename(path), bg=C['card'], fg=C['dim'],
+                 font=('Segoe UI', 9)).pack(side='left')
+
+        body = tk.Frame(self.top, bg=C['bg'])
+        body.pack(fill='both', expand=True, padx=14, pady=12)
+
+        # ---- ซ้าย : รายชื่อชีท ----
+        left = tk.Frame(body, bg=C['bg'], width=270)
+        left.pack(side='left', fill='y')
+        left.pack_propagate(False)
+        tk.Label(left, text='เลือกชีท', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9, 'bold')).pack(anchor='w')
+        self.lb = tk.Listbox(left, bg=C['input'], fg=C['fg'], bd=0,
+                             highlightthickness=1, highlightbackground=C['line'],
+                             selectbackground=C['accent'], selectforeground='white',
+                             font=('Segoe UI', 9), activestyle='none')
+        sb = ttk.Scrollbar(left, orient='vertical', command=self.lb.yview)
+        self.lb.configure(yscrollcommand=sb.set)
+        self.lb.pack(side='left', fill='both', expand=True, pady=(5, 0))
+        sb.pack(side='right', fill='y', pady=(5, 0))
+        self.lb.bind('<<ListboxSelect>>', lambda e: self._on_sheet())
+
+        # ---- ขวา ----
+        right = tk.Frame(body, bg=C['bg'])
+        right.pack(side='left', fill='both', expand=True, padx=(14, 0))
+
+        self.info = tk.Label(right, text='กำลังสแกนไฟล์…', bg=C['bg'], fg=C['dim'],
+                             font=('Segoe UI', 9), anchor='w')
+        self.info.pack(fill='x')
+
+        mapbox = tk.LabelFrame(right, text='  จับคู่คอลัมน์  ', bg=C['bg'], fg=C['dim'],
+                               font=('Segoe UI', 9, 'bold'), bd=1, relief='solid')
+        mapbox.pack(fill='x', pady=(8, 0))
+        grid = tk.Frame(mapbox, bg=C['bg'])
+        grid.pack(fill='x', padx=12, pady=10)
+        self.combos = {}
+        for n, (key, label) in enumerate(self.FIELDS):
+            r, c = divmod(n, 3)
+            cell = tk.Frame(grid, bg=C['bg'])
+            cell.grid(row=r, column=c, sticky='w', padx=(0, 16), pady=4)
+            tk.Label(cell, text=label, bg=C['bg'], fg=C['dim'],
+                     font=('Segoe UI', 8)).pack(anchor='w')
+            cb = ttk.Combobox(cell, width=22, state='readonly', font=('Segoe UI', 9))
+            cb.pack()
+            cb.bind('<<ComboboxSelected>>', lambda e: self._refresh_preview())
+            self.combos[key] = cb
+
+        tk.Label(right, text='ตัวอย่างข้อมูลที่จะนำเข้า', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(12, 4))
+        pv = tk.Frame(right, bg=C['bg'])
+        pv.pack(fill='both', expand=True)
+        cols = ('kind', 'name', 'dur', 'trade', 'qty')
+        self.tree = ttk.Treeview(pv, columns=cols, show='headings', style='TR.Treeview', height=9)
+        for c, t, w in (('kind', 'ItemKind', 100), ('name', 'ชื่อไอเทม', 330),
+                        ('dur', 'ระยะเวลา', 90), ('trade', 'แลกเปลี่ยน', 90),
+                        ('qty', 'จำนวน', 80)):
+            self.tree.heading(c, text=t)
+            self.tree.column(c, width=w, anchor='w')
+        tsb = ttk.Scrollbar(pv, orient='vertical', command=self.tree.yview)
+        self.tree.configure(yscrollcommand=tsb.set)
+        self.tree.pack(side='left', fill='both', expand=True)
+        tsb.pack(side='right', fill='y')
+
+        foot = tk.Frame(self.top, bg=C['card'], height=62)
+        foot.pack(fill='x', side='bottom')
+        foot.pack_propagate(False)
+        self.count_lbl = tk.Label(foot, text='', bg=C['card'], fg=C['dim'], font=('Segoe UI', 10))
+        self.count_lbl.pack(side='left', padx=18)
+        self.ok_btn = tk.Button(foot, text='ใช้ข้อมูลนี้', bg=C['accent'], fg='white', bd=0,
+                                font=('Segoe UI', 10, 'bold'), cursor='hand2',
+                                activebackground='#3d55cf', activeforeground='white',
+                                state='disabled', command=self._ok)
+        self.ok_btn.pack(side='right', padx=18, pady=12, ipadx=22, ipady=5)
+        tk.Button(foot, text='ยกเลิก', bg=C['input'], fg=C['fg'], bd=0,
+                  font=('Segoe UI', 10), cursor='hand2', activebackground=C['line'],
+                  command=self._cancel).pack(side='right', pady=12, ipadx=16, ipady=5)
+
+        self.top.protocol('WM_DELETE_WINDOW', self._cancel)
+        self.wb = None
+        self.cache = {}
+        self.lock = threading.Lock()
+        self.busy = False
+        self.q = queue.Queue()
+        self.inflight = set()
+        threading.Thread(target=self._scan_worker, daemon=True).start()
+        self.top.after(80, self._pump)
+        parent.wait_window(self.top)
+
+    # ---------- รับผลจากเธรดเบื้องหลัง (ทำงานบนเธรดหลักเท่านั้น) ----------
+    #  ห้ามแตะ widget จากเธรดอื่นตรงๆ เด็ดขาด จอจะค้าง
+    def _pump(self):
+        try:
+            while True:
+                msg = self.q.get_nowait()
+                kind = msg[0]
+                if kind == 'info':
+                    self.info.config(text=msg[1])
+                elif kind == 'sheets':
+                    self.sheets = msg[1]
+                    self._fill_sheets()
+                elif kind == 'sheet':
+                    name, res = msg[1], msg[2]
+                    self.cache[name] = res
+                    self.inflight.discard(name)
+                    self.busy = False
+                    if self.sheet_name == name:
+                        self.headers, self.blocks = res
+                        self._apply_sheet(name)
+        except queue.Empty:
+            pass
+        except Exception:
+            pass
+        try:
+            self.top.after(80, self._pump)
+        except Exception:
+            pass
+
+    # ---------- สแกนรายชื่อชีท (ทำในเธรดแยก จอไม่ค้าง) ----------
+    def _scan_worker(self):
+        try:
+            with self.lock:
+                self.q.put(('info', 'กำลังเปิดไฟล์…'))
+                self.wb = open_workbook(self.path)
+                sheets = scan_sheets_wb(
+                    self.wb,
+                    progress=lambda k, n, name: self.q.put(
+                        ('info', f'กำลังสแกน… {k}/{n}   {name}')))
+        except Exception as ex:
+            self.q.put(('info', 'อ่านไฟล์ไม่ได้: ' + str(ex)))
+            return
+        self.q.put(('sheets', sheets))
+
+    def _fill_sheets(self):
+        self.lb.delete(0, tk.END)
+        first_hit = None
+        for i, (name, n) in enumerate(self.sheets):
+            mark = f'★ ({n})  ' if n else '     '
+            self.lb.insert(tk.END, mark + name)
+            if n and first_hit is None:
+                first_hit = i
+        hits = sum(1 for _, n in self.sheets if n)
+        self.info.config(text=f'ไฟล์นี้มี {len(self.sheets)} ชีท · พบตารางไอเทมใน {hits} ชีท '
+                              f'(ชีทที่มีดาว ★ คือชีทที่น่าจะใช้ได้)')
+        if first_hit is not None:
+            self.lb.selection_set(first_hit)
+            self.lb.see(first_hit)
+            self._on_sheet()
+
+    # ---------- เลือกชีท ----------
+    def _on_sheet(self):
+        sel = self.lb.curselection()
+        if not sel or not self.sheets:
+            return
+        name = self.sheets[sel[0]][0]
+        self.sheet_name = name
+        if name in self.cache:
+            self.headers, self.blocks = self.cache[name]
+            self._apply_sheet(name)
+            return
+        # ยังไม่เคยอ่านชีทนี้ — เคลียร์ของเก่าก่อน จะได้ไม่เข้าใจผิดว่าเป็นข้อมูลชีทใหม่
+        self.headers, self.blocks = [], []
+        self.preview_rows = []
+        self.tree.delete(*self.tree.get_children())
+        self.count_lbl.config(text='')
+        self.ok_btn.config(state='disabled', bg=C['input'], fg=C['dim'])
+        self.info.config(text=f'กำลังอ่านชีท “{name}” …')
+        if name in self.inflight:
+            return
+        self.inflight.add(name)
+        threading.Thread(target=self._sheet_worker, args=(name,), daemon=True).start()
+
+    def _sheet_worker(self, name):
+        try:
+            with self.lock:
+                res = parse_sheet_wb(self.wb, name)
+        except Exception as ex:
+            res = ([], [])
+            self.q.put(('info', 'อ่านชีทไม่ได้: ' + str(ex)))
+        self.q.put(('sheet', name, res))
+
+    def _apply_sheet(self, name):
+        opts = ['— ไม่ใช้ —'] + [f'{i + 1}. {h or "(ไม่มีชื่อ)"}' for i, h in enumerate(self.headers)]
+        for key, _ in self.FIELDS:
+            cb = self.combos[key]
+            cb['values'] = opts
+            idx = guess_column(self.headers, key)
+            cb.current(idx + 1 if idx >= 0 else 0)
+
+        total = sum(len(b['data']) for b in self.blocks)
+        self.info.config(text=f'ชีท “{name}” · พบตาราง {len(self.blocks)} บล็อก · '
+                              f'{total} แถวข้อมูล')
+        self._refresh_preview()
+
+    # ---------- ตัวอย่าง ----------
+    def _colmap(self):
+        m = {}
+        for key, _ in self.FIELDS:
+            i = self.combos[key].current()
+            m[key] = i - 1 if i > 0 else -1
+        return m
+
+    def _refresh_preview(self):
+        self.tree.delete(*self.tree.get_children())
+        rows = blocks_to_rows(self.blocks, self._colmap()) if self.blocks else []
+        self.preview_rows = rows
+        for r in rows[:200]:
+            dur = 'ถาวร' if r['dur'] == '' else ('ไม่กรอง' if r['dur'] == 'any' else r['dur'] + ' วัน')
+            self.tree.insert('', 'end', values=(r['kind'], r['name'], dur, r['trade'], r['qty']))
+        self.count_lbl.config(text=f'จะนำเข้า {len(rows)} รายการ'
+                              + (f' (แสดงตัวอย่าง 200 แถวแรก)' if len(rows) > 200 else ''))
+        self.ok_btn.config(state='normal' if rows else 'disabled',
+                           bg=C['accent'] if rows else C['input'],
+                           fg='white' if rows else C['dim'])
+
+    def _close_wb(self):
+        try:
+            if self.wb:
+                self.wb.close()
+        except Exception:
+            pass
+        self.wb = None
+
+    def _ok(self):
+        self.result = list(self.preview_rows)
+        self._close_wb()
+        self.top.destroy()
+
+    def _cancel(self):
+        self.result = None
+        self._close_wb()
+        self.top.destroy()
 
 
 # ============================================================================
@@ -464,7 +868,7 @@ class App:
         self.v_qty.insert(0, self.prefs.get('qty', ''))
         self.v_qty.grid(row=2, column=2, sticky='w', padx=(12, 0), ipady=4)
 
-        tk.Label(s3, text='ระยะเวลา: any = ไม่กรอง · เว้นว่าง = เฉพาะไอเทมถาวร · ตัวเลข = จำนวนวันนั้น\n'
+        tk.Label(s3, text='ระยะเวลา: any หรือเว้นว่าง = ไม่กรอง · พิมพ์ ถาวร = เฉพาะไอเทมถาวร · ตัวเลข = จำนวนวันนั้น\n'
                           'ถ้ากรองแค่ระยะเวลาเป็นตัวเลข โปรแกรมจะใช้ฟิลเตอร์บนหน้า list แทน เร็วกว่ามาก',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), justify='left'
                  ).grid(row=3, column=0, columnspan=4, sticky='w', pady=(8, 0))
@@ -612,10 +1016,24 @@ class App:
         if not path:
             return
         try:
-            self.imported = read_template(path)
-            self.lbl_file.config(text=f'{os.path.basename(path)} — {len(self.imported)} รายการ')
-            self.btn_multi.config(state='normal' if self.imported else 'disabled')
-            self.log(f'อ่าน template: {len(self.imported)} รายการ', 'OK')
+            if path.lower().endswith('.csv'):
+                rows = read_template(path)
+                src = os.path.basename(path)
+            else:
+                if not XLSX_OK:
+                    raise RuntimeError('เครื่องนี้อ่านไฟล์ Excel ไม่ได้ ลองใช้ .csv แทน')
+                dlg = ImportDialog(self.root, path)
+                if dlg.result is None:
+                    return
+                rows = dlg.result
+                src = f'{os.path.basename(path)}  ›  {dlg.sheet_name}'
+            if not rows:
+                messagebox.showwarning('นำเข้า', 'ไม่พบรายการที่ใช้ได้ในไฟล์นี้')
+                return
+            self.imported = rows
+            self.lbl_file.config(text=f'{src} — {len(rows)} รายการ')
+            self.btn_multi.config(state='normal')
+            self.log(f'นำเข้าจาก {src}: {len(rows)} รายการ', 'OK')
         except Exception as ex:
             messagebox.showerror('อ่านไฟล์ไม่ได้', str(ex))
 
@@ -630,7 +1048,7 @@ class App:
     def deep_criteria(self):
         if not self.v_deep.get():
             return {'dur': 'any', 'trade': 'any', 'qty': ''}
-        return {'dur': self.v_dur.get().strip(), 'trade': self.v_trade.get(),
+        return {'dur': dur_from_text(self.v_dur.get()), 'trade': self.v_trade.get(),
                 'qty': self.v_qty.get().strip()}
 
     def do_cancel(self):
