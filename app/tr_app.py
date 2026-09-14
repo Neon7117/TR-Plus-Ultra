@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.2 : ค้นหาไอเทม + นำเข้าจากไฟล์ Excel ต้นฉบับ (เลือกชีท/จับคู่คอลัมน์ได้)
+V0.3 : ค้นหาไอเทม + อ่านชีทต้นฉบับอัตโนมัติแบบเดียวกับเครื่องมือเดิม
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -154,7 +154,7 @@ def norm_bool(v):
 def build_template(path):
     notes = [
         'ItemKind = รหัสไอเท็ม (ช่องค้นหาหลัก)   |   ItemName = ใส่เพื่อกรองชื่อซ้ำอีกชั้น (ไม่บังคับ)',
-        'duration : เว้นว่าง / any = ไม่กรอง  |  ใส่คำว่า ถาวร = เฉพาะไอเท็มถาวร  |  ใส่ตัวเลข = จำนวนวันนั้น (เช่น 15)',
+        'duration : เว้นว่าง = เฉพาะไอเท็มถาวร (ระยะเวลา = 0)  |  ใส่ตัวเลข = จำนวนวันนั้น (เช่น 15)  |  any = ไม่กรอง',
         'trade : Any / Yes / No        qty : เว้นว่าง = ไม่กรอง หรือใส่ค่าที่ต้องตรงเป๊ะ',
         'กรอกรายการตั้งแต่แถวที่ 5 ลงมา',
     ]
@@ -176,7 +176,7 @@ def build_template(path):
             cell.font = Font(color='FFFFFF' if search_col else '0D1117', bold=True)
             cell.alignment = Alignment(horizontal='center')
             ws.column_dimensions[cell.column_letter].width = [14, 30, 12, 10, 10][col - 1]
-        ws.append(['40852', '', 'ถาวร', 'No', '1'])
+        ws.append(['40852', '', '', 'No', '1'])
         ws.append(['40852', '', '15', 'Yes', ''])
         ws.append(['40852', '', 'any', 'Any', ''])
         ws.add_data_validation(DataValidation(
@@ -186,7 +186,7 @@ def build_template(path):
     with open(path, 'w', newline='', encoding='utf-8-sig') as f:
         w = csv.writer(f)
         w.writerow(TMPL_HEADERS)
-        w.writerow(['40852', '', 'ถาวร', 'No', '1'])
+        w.writerow(['40852', '', '', 'No', '1'])
 
 
 def read_template(path):
@@ -219,12 +219,20 @@ def num_str(v):
 
 
 def dur_from_text(v):
-    """'ถาวร' → ''(ถาวร) · '7 วัน' → '7' · ว่าง → 'any'"""
+    """กติกาเดียวกับเครื่องมือเดิมเป๊ะ
+
+         เว้นว่าง   ->  ''     = เฉพาะไอเท็มถาวร (บนเว็บช่องระยะเวลาไอเท็ม = 0)
+         'ถาวร'     ->  ''     = ความหมายเดียวกัน (ชีทต้นฉบับเขียนคำนี้)
+         'any'      ->  'any'  = ไม่กรองระยะเวลา
+         ตัวเลข     ->  ตัวเลขนั้น เช่น '15'
+    """
     s = num_str(v).strip()
     if not s:
-        return 'any'
+        return ''
     if 'ถาวร' in s or 'permanent' in s.lower():
         return ''
+    if s.lower() == 'any':
+        return 'any'
     m = re.search(r'(\d+)', s)
     return m.group(1) if m else 'any'
 
@@ -474,29 +482,124 @@ JS_CLICK_ROW = """
 
 
 # ============================================================================
-#  [5.5] หน้าต่างนำเข้า Excel — เลือกชีท + จับคู่คอลัมน์ + ดูตัวอย่างก่อน
+#  [5.4] อ่านชีทต้นฉบับแบบเดียวกับเครื่องมือเดิม (parse_master_rows)
+#        ไม่ต้องกรอก template เอง — ยกกฎมาจาก tr_studio.py ทั้งดุ้น
+#
+#        anchor  = คอลัมน์ที่หัวตารางเขียนว่า fdItemNum (หรือ Item Kind)
+#        name    = Name / Display Name / Item Name  ที่อยู่ในช่วงของ anchor นั้น
+#        qty     = เลขที่อยู่หน้าคำว่า "ชิ้น" ในชื่อ   เช่น "กล่องอิลลิเฟียร์ 5 ชิ้น" -> 5
+#        ชื่อโชว์ = ตัด " X ชิ้น" ท้ายออก                 -> "กล่องอิลลิเฟียร์"
+#        dur     = เลขในคอลัมน์ระยะเวลา เฉพาะตอนมีคำว่า "วัน" ; "ถาวร"/ว่าง -> '' (ถาวร)
+#        trade   = คอลัมน์ Itemmove (Yes/No, ว่าง = No) ; ไม่มีคอลัมน์เลย -> 'any'
+#        หนึ่งแถวมีได้หลายตาราง (fdItemNum หลายคอลัมน์วางเรียงกัน) และตัด ID ซ้ำให้
+# ============================================================================
+MASTER_TRADE_YES = ('yes', 'y', 'true', 'ได้', 'แลกเปลี่ยนได้')
+
+
+def read_sheet_rows(wb, sheet):
+    return [list(r) if r else []
+            for r in wb[sheet].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True)]
+
+
+def parse_master_rows(rows, seen=None):
+    out = []
+    if seen is None:
+        seen = set()
+    tables = []
+    prev = []
+
+    for row in rows:
+        cells = [num_str(c) for c in row]
+        low = [c.lower() for c in cells]
+
+        anchors = [j for j, c in enumerate(low) if 'fditemnum' in c]
+        if not anchors:
+            anchors = [j for j, c in enumerate(low) if c in ('item kind', 'itemkind')]
+
+        if anchors:
+            top = [str(c or '').strip().lower() for c in prev]
+            tables = []
+            for idx, a in enumerate(anchors):
+                end_c = anchors[idx + 1] if idx + 1 < len(anchors) else max(len(low), a + 12)
+                span = list(range(a, min(end_c, len(low))))
+
+                def findin(preds, _span=span, _low=low):
+                    for j in _span:
+                        h = _low[j]
+                        if any(pr(h) for pr in preds):
+                            return j
+                    return None
+
+                name_col = findin([lambda h: h == 'name', lambda h: 'display name' in h,
+                                   lambda h: h == 'item name', lambda h: h == 'itemname'])
+                dur_col = findin([lambda h: 'ระยะเวลา' in h, lambda h: 'ของขวัญ' in h,
+                                  lambda h: 'duration' in h])
+                move_col = findin([lambda h: 'itemmove' in h])
+                if move_col is None:      # บางไฟล์เขียน Itemmove ไว้แถวบนของหัวตาราง
+                    for j in span:
+                        if j < len(top) and 'itemmove' in top[j]:
+                            move_col = j
+                            break
+                tables.append({'kind': a, 'name': name_col, 'dur': dur_col, 'move': move_col})
+            prev = cells
+            continue
+
+        prev = cells
+        if not tables:
+            continue
+
+        for t in tables:
+            a = t['kind']
+            if a >= len(cells):
+                continue
+            kind = num_str(cells[a])
+            if not re.fullmatch(r'\d+', kind):
+                continue
+            nc = t['name'] if t['name'] is not None else (a + 4)
+            name = cells[nc] if nc < len(cells) else ''
+            # ต้องมีตัวอักษรจริงในชื่อ ไม่ใช่ตัวเลขล้วน (กันแถวยอดรวม)
+            if not name.strip() or not re.search(r'[^\d.,\s]', name):
+                continue
+            if kind in seen:
+                continue
+            seen.add(kind)
+
+            m = re.search(r'(\d+)\s*ชิ้น', name)
+            qty = m.group(1) if m else ''
+            disp = re.sub(r'\s*\d+\s*ชิ้น.*$', '', name).strip() or name.strip()
+
+            dc = t['dur'] if t['dur'] is not None else (a + 5)
+            durc = cells[dc] if dc < len(cells) else ''
+            md = re.search(r'(\d+)', durc) if 'วัน' in durc else None
+            dur = md.group(1) if md else ''
+
+            if t['move'] is not None:
+                mc = cells[t['move']] if t['move'] < len(cells) else ''
+                trade = 'yes' if mc.strip().lower() in MASTER_TRADE_YES else 'no'
+            else:
+                trade = 'any'
+
+            out.append({'kind': kind, 'name': '', 'disp': disp,
+                        'dur': dur, 'trade': trade, 'qty': qty,
+                        'has_move': t['move'] is not None})
+    return out
+
+
+# ============================================================================
+#  [5.5] หน้าต่างนำเข้า Excel — เลือกชีท แล้วอ่านให้อัตโนมัติ
 # ============================================================================
 class ImportDialog:
-    FIELDS = [
-        ('kind',  'ItemKind  *จำเป็น'),
-        ('name',  'ชื่อไอเทม'),
-        ('dur',   'ระยะเวลา'),
-        ('trade', 'แลกเปลี่ยนได้'),
-        ('qty',   'จำนวน'),
-    ]
-
     def __init__(self, parent, path):
         self.path = path
         self.result = None
         self.sheet_name = ''
-        self.headers = []
-        self.blocks = []
         self.sheets = []
+        self.rows = []
 
         self.top = tk.Toplevel(parent)
         self.top.title('นำเข้าจาก Excel')
         self.top.configure(bg=C['bg'])
-        self.top.geometry('1000x640')
+        self.top.geometry('1010x640')
         self.top.transient(parent)
         self.top.grab_set()
 
@@ -507,66 +610,6 @@ class ImportDialog:
                  font=('Segoe UI', 13, 'bold')).pack(side='left', padx=18)
         tk.Label(head, text=os.path.basename(path), bg=C['card'], fg=C['dim'],
                  font=('Segoe UI', 9)).pack(side='left')
-
-        body = tk.Frame(self.top, bg=C['bg'])
-        body.pack(fill='both', expand=True, padx=14, pady=12)
-
-        # ---- ซ้าย : รายชื่อชีท ----
-        left = tk.Frame(body, bg=C['bg'], width=270)
-        left.pack(side='left', fill='y')
-        left.pack_propagate(False)
-        tk.Label(left, text='เลือกชีท', bg=C['bg'], fg=C['dim'],
-                 font=('Segoe UI', 9, 'bold')).pack(anchor='w')
-        self.lb = tk.Listbox(left, bg=C['input'], fg=C['fg'], bd=0,
-                             highlightthickness=1, highlightbackground=C['line'],
-                             selectbackground=C['accent'], selectforeground='white',
-                             font=('Segoe UI', 9), activestyle='none')
-        sb = ttk.Scrollbar(left, orient='vertical', command=self.lb.yview)
-        self.lb.configure(yscrollcommand=sb.set)
-        self.lb.pack(side='left', fill='both', expand=True, pady=(5, 0))
-        sb.pack(side='right', fill='y', pady=(5, 0))
-        self.lb.bind('<<ListboxSelect>>', lambda e: self._on_sheet())
-
-        # ---- ขวา ----
-        right = tk.Frame(body, bg=C['bg'])
-        right.pack(side='left', fill='both', expand=True, padx=(14, 0))
-
-        self.info = tk.Label(right, text='กำลังสแกนไฟล์…', bg=C['bg'], fg=C['dim'],
-                             font=('Segoe UI', 9), anchor='w')
-        self.info.pack(fill='x')
-
-        mapbox = tk.LabelFrame(right, text='  จับคู่คอลัมน์  ', bg=C['bg'], fg=C['dim'],
-                               font=('Segoe UI', 9, 'bold'), bd=1, relief='solid')
-        mapbox.pack(fill='x', pady=(8, 0))
-        grid = tk.Frame(mapbox, bg=C['bg'])
-        grid.pack(fill='x', padx=12, pady=10)
-        self.combos = {}
-        for n, (key, label) in enumerate(self.FIELDS):
-            r, c = divmod(n, 3)
-            cell = tk.Frame(grid, bg=C['bg'])
-            cell.grid(row=r, column=c, sticky='w', padx=(0, 16), pady=4)
-            tk.Label(cell, text=label, bg=C['bg'], fg=C['dim'],
-                     font=('Segoe UI', 8)).pack(anchor='w')
-            cb = ttk.Combobox(cell, width=22, state='readonly', font=('Segoe UI', 9))
-            cb.pack()
-            cb.bind('<<ComboboxSelected>>', lambda e: self._refresh_preview())
-            self.combos[key] = cb
-
-        tk.Label(right, text='ตัวอย่างข้อมูลที่จะนำเข้า', bg=C['bg'], fg=C['dim'],
-                 font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(12, 4))
-        pv = tk.Frame(right, bg=C['bg'])
-        pv.pack(fill='both', expand=True)
-        cols = ('kind', 'name', 'dur', 'trade', 'qty')
-        self.tree = ttk.Treeview(pv, columns=cols, show='headings', style='TR.Treeview', height=9)
-        for c, t, w in (('kind', 'ItemKind', 100), ('name', 'ชื่อไอเทม', 330),
-                        ('dur', 'ระยะเวลา', 90), ('trade', 'แลกเปลี่ยน', 90),
-                        ('qty', 'จำนวน', 80)):
-            self.tree.heading(c, text=t)
-            self.tree.column(c, width=w, anchor='w')
-        tsb = ttk.Scrollbar(pv, orient='vertical', command=self.tree.yview)
-        self.tree.configure(yscrollcommand=tsb.set)
-        self.tree.pack(side='left', fill='both', expand=True)
-        tsb.pack(side='right', fill='y')
 
         foot = tk.Frame(self.top, bg=C['card'], height=62)
         foot.pack(fill='x', side='bottom')
@@ -582,19 +625,75 @@ class ImportDialog:
                   font=('Segoe UI', 10), cursor='hand2', activebackground=C['line'],
                   command=self._cancel).pack(side='right', pady=12, ipadx=16, ipady=5)
 
+        body = tk.Frame(self.top, bg=C['bg'])
+        body.pack(fill='both', expand=True, padx=14, pady=12)
+
+        # ---- ซ้าย : รายชื่อชีท ----
+        left = tk.Frame(body, bg=C['bg'], width=280)
+        left.pack(side='left', fill='y')
+        left.pack_propagate(False)
+        tk.Label(left, text='เลือกชีท', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9, 'bold')).pack(anchor='w')
+        lbwrap = tk.Frame(left, bg=C['bg'])
+        lbwrap.pack(fill='both', expand=True, pady=(5, 0))
+        self.lb = tk.Listbox(lbwrap, bg=C['input'], fg=C['fg'], bd=0,
+                             highlightthickness=1, highlightbackground=C['line'],
+                             selectbackground=C['accent'], selectforeground='white',
+                             font=('Segoe UI', 9), activestyle='none')
+        sb = ttk.Scrollbar(lbwrap, orient='vertical', command=self.lb.yview)
+        self.lb.configure(yscrollcommand=sb.set)
+        self.lb.pack(side='left', fill='both', expand=True)
+        sb.pack(side='right', fill='y')
+        self.lb.bind('<<ListboxSelect>>', lambda e: self._on_sheet())
+
+        self.v_all = tk.BooleanVar(value=False)
+        tk.Checkbutton(left, text='อ่านทุกชีทในไฟล์ (ตัด ID ซ้ำให้)', variable=self.v_all,
+                       bg=C['bg'], fg=C['dim'], selectcolor=C['input'],
+                       activebackground=C['bg'], activeforeground=C['fg'],
+                       font=('Segoe UI', 9), bd=0, highlightthickness=0,
+                       command=self._on_mode).pack(anchor='w', pady=(8, 0))
+
+        # ---- ขวา ----
+        right = tk.Frame(body, bg=C['bg'])
+        right.pack(side='left', fill='both', expand=True, padx=(14, 0))
+
+        self.info = tk.Label(right, text='กำลังสแกนไฟล์…', bg=C['bg'], fg=C['dim'],
+                             font=('Segoe UI', 9), anchor='w', justify='left')
+        self.info.pack(fill='x')
+
+        tk.Label(right, text='อ่านให้อัตโนมัติแบบเดียวกับเครื่องมือเดิม — '
+                             'qty ดึงจากเลขหน้าคำว่า “ชิ้น” ในชื่อ · ระยะเวลาอ่านจากคอลัมน์ที่มีคำว่า “วัน” · '
+                             'แลกเปลี่ยนอ่านจากคอลัมน์ Itemmove (ไม่มีคอลัมน์ = ไม่กรอง)',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), wraplength=690,
+                 justify='left').pack(anchor='w', pady=(6, 0))
+
+        tk.Label(right, text='ข้อมูลที่จะนำเข้า', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(12, 4))
+        pv = tk.Frame(right, bg=C['bg'])
+        pv.pack(fill='both', expand=True)
+        cols = ('kind', 'name', 'dur', 'trade', 'qty')
+        self.tree = ttk.Treeview(pv, columns=cols, show='headings', style='TR.Treeview', height=13)
+        for c, t, w in (('kind', 'ItemKind', 95), ('name', 'ชื่อไอเทม', 330),
+                        ('dur', 'ระยะเวลา', 95), ('trade', 'แลกเปลี่ยน', 95),
+                        ('qty', 'จำนวน', 75)):
+            self.tree.heading(c, text=t)
+            self.tree.column(c, width=w, anchor='w')
+        tsb = ttk.Scrollbar(pv, orient='vertical', command=self.tree.yview)
+        self.tree.configure(yscrollcommand=tsb.set)
+        self.tree.pack(side='left', fill='both', expand=True)
+        tsb.pack(side='right', fill='y')
+
         self.top.protocol('WM_DELETE_WINDOW', self._cancel)
         self.wb = None
         self.cache = {}
         self.lock = threading.Lock()
-        self.busy = False
         self.q = queue.Queue()
         self.inflight = set()
         threading.Thread(target=self._scan_worker, daemon=True).start()
         self.top.after(80, self._pump)
         parent.wait_window(self.top)
 
-    # ---------- รับผลจากเธรดเบื้องหลัง (ทำงานบนเธรดหลักเท่านั้น) ----------
-    #  ห้ามแตะ widget จากเธรดอื่นตรงๆ เด็ดขาด จอจะค้าง
+    # ---------- รับผลจากเธรดเบื้องหลัง (บนเธรดหลักเท่านั้น) ----------
     def _pump(self):
         try:
             while True:
@@ -605,14 +704,12 @@ class ImportDialog:
                 elif kind == 'sheets':
                     self.sheets = msg[1]
                     self._fill_sheets()
-                elif kind == 'sheet':
-                    name, res = msg[1], msg[2]
-                    self.cache[name] = res
-                    self.inflight.discard(name)
-                    self.busy = False
-                    if self.sheet_name == name:
-                        self.headers, self.blocks = res
-                        self._apply_sheet(name)
+                elif kind == 'rows':
+                    key, rows, note = msg[1], msg[2], msg[3]
+                    self.cache[key] = (rows, note)
+                    self.inflight.discard(key)
+                    if self._key() == key:
+                        self._show(rows, note)
         except queue.Empty:
             pass
         except Exception:
@@ -622,7 +719,7 @@ class ImportDialog:
         except Exception:
             pass
 
-    # ---------- สแกนรายชื่อชีท (ทำในเธรดแยก จอไม่ค้าง) ----------
+    # ---------- สแกนรายชื่อชีท ----------
     def _scan_worker(self):
         try:
             with self.lock:
@@ -641,80 +738,86 @@ class ImportDialog:
         self.lb.delete(0, tk.END)
         first_hit = None
         for i, (name, n) in enumerate(self.sheets):
-            mark = f'★ ({n})  ' if n else '     '
-            self.lb.insert(tk.END, mark + name)
+            self.lb.insert(tk.END, (f'★ ({n})  ' if n else '     ') + name)
             if n and first_hit is None:
                 first_hit = i
         hits = sum(1 for _, n in self.sheets if n)
-        self.info.config(text=f'ไฟล์นี้มี {len(self.sheets)} ชีท · พบตารางไอเทมใน {hits} ชีท '
-                              f'(ชีทที่มีดาว ★ คือชีทที่น่าจะใช้ได้)')
+        self.info.config(text=f'ไฟล์นี้มี {len(self.sheets)} ชีท · พบตารางไอเทมใน {hits} ชีท')
         if first_hit is not None:
             self.lb.selection_set(first_hit)
             self.lb.see(first_hit)
             self._on_sheet()
 
-    # ---------- เลือกชีท ----------
+    # ---------- เลือกชีท / สลับโหมด ----------
+    def _key(self):
+        return '\x00ALL' if self.v_all.get() else self.sheet_name
+
+    def _on_mode(self):
+        self.lb.config(state='disabled' if self.v_all.get() else 'normal')
+        self._request()
+
     def _on_sheet(self):
         sel = self.lb.curselection()
         if not sel or not self.sheets:
             return
-        name = self.sheets[sel[0]][0]
-        self.sheet_name = name
-        if name in self.cache:
-            self.headers, self.blocks = self.cache[name]
-            self._apply_sheet(name)
+        self.sheet_name = self.sheets[sel[0]][0]
+        if not self.v_all.get():
+            self._request()
+
+    def _request(self):
+        key = self._key()
+        if not key:
             return
-        # ยังไม่เคยอ่านชีทนี้ — เคลียร์ของเก่าก่อน จะได้ไม่เข้าใจผิดว่าเป็นข้อมูลชีทใหม่
-        self.headers, self.blocks = [], []
-        self.preview_rows = []
+        if key in self.cache:
+            rows, note = self.cache[key]
+            self._show(rows, note)
+            return
+        self._clear()
+        self.info.config(text='กำลังอ่านทุกชีท…' if self.v_all.get()
+                         else f'กำลังอ่านชีท “{self.sheet_name}” …')
+        if key in self.inflight:
+            return
+        self.inflight.add(key)
+        threading.Thread(target=self._rows_worker, args=(key, self.sheet_name,),
+                         daemon=True).start()
+
+    def _rows_worker(self, key, sheet):
+        rows, note = [], ''
+        try:
+            with self.lock:
+                if key == '\x00ALL':
+                    seen = set()
+                    for name, n in self.sheets:
+                        if not n:
+                            continue
+                        rows.extend(parse_master_rows(read_sheet_rows(self.wb, name), seen))
+                    note = f'อ่านทุกชีท ({sum(1 for _, n in self.sheets if n)} ชีทที่มีตาราง)'
+                else:
+                    rows = parse_master_rows(read_sheet_rows(self.wb, sheet))
+                    note = f'ชีท “{sheet}”'
+        except Exception as ex:
+            self.q.put(('info', 'อ่านไม่ได้: ' + str(ex)))
+        self.q.put(('rows', key, rows, note))
+
+    # ---------- แสดงผล ----------
+    def _clear(self):
+        self.rows = []
         self.tree.delete(*self.tree.get_children())
         self.count_lbl.config(text='')
         self.ok_btn.config(state='disabled', bg=C['input'], fg=C['dim'])
-        self.info.config(text=f'กำลังอ่านชีท “{name}” …')
-        if name in self.inflight:
-            return
-        self.inflight.add(name)
-        threading.Thread(target=self._sheet_worker, args=(name,), daemon=True).start()
 
-    def _sheet_worker(self, name):
-        try:
-            with self.lock:
-                res = parse_sheet_wb(self.wb, name)
-        except Exception as ex:
-            res = ([], [])
-            self.q.put(('info', 'อ่านชีทไม่ได้: ' + str(ex)))
-        self.q.put(('sheet', name, res))
-
-    def _apply_sheet(self, name):
-        opts = ['— ไม่ใช้ —'] + [f'{i + 1}. {h or "(ไม่มีชื่อ)"}' for i, h in enumerate(self.headers)]
-        for key, _ in self.FIELDS:
-            cb = self.combos[key]
-            cb['values'] = opts
-            idx = guess_column(self.headers, key)
-            cb.current(idx + 1 if idx >= 0 else 0)
-
-        total = sum(len(b['data']) for b in self.blocks)
-        self.info.config(text=f'ชีท “{name}” · พบตาราง {len(self.blocks)} บล็อก · '
-                              f'{total} แถวข้อมูล')
-        self._refresh_preview()
-
-    # ---------- ตัวอย่าง ----------
-    def _colmap(self):
-        m = {}
-        for key, _ in self.FIELDS:
-            i = self.combos[key].current()
-            m[key] = i - 1 if i > 0 else -1
-        return m
-
-    def _refresh_preview(self):
+    def _show(self, rows, note):
+        self.rows = rows
         self.tree.delete(*self.tree.get_children())
-        rows = blocks_to_rows(self.blocks, self._colmap()) if self.blocks else []
-        self.preview_rows = rows
-        for r in rows[:200]:
-            dur = 'ถาวร' if r['dur'] == '' else ('ไม่กรอง' if r['dur'] == 'any' else r['dur'] + ' วัน')
-            self.tree.insert('', 'end', values=(r['kind'], r['name'], dur, r['trade'], r['qty']))
+        for r in rows[:400]:
+            dur = 'ถาวร' if r['dur'] == '' else (r['dur'] + ' วัน')
+            trade = {'yes': 'ได้', 'no': 'ไม่ได้', 'any': '— ไม่กรอง —'}.get(r['trade'], r['trade'])
+            self.tree.insert('', 'end', values=(r['kind'], r['disp'], dur, trade, r['qty'] or '—'))
+        has_move = any(r.get('has_move') for r in rows)
+        extra = '' if has_move else '   (ชีทนี้ไม่มีคอลัมน์ Itemmove → ไม่กรองแลกเปลี่ยน)'
+        self.info.config(text=f'{note} · พบ {len(rows)} รายการ{extra}')
         self.count_lbl.config(text=f'จะนำเข้า {len(rows)} รายการ'
-                              + (f' (แสดงตัวอย่าง 200 แถวแรก)' if len(rows) > 200 else ''))
+                              + ('   (แสดงตัวอย่าง 400 แถวแรก)' if len(rows) > 400 else ''))
         self.ok_btn.config(state='normal' if rows else 'disabled',
                            bg=C['accent'] if rows else C['input'],
                            fg='white' if rows else C['dim'])
@@ -728,7 +831,7 @@ class ImportDialog:
         self.wb = None
 
     def _ok(self):
-        self.result = list(self.preview_rows)
+        self.result = list(self.rows)
         self._close_wb()
         self.top.destroy()
 
@@ -868,7 +971,7 @@ class App:
         self.v_qty.insert(0, self.prefs.get('qty', ''))
         self.v_qty.grid(row=2, column=2, sticky='w', padx=(12, 0), ipady=4)
 
-        tk.Label(s3, text='ระยะเวลา: any หรือเว้นว่าง = ไม่กรอง · พิมพ์ ถาวร = เฉพาะไอเทมถาวร · ตัวเลข = จำนวนวันนั้น\n'
+        tk.Label(s3, text='ระยะเวลา: any = ไม่กรอง · เว้นว่าง = เฉพาะไอเทมถาวร (ระยะเวลา = 0) · ตัวเลข = จำนวนวันนั้น\n'
                           'ถ้ากรองแค่ระยะเวลาเป็นตัวเลข โปรแกรมจะใช้ฟิลเตอร์บนหน้า list แทน เร็วกว่ามาก',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), justify='left'
                  ).grid(row=3, column=0, columnspan=4, sticky='w', pady=(8, 0))
@@ -1026,7 +1129,8 @@ class App:
                 if dlg.result is None:
                     return
                 rows = dlg.result
-                src = f'{os.path.basename(path)}  ›  {dlg.sheet_name}'
+                where = 'ทุกชีท' if getattr(dlg, 'v_all', None) and dlg.v_all.get() else dlg.sheet_name
+                src = f'{os.path.basename(path)}  ›  {where}'
             if not rows:
                 messagebox.showwarning('นำเข้า', 'ไม่พบรายการที่ใช้ได้ในไฟล์นี้')
                 return
@@ -1209,7 +1313,8 @@ class App:
         for i, c in enumerate(criteria):
             if self.cancel:
                 break
-            label = f"#{i + 1} Kind={c.get('kind') or '-'}" + (f" Name={c['name']}" if c.get('name') else '')
+            shown = c.get('disp') or c.get('name') or ''
+            label = f"#{i + 1} Kind={c.get('kind') or '-'}" + (f"  {shown}" if shown else '')
             self.log(f'── {label}', 'STEP')
 
             use_filter = bool(duration_only_numeric(c))
