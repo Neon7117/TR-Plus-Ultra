@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.3 : ค้นหาไอเทม + อ่านชีทต้นฉบับอัตโนมัติแบบเดียวกับเครื่องมือเดิม
+V0.4 : ค้นหาไอเทม + อ่านชีทต้นฉบับอัตโนมัติ + ระบบตรวจสอบตัวเอง
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -842,6 +842,216 @@ class ImportDialog:
 
 
 # ============================================================================
+#  [5.6] ระบบตรวจสอบตัวเอง (Self Test)
+#        แบ่งเป็น 2 ชุด
+#          A. ตรวจตรรกะ  — ไม่ต้องเปิดเว็บ เช็กว่ากฎการอ่านชีทยังถูกต้อง
+#          B. ตรวจเว็บ    — เปิดเว็บจริง เช็กว่าหน้าตาเว็บยังตรงกับ CFG ไหม
+#        ถ้าเว็บเปลี่ยน จะได้รู้ทันทีว่า "พังตรงไหน" และ "ต้องแก้ค่าตัวไหน"
+# ============================================================================
+def _t(ok, name, detail='', fix=''):
+    return {'ok': bool(ok), 'name': name, 'detail': str(detail), 'fix': fix}
+
+
+def run_logic_tests():
+    """ตรวจกฎการอ่านข้อมูลทั้งหมด โดยไม่ต้องต่อเน็ต"""
+    r = []
+
+    # ---- กติกาช่องระยะเวลา ----
+    r.append(_t(dur_from_text('') == '', 'ระยะเวลา: เว้นว่าง = ถาวร', repr(dur_from_text(''))))
+    r.append(_t(dur_from_text('ถาวร') == '', 'ระยะเวลา: "ถาวร" = ถาวร', repr(dur_from_text('ถาวร'))))
+    r.append(_t(dur_from_text('any') == 'any', 'ระยะเวลา: "any" = ไม่กรอง', repr(dur_from_text('any'))))
+    r.append(_t(dur_from_text('15 วัน') == '15', 'ระยะเวลา: "15 วัน" = 15', repr(dur_from_text('15 วัน'))))
+
+    # ---- ตัวเลขจาก Excel ----
+    r.append(_t(num_str(112247.0) == '112247', 'ตัดทศนิยม .0 ที่ Excel ติดมา', num_str(112247.0)))
+
+    # ---- Yes/No ----
+    r.append(_t(all(norm_bool(v) == 'yes' for v in ('Yes', 'y', '1', 'TRUE')),
+                'อ่านค่า Yes ได้ทุกแบบ'))
+    r.append(_t(all(norm_bool(v) == 'no' for v in ('No', 'n', '0', 'false')),
+                'อ่านค่า No ได้ทุกแบบ'))
+    r.append(_t(norm_bool('') == 'any' and norm_bool('มั่ว') == 'any',
+                'ค่าว่าง/อ่านไม่ออก = ไม่กรอง'))
+
+    # ---- อ่านชีทต้นฉบับ (กฎเดียวกับเครื่องมือเดิม) ----
+    rows = [
+        ['400', 'fdItemNum', 'fdPosition', 'fdItemKind', 'Rank',
+         'Display Name', 'ระยะเวลาของขวัญ', 'Amt', 'ราคา'],
+        ['', '112247', '9999', '2648', 'SS', 'New.1 ตั๋วเปลี่ยนตำนาน II 1 ชิ้น', 'ถาวร', '1', '150'],
+        ['', '128172', '250', '5485', 'S', 'กล่องอิลลิเฟียร์ 5 ชิ้น', 'ถาวร', '1', '95'],
+        ['', '999001', '250', '5486', 'A', 'หมวกทดสอบ 3 ชิ้น', '7 วัน', '1', '10'],
+        ['', '', '', '', '', '', '', '', '460'],
+        ['', 'ขอรางวัลเริ่ดๆ เหมือนเดิมค่า'],
+    ]
+    got = parse_master_rows(rows)
+    r.append(_t(len(got) == 3, 'อ่านชีทตัวอย่างได้ 3 รายการ (ตัดแถวยอดรวม/หมายเหตุ)', len(got)))
+    if len(got) == 3:
+        a, b, c = got
+        r.append(_t(a['kind'] == '112247', 'ใช้คอลัมน์ fdItemNum เป็น ItemKind', a['kind']))
+        r.append(_t(a['qty'] == '1' and b['qty'] == '5' and c['qty'] == '3',
+                    'ดึงจำนวนจากเลขหน้าคำว่า "ชิ้น"',
+                    f"{a['qty']}/{b['qty']}/{c['qty']}"))
+        r.append(_t(b['disp'] == 'กล่องอิลลิเฟียร์', 'ตัดคำว่า "X ชิ้น" ออกจากชื่อ', b['disp']))
+        r.append(_t(a['dur'] == '' and c['dur'] == '7',
+                    'อ่านระยะเวลา: ถาวร / 7 วัน', f"{a['dur']!r}/{c['dur']!r}"))
+        r.append(_t(a['trade'] == 'any', 'ไม่มีคอลัมน์ Itemmove = ไม่กรองแลกเปลี่ยน', a['trade']))
+
+    # ---- มีคอลัมน์ Itemmove ----
+    rows2 = [
+        ['fdItemNum', 'Display Name', 'ระยะเวลาของขวัญ', 'Itemmove'],
+        ['111111', 'ของทดสอบ 2 ชิ้น', 'ถาวร', 'Yes'],
+        ['222222', 'ของทดสอบสอง 1 ชิ้น', 'ถาวร', ''],
+    ]
+    g2 = parse_master_rows(rows2)
+    r.append(_t(len(g2) == 2 and g2[0]['trade'] == 'yes' and g2[1]['trade'] == 'no',
+                'มีคอลัมน์ Itemmove: Yes = ได้ / ว่าง = ไม่ได้',
+                [x['trade'] for x in g2]))
+
+    # ---- ตัด ID ซ้ำ ----
+    seen = set()
+    d1 = parse_master_rows(rows, seen)
+    d2 = parse_master_rows(rows, seen)
+    r.append(_t(len(d1) == 3 and len(d2) == 0, 'ตัด ID ซ้ำข้ามชีทได้', f'{len(d1)} / {len(d2)}'))
+
+    # ---- เงื่อนไข deep check ----
+    item7 = {'duration': '7', 'trade': False, 'qty': '10'}
+    r.append(_t(match_deep(item7, {'dur': '7', 'trade': 'any', 'qty': ''})[0],
+                'deep check: ระยะเวลาตรง = ผ่าน'))
+    r.append(_t(not match_deep(item7, {'dur': '15', 'trade': 'any', 'qty': ''})[0],
+                'deep check: ระยะเวลาไม่ตรง = ไม่ผ่าน'))
+    r.append(_t(match_deep({'duration': '0', 'trade': None, 'qty': ''},
+                           {'dur': '', 'trade': 'any', 'qty': ''})[0],
+                'deep check: ระยะเวลา 0 บนเว็บ = ถาวร'))
+    r.append(_t(not match_deep(item7, {'dur': 'any', 'trade': 'yes', 'qty': ''})[0],
+                'deep check: แลกเปลี่ยนไม่ตรง = ไม่ผ่าน'))
+    r.append(_t(not match_deep(item7, {'dur': 'any', 'trade': 'any', 'qty': '5'})[0],
+                'deep check: จำนวนไม่ตรง = ไม่ผ่าน'))
+
+    # ---- ทางลัดใช้ฟิลเตอร์หน้า list ----
+    r.append(_t(bool(duration_only_numeric({'dur': '15', 'trade': 'any', 'qty': ''})),
+                'ใช้ทางลัดฟิลเตอร์เมื่อกรองแค่ระยะเวลา'))
+    r.append(_t(not duration_only_numeric({'dur': '15', 'trade': 'yes', 'qty': ''}),
+                'ไม่ใช้ทางลัดเมื่อมีเงื่อนไขอื่นด้วย'))
+
+    # ---- สภาพแวดล้อม ----
+    r.append(_t(XLSX_OK, 'อ่านไฟล์ Excel ได้ (openpyxl)', 'ok' if XLSX_OK else 'ไม่มี openpyxl'))
+    chrome = find_chrome_exe()
+    r.append(_t(chrome, 'เจอ Google Chrome ในเครื่อง', chrome or 'ไม่พบ',
+                'ติดตั้ง Chrome ก่อนใช้งาน'))
+    return r
+
+
+JS_HEADERS = """() => [...document.querySelectorAll('table thead th')]
+                        .map(x => (x.innerText || '').trim())"""
+
+
+async def run_web_tests(page, log=None):
+    """เปิดเว็บจริงแล้วตรวจว่าหน้าตายังตรงกับ CFG ไหม"""
+    r = []
+
+    def say(msg):
+        if log:
+            log(msg)
+
+    # --- W1 เปิดหน้า Item ---
+    try:
+        await page.goto(ITEM_LIST_URL, wait_until='domcontentloaded', timeout=45000)
+        await page.wait_for_timeout(1800)
+        r.append(_t(True, 'เปิดหน้า Shop > Item ได้', page.url.split('?')[0]))
+    except Exception as ex:
+        r.append(_t(False, 'เปิดหน้า Shop > Item ได้', str(ex)[:90], 'เช็กอินเทอร์เน็ต / ITEM_LIST_URL'))
+        return r
+    say('  เปิดหน้า Item แล้ว')
+
+    # --- W2 ล็อกอินอยู่ไหม ---
+    has_search = await page.locator(SEL['search_input']).count() > 0
+    r.append(_t(has_search, 'ล็อกอินอยู่ และเจอช่องค้นหา',
+                'เจอ' if has_search else 'ไม่เจอช่องค้นหา',
+                'กดปุ่ม "เปิดหน้า Login" แล้วล็อกอินก่อน'))
+    if not has_search:
+        return r
+
+    # --- W3 หัวตาราง ---
+    try:
+        heads = await page.evaluate(JS_HEADERS)
+    except Exception:
+        heads = []
+    ok_head = len(heads) >= 4 and 'Aztek Item Id' in ' '.join(heads) and 'ItemKind' in ' '.join(heads)
+    r.append(_t(ok_head, 'ตารางมีคอลัมน์ Aztek Item Id และ ItemKind',
+                ' | '.join(heads) or 'อ่านหัวตารางไม่ได้', 'แก้ COL ใน CONFIG'))
+
+    # --- W4 อ่านแถวได้ ---
+    rows = await page.evaluate(JS_READ_ROWS, COL)
+    r.append(_t(len(rows) > 0, 'อ่านแถวในตารางได้', f'{len(rows)} แถว', 'แก้ SEL["row"] หรือ COL'))
+    if not rows:
+        return r
+    first = rows[0]
+    r.append(_t(re.fullmatch(r'\d+', first['id'] or '') and first['name'],
+                'คอลัมน์ ID เป็นตัวเลข และมีชื่อไอเทม',
+                f"id={first['id']} name={first['name'][:24]}", 'ลำดับคอลัมน์ COL เปลี่ยน'))
+
+    # --- W5 ปุ่มค้นหา + ฟิลเตอร์ ---
+    r.append(_t(await page.locator(SEL['search_button']).count() > 0,
+                'เจอปุ่มค้นหา', SEL['search_button'], 'แก้ SEL["search_button"]'))
+    r.append(_t(await page.locator(SEL['filter_duration']).count() > 0,
+                'เจอฟิลเตอร์ DurationIndex', SEL['filter_duration'],
+                'แก้ SEL["filter_duration"]'))
+    nxt = await page.locator(f'button:has-text("{SEL["next_text"]}")').count()
+    r.append(_t(nxt > 0, 'เจอปุ่มเปลี่ยนหน้า (Next)', f'{nxt} ปุ่ม', 'แก้ SEL["next_text"]'))
+
+    # --- W6 ค้นหาจริงแล้วต้องเจอ ---
+    kind = first['kind'] or first['id']
+    say(f'  ทดลองค้นหา {kind}')
+    try:
+        await page.fill(SEL['search_input'], str(kind))
+        await page.locator(SEL['search_button']).first.click()
+        await page.wait_for_timeout(1600)
+        found = await page.evaluate(JS_READ_ROWS, COL)
+        hit = any(x['kind'] == first['kind'] or x['id'] == first['id'] for x in found)
+        r.append(_t(hit, f'ค้นหา {kind} แล้วเจอไอเทมที่ต้องการ', f'ได้ {len(found)} แถว',
+                    'ช่องค้นหาหรือปุ่มค้นหาเปลี่ยนไป'))
+    except Exception as ex:
+        r.append(_t(False, f'ค้นหา {kind} แล้วเจอไอเทมที่ต้องการ', str(ex)[:90]))
+        return r
+
+    # --- W7 เข้าหน้ารายละเอียด ---
+    target = first['id']
+    try:
+        clicked = await page.evaluate(JS_CLICK_ROW, str(target))
+        if clicked:
+            await page.wait_for_selector(SEL['d_name'], timeout=15000)
+            await page.wait_for_timeout(500)
+        r.append(_t(clicked, 'คลิกเข้าหน้ารายละเอียดไอเทมได้',
+                    page.url.split('/')[-1], 'ลิงก์ในตารางเปลี่ยนรูปแบบ'))
+        if not clicked:
+            return r
+    except Exception as ex:
+        r.append(_t(False, 'คลิกเข้าหน้ารายละเอียดไอเทมได้', str(ex)[:90]))
+        return r
+
+    # --- W8 ฟิลด์ในหน้ารายละเอียด ---
+    for key, label in (('d_name', 'ชื่อไอเท็ม'), ('d_kind', 'game_item_id (ItemKind)'),
+                       ('d_price', 'Price'), ('d_duration', 'ระยะเวลาไอเท็ม (วัน)'),
+                       ('d_qty', 'จำนวน')):
+        n = await page.locator(SEL[key]).count()
+        r.append(_t(n > 0, f'เจอช่อง {label}', SEL[key], f'แก้ SEL["{key}"]'))
+
+    detail = await page.evaluate(JS_READ_DETAIL, {
+        'name': SEL['d_name'], 'kind': SEL['d_kind'], 'price': SEL['d_price'],
+        'duration': SEL['d_duration'], 'qty': SEL['d_qty'],
+        'tradeLabel': SEL['d_trade_label'],
+    })
+    r.append(_t(detail.get('trade') is not None, 'อ่านค่า "แลกเปลี่ยนได้" ได้',
+                detail.get('trade'), 'แก้ SEL["d_trade_label"]'))
+
+    # --- W9 ข้อมูลตรงกันระหว่างตารางกับหน้ารายละเอียด (ตรวจ mapping ทั้งเส้น) ---
+    same = str(detail.get('kind') or '').strip() == str(first['kind'] or '').strip()
+    r.append(_t(same, 'ItemKind ในตาราง ตรงกับในหน้ารายละเอียด',
+                f"ตาราง={first['kind']}  รายละเอียด={detail.get('kind')}",
+                'คอลัมน์ ItemKind ในตารางอาจสลับตำแหน่ง — แก้ COL'))
+    return r
+
+# ============================================================================
 #  [6] หน้าต่างโปรแกรม
 # ============================================================================
 class App:
@@ -890,13 +1100,16 @@ class App:
         self.tab_search = tk.Frame(self.nb, bg=C['bg'])
         self.tab_result = tk.Frame(self.nb, bg=C['bg'])
         self.tab_log = tk.Frame(self.nb, bg=C['bg'])
+        self.tab_check = tk.Frame(self.nb, bg=C['bg'])
         self.nb.add(self.tab_search, text='🔍  ค้นหา')
         self.nb.add(self.tab_result, text='📋  ผลลัพธ์')
         self.nb.add(self.tab_log, text='📜  Log')
+        self.nb.add(self.tab_check, text='🩺  ตรวจระบบ')
 
         self._build_search()
         self._build_result()
         self._build_log()
+        self._build_check()
 
     def _card(self, parent, title):
         outer = tk.LabelFrame(parent, text='  ' + title + '  ', bg=C['bg'], fg=C['dim'],
@@ -1021,6 +1234,116 @@ class App:
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side='left', fill='both', expand=True)
         sb.pack(side='right', fill='y')
+
+    # ------------------------------------------------------------------
+    #  แท็บตรวจระบบ
+    # ------------------------------------------------------------------
+    def _build_check(self):
+        p = self.tab_check
+        bar = tk.Frame(p, bg=C['bg'])
+        bar.pack(fill='x', padx=14, pady=12)
+        self.btn_chk_logic = self._btn(bar, '⚡  ตรวจตรรกะ (เร็ว ไม่ต้องต่อเน็ต)', self.run_check_logic)
+        self.btn_chk_logic.pack(side='left', ipadx=10, ipady=5)
+        self.btn_chk_full = self._btn(bar, '🌐  ตรวจเต็ม (เปิดเว็บจริง)', self.run_check_full, primary=True)
+        self.btn_chk_full.pack(side='left', padx=8, ipadx=10, ipady=4)
+        self._btn(bar, '📋  คัดลอกผล', self.copy_check).pack(side='right', ipadx=10, ipady=5)
+        self.lbl_chk = tk.Label(bar, text='', bg=C['bg'], fg=C['dim'], font=FB)
+        self.lbl_chk.pack(side='right', padx=14)
+
+        tk.Label(p, text='ใช้ตรวจว่าเครื่องมือยังทำงานถูกต้องไหม — "ตรวจเต็ม" จะเปิดเว็บจริงแล้วไล่เช็กทีละจุด '
+                         'ถ้าเว็บเปลี่ยนหน้าตา จะบอกได้เลยว่าพังตรงไหนและต้องแก้ค่าตัวไหน',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), wraplength=1000,
+                 justify='left').pack(anchor='w', padx=14)
+
+        wrap = tk.Frame(p, bg=C['bg'])
+        wrap.pack(fill='both', expand=True, padx=14, pady=(10, 14))
+        cols = ('st', 'name', 'detail')
+        self.chk_tree = ttk.Treeview(wrap, columns=cols, show='headings', style='TR.Treeview')
+        for c, t, w in (('st', 'ผล', 60), ('name', 'รายการตรวจ', 420), ('detail', 'รายละเอียด', 480)):
+            self.chk_tree.heading(c, text=t)
+            self.chk_tree.column(c, width=w, anchor='w')
+        self.chk_tree.tag_configure('ok', foreground=C['ok'])
+        self.chk_tree.tag_configure('bad', foreground=C['err'])
+        sb = ttk.Scrollbar(wrap, orient='vertical', command=self.chk_tree.yview)
+        self.chk_tree.configure(yscrollcommand=sb.set)
+        self.chk_tree.pack(side='left', fill='both', expand=True)
+        sb.pack(side='right', fill='y')
+        self.check_rows = []
+
+    def _show_check(self, results, append=False):
+        if not append:
+            self.chk_tree.delete(*self.chk_tree.get_children())
+            self.check_rows = []
+        self.check_rows.extend(results)
+        for x in results:
+            detail = x['detail']
+            if not x['ok'] and x['fix']:
+                detail = (detail + '   →  ' + x['fix']).strip(' →')
+            self.chk_tree.insert('', 'end', values=('ผ่าน' if x['ok'] else 'พัง', x['name'], detail),
+                                 tags=('ok' if x['ok'] else 'bad',))
+        bad = sum(1 for x in self.check_rows if not x['ok'])
+        total = len(self.check_rows)
+        self.lbl_chk.config(text=f'ผ่าน {total - bad}/{total}' + ('  ✓ ปกติดี' if not bad else f'  ✗ พัง {bad} จุด'),
+                            fg=C['ok'] if not bad else C['err'])
+
+    def copy_check(self):
+        if not self.check_rows:
+            return messagebox.showinfo('ตรวจระบบ', 'ยังไม่ได้ตรวจ')
+        lines = [f'TR Plus Ultra v{APP_VERSION} — ผลตรวจระบบ {datetime.now():%Y-%m-%d %H:%M}', '']
+        for x in self.check_rows:
+            mark = 'OK  ' if x['ok'] else 'FAIL'
+            lines.append(f'[{mark}] {x["name"]}  |  {x["detail"]}'
+                         + (f'  ->  {x["fix"]}' if (not x['ok'] and x['fix']) else ''))
+        bad = sum(1 for x in self.check_rows if not x['ok'])
+        lines += ['', f'สรุป: ผ่าน {len(self.check_rows) - bad}/{len(self.check_rows)}']
+        self.root.clipboard_clear()
+        self.root.clipboard_append('\n'.join(lines))
+        self.log('คัดลอกผลตรวจแล้ว ส่งให้คนดูแลเครื่องมือได้เลย', 'OK')
+
+    def run_check_logic(self):
+        self.nb.select(self.tab_check)
+        try:
+            self._show_check(run_logic_tests())
+            self.log('ตรวจตรรกะเสร็จ', 'OK')
+        except Exception as ex:
+            messagebox.showerror('ตรวจระบบ', str(ex))
+
+    def run_check_full(self):
+        if self.running:
+            return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
+        self.nb.select(self.tab_check)
+        self._show_check(run_logic_tests())
+        self.running = True
+        self.btn_chk_full.config(state='disabled', text='กำลังตรวจ...')
+        threading.Thread(target=self._check_thread, daemon=True).start()
+
+    def _check_thread(self):
+        try:
+            asyncio.run(self._check_web())
+        except Exception as ex:
+            self.root.after(0, lambda: self._show_check(
+                [_t(False, 'เปิดเบราว์เซอร์ได้', str(ex)[:120])], append=True))
+        finally:
+            self.running = False
+            self.root.after(0, lambda: self.btn_chk_full.config(
+                state='normal', text='🌐  ตรวจเต็ม (เปิดเว็บจริง)'))
+
+    async def _check_web(self):
+        self.log('เริ่มตรวจเว็บจริง...', 'STEP')
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch_persistent_context(**launch_kwargs(True))
+            page = browser.pages[0] if browser.pages else await browser.new_page()
+            try:
+                res = await run_web_tests(page, log=lambda m: self.log(m))
+            finally:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+        self.root.after(0, lambda: self._show_check(res, append=True))
+        bad = sum(1 for x in res if not x['ok'])
+        self.log(f'ตรวจเว็บเสร็จ — พัง {bad} จุด' if bad else 'ตรวจเว็บเสร็จ — ปกติดีทุกจุด',
+                 'WARN' if bad else 'OK')
 
     def _build_log(self):
         self.log_box = scrolledtext.ScrolledText(
