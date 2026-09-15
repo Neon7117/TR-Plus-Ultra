@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.5.1 : ตั้งที่เก็บ log ได้จากในโปรแกรม + เตือนสิ่งที่ยังตั้งค่าไม่ครบ
+V0.5.2 : ย้ายที่เก็บ log ได้ทั้งในเครื่องและโฟลเดอร์กลาง
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -11,6 +11,7 @@ V0.5.1 : ตั้งที่เก็บ log ได้จากในโปร
 import os
 import re
 import csv
+import shutil
 import json
 import asyncio
 import queue
@@ -83,8 +84,8 @@ CHROME_PROFILE = os.path.join(DATA_DIR, 'chrome_profile')
 PREF_FILE = os.path.join(DATA_DIR, 'prefs.json')
 
 # ---- บันทึกการใช้งาน ----
-HISTORY_FILE = os.path.join(DATA_DIR, 'history.jsonl')
-STATS_FILE = os.path.join(DATA_DIR, 'stats.json')
+# เก็บไว้ในโฟลเดอร์ข้อมูลโปรแกรมเป็นค่าเริ่มต้น แต่ย้ายที่ได้จากในโปรแกรม
+LOCAL_LOG_DIR = DATA_DIR
 LOG_MAX_EVENTS = 20000          # เกินนี้จะตัดของเก่าทิ้ง
 
 # โฟลเดอร์กลางของทีม — เว้นว่าง = ปิดอยู่ (เก็บเฉพาะในเครื่อง)
@@ -171,10 +172,71 @@ def norm_bool(v):
 SESSION_ID = datetime.now().strftime('%y%m%d%H%M%S')
 
 
+def history_file():
+    return os.path.join(LOCAL_LOG_DIR, 'history.jsonl')
+
+
+def stats_file():
+    return os.path.join(LOCAL_LOG_DIR, 'stats.json')
+
+
+def set_local_log_dir(path, move=True):
+    """ย้ายที่เก็บ log ในเครื่อง — ย้ายไฟล์เดิมตามไปด้วย จะได้ไม่เสียประวัติ
+       คืนค่า (จำนวนไฟล์ที่ย้าย, ข้อความผิดพลาดถ้ามี)"""
+    global LOCAL_LOG_DIR
+    new_dir = (path or '').strip() or DATA_DIR
+    old_dir = LOCAL_LOG_DIR
+    moved, err = 0, ''
+    try:
+        os.makedirs(new_dir, exist_ok=True)
+        if move and os.path.abspath(new_dir) != os.path.abspath(old_dir):
+            for fn in ('history.jsonl', 'stats.json'):
+                src = os.path.join(old_dir, fn)
+                dst = os.path.join(new_dir, fn)
+                if not os.path.exists(src):
+                    continue
+                if os.path.exists(dst):
+                    if fn.endswith('.jsonl'):     # มีไฟล์อยู่แล้ว → ต่อท้ายไม่ให้ของเก่าหาย
+                        with open(src, 'r', encoding='utf-8') as f, \
+                                open(dst, 'a', encoding='utf-8') as g:
+                            g.write(f.read())
+                        moved += 1
+                else:
+                    shutil.copy2(src, dst)
+                    moved += 1
+    except Exception as ex:
+        err = str(ex)[:150]
+        new_dir = old_dir
+    LOCAL_LOG_DIR = new_dir
+    try:
+        pr = load_prefs()
+        pr['local_log_dir'] = '' if os.path.abspath(new_dir) == os.path.abspath(DATA_DIR) else new_dir
+        save_prefs(pr)
+    except Exception:
+        pass
+    return moved, err
+
+
+def load_local_log_dir():
+    global LOCAL_LOG_DIR
+    try:
+        saved = (load_prefs().get('local_log_dir') or '').strip()
+        if saved and os.path.isdir(saved):
+            LOCAL_LOG_DIR = saved
+    except Exception:
+        pass
+    return LOCAL_LOG_DIR
+
+
 def set_central_dir(path):
     """ตั้ง/ล้างโฟลเดอร์กลางของทีม — เก็บลง prefs ไม่ต้องแก้โค้ด"""
     global CENTRAL_LOG_DIR
     CENTRAL_LOG_DIR = (path or '').strip()
+    if CENTRAL_LOG_DIR:
+        try:
+            os.makedirs(CENTRAL_LOG_DIR, exist_ok=True)
+        except Exception:
+            pass
     try:
         pr = load_prefs()
         pr['central_log_dir'] = CENTRAL_LOG_DIR
@@ -208,10 +270,12 @@ def pending_items():
 
 
 def _central_path():
-    if not CENTRAL_LOG_DIR:
+    """ไม่สร้างโฟลเดอร์เอง — ถ้าโฟลเดอร์หาย (ไดรฟ์หลุด/ยังไม่ sync)
+       ให้ข้ามไปเฉยๆ แล้วให้ pending_items() เตือนแทน
+       จะได้ไม่ไปสร้างโฟลเดอร์ว่างทิ้งไว้แล้ว log กองผิดที่โดยไม่รู้ตัว"""
+    if not CENTRAL_LOG_DIR or not os.path.isdir(CENTRAL_LOG_DIR):
         return None
     try:
-        os.makedirs(CENTRAL_LOG_DIR, exist_ok=True)
         safe = re.sub(r'[^A-Za-z0-9._@-]', '_', f'{TR_USER}@{TR_MACHINE}')
         return os.path.join(CENTRAL_LOG_DIR, f'log_{safe}.jsonl')
     except Exception:
@@ -234,7 +298,7 @@ def log_event(_ev, **fields):
     }
     ev.update(fields)
     line = json.dumps(ev, ensure_ascii=False)
-    for path in (HISTORY_FILE, _central_path()):
+    for path in (history_file(), _central_path()):
         if not path:
             continue
         try:
@@ -262,7 +326,7 @@ def _bump_stats(kind, fields):
             st['items_found'] = st.get('items_found', 0) + int(fields.get('found') or 0)
         if kind == 'error':
             st['errors'] = st.get('errors', 0) + 1
-        with open(STATS_FILE, 'w', encoding='utf-8') as f:
+        with open(stats_file(), 'w', encoding='utf-8') as f:
             json.dump(st, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
@@ -270,7 +334,7 @@ def _bump_stats(kind, fields):
 
 def read_stats():
     try:
-        with open(STATS_FILE, 'r', encoding='utf-8') as f:
+        with open(stats_file(), 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception:
         return {}
@@ -280,7 +344,7 @@ def read_events(limit=None, kinds=None):
     """อ่าน history ย้อนหลัง (ใหม่สุดอยู่ท้ายไฟล์)"""
     out = []
     try:
-        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+        with open(history_file(), 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -300,13 +364,14 @@ def read_events(limit=None, kinds=None):
 def trim_history():
     """ตัด log เก่าทิ้งถ้ายาวเกิน LOG_MAX_EVENTS"""
     try:
-        if not os.path.exists(HISTORY_FILE):
+        hf = history_file()
+        if not os.path.exists(hf):
             return
-        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+        with open(hf, 'r', encoding='utf-8') as f:
             lines = f.readlines()
         if len(lines) <= LOG_MAX_EVENTS:
             return
-        with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+        with open(hf, 'w', encoding='utf-8') as f:
             f.writelines(lines[-LOG_MAX_EVENTS:])
     except Exception:
         pass
@@ -1106,7 +1171,8 @@ def run_logic_tests():
         detail = f'{after} เหตุการณ์ในไฟล์'
     except Exception as ex:
         ok_log, detail = False, str(ex)[:80]
-    r.append(_t(ok_log, 'บันทึกการใช้งานลงไฟล์ได้', detail, 'เช็กสิทธิ์เขียนโฟลเดอร์ข้อมูล'))
+    r.append(_t(ok_log, 'บันทึกการใช้งานลงไฟล์ได้', f'{detail}  ({LOCAL_LOG_DIR})',
+                'เช็กสิทธิ์เขียนโฟลเดอร์ที่ตั้งไว้'))
     st = read_stats()
     r.append(_t(st.get('total_events', 0) > 0, 'ตัวนับสถิติทำงาน',
                 f"รวม {st.get('total_events', 0)} ครั้ง · เริ่มเก็บ {st.get('first_used', '-')}"))
@@ -1252,6 +1318,7 @@ class App:
         self.running = False
         self.cancel = False
 
+        load_local_log_dir()
         load_central_dir()
         self._build_ui()
         trim_history()
@@ -1439,11 +1506,14 @@ class App:
 
         r1 = tk.Frame(inner, bg=C['bg'])
         r1.pack(fill='x')
-        tk.Label(r1, text='ในเครื่องนี้', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9),
+        tk.Label(r1, text='บันทึกในเครื่อง', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9),
                  width=16, anchor='w').pack(side='left')
-        tk.Label(r1, text=DATA_DIR, bg=C['bg'], fg=C['fg'], font=('Consolas', 9),
-                 anchor='w').pack(side='left')
-        self._btn(r1, '📂  เปิดโฟลเดอร์', self.open_data_dir).pack(side='right', ipadx=8, ipady=2)
+        self.lbl_local = tk.Label(r1, text='', bg=C['bg'], fg=C['fg'],
+                                  font=('Consolas', 9), anchor='w')
+        self.lbl_local.pack(side='left')
+        self._btn(r1, '📂  เปิด', self.open_log_dir).pack(side='right', padx=(8, 0), ipadx=8, ipady=2)
+        self._btn(r1, '↺  คืนค่าเดิม', self.reset_local).pack(side='right', padx=(8, 0), ipadx=8, ipady=2)
+        self._btn(r1, '📁  เลือกโฟลเดอร์', self.pick_local).pack(side='right', ipadx=8, ipady=2)
 
         r2 = tk.Frame(inner, bg=C['bg'])
         r2.pack(fill='x', pady=(8, 0))
@@ -1454,6 +1524,14 @@ class App:
         self.lbl_central.pack(side='left')
         self._btn(r2, '✕  ล้าง', self.clear_central).pack(side='right', padx=(8, 0), ipadx=8, ipady=2)
         self._btn(r2, '📁  เลือกโฟลเดอร์', self.pick_central).pack(side='right', ipadx=8, ipady=2)
+
+        r3 = tk.Frame(inner, bg=C['bg'])
+        r3.pack(fill='x', pady=(8, 0))
+        tk.Label(r3, text='โฟลเดอร์โปรแกรม', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9),
+                 width=16, anchor='w').pack(side='left')
+        tk.Label(r3, text=DATA_DIR + '   (เก็บ login ของ Chrome ไว้ที่นี่ ย้ายไม่ได้)',
+                 bg=C['bg'], fg=C['dim'], font=('Consolas', 9), anchor='w').pack(side='left')
+        self._btn(r3, '📂  เปิด', self.open_data_dir).pack(side='right', ipadx=8, ipady=2)
 
         self.lbl_todo = tk.Label(inner, text='', bg=C['bg'], fg=C['warn'],
                                  font=('Segoe UI', 9), wraplength=980, justify='left', anchor='w')
@@ -1490,7 +1568,37 @@ class App:
         sb.pack(side='right', fill='y')
         self.check_rows = []
 
+    def open_log_dir(self):
+        try:
+            os.startfile(LOCAL_LOG_DIR)
+        except Exception:
+            messagebox.showinfo('ที่เก็บ log', LOCAL_LOG_DIR)
+
+    def pick_local(self):
+        path = filedialog.askdirectory(title='เลือกที่เก็บบันทึกการใช้งานในเครื่องนี้')
+        if not path:
+            return
+        moved, err = set_local_log_dir(path)
+        self._refresh_central()
+        if err:
+            messagebox.showerror('ย้ายที่เก็บ log', 'ย้ายไม่สำเร็จ: ' + err)
+            return
+        log_event('set_local_log_dir', path=path, moved=moved)
+        self.log(f'ย้ายที่เก็บ log ไปที่ {path} (ย้ายไฟล์เดิม {moved} ไฟล์)', 'OK')
+        messagebox.showinfo('ย้ายที่เก็บ log',
+                            f'เรียบร้อย\n\nที่ใหม่: {path}\nย้ายประวัติเดิมตามไปให้ {moved} ไฟล์')
+
+    def reset_local(self):
+        if os.path.abspath(LOCAL_LOG_DIR) == os.path.abspath(DATA_DIR):
+            return
+        moved, err = set_local_log_dir(DATA_DIR)
+        self._refresh_central()
+        self.log(f'คืนค่าที่เก็บ log กลับเป็นค่าเริ่มต้น (ย้ายไฟล์ {moved})', 'OK')
+
     def _refresh_central(self):
+        default = os.path.abspath(LOCAL_LOG_DIR) == os.path.abspath(DATA_DIR)
+        self.lbl_local.config(text=LOCAL_LOG_DIR + ('   (ค่าเริ่มต้น)' if default else ''),
+                              fg=C['dim'] if default else C['fg'])
         self.lbl_central.config(
             text=CENTRAL_LOG_DIR or '— ยังไม่ได้ตั้ง (เก็บเฉพาะในเครื่องนี้) —',
             fg=C['fg'] if CENTRAL_LOG_DIR else C['dim'])
