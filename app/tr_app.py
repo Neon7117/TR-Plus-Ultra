@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.4 : ค้นหาไอเทม + อ่านชีทต้นฉบับอัตโนมัติ + ระบบตรวจสอบตัวเอง
+V0.5.1 : ตั้งที่เก็บ log ได้จากในโปรแกรม + เตือนสิ่งที่ยังตั้งค่าไม่ครบ
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -82,6 +82,20 @@ os.makedirs(DATA_DIR, exist_ok=True)
 CHROME_PROFILE = os.path.join(DATA_DIR, 'chrome_profile')
 PREF_FILE = os.path.join(DATA_DIR, 'prefs.json')
 
+# ---- บันทึกการใช้งาน ----
+HISTORY_FILE = os.path.join(DATA_DIR, 'history.jsonl')
+STATS_FILE = os.path.join(DATA_DIR, 'stats.json')
+LOG_MAX_EVENTS = 20000          # เกินนี้จะตัดของเก่าทิ้ง
+
+# โฟลเดอร์กลางของทีม — เว้นว่าง = ปิดอยู่ (เก็บเฉพาะในเครื่อง)
+# พร้อมเมื่อไหร่ ใส่ path ที่ทุกคนเขียนได้ เช่น
+#   CENTRAL_LOG_DIR = r'C:\Users\B_A_N\OneDrive\TR-Logs'
+# แล้วโปรแกรมจะเขียน log ซ้ำอีกชุดเป็นไฟล์ของแต่ละเครื่องลงไปให้เอง
+CENTRAL_LOG_DIR = ''
+
+TR_USER = os.environ.get('USERNAME') or os.environ.get('USER') or 'unknown'
+TR_MACHINE = os.environ.get('COMPUTERNAME') or 'unknown'
+
 C = {
     'bg': '#11161f', 'card': '#151c28', 'line': '#263041', 'input': '#0c1119',
     'fg': '#dfe6f2', 'dim': '#8b98ad', 'accent': '#4f6bed',
@@ -146,6 +160,156 @@ def norm_bool(v):
     if s in ('no', 'n', '0', 'false'):
         return 'no'
     return 'any'
+
+
+# ============================================================================
+#  [2.5] บันทึกการใช้งาน (history)
+#        เขียนทีละบรรทัดเป็น JSON ลง history.jsonl — อ่านย้อนหลังได้ทั้งหมด
+#        ทุกบรรทัดมีชื่อผู้ใช้/ชื่อเครื่องติดไปด้วย เผื่อวันหน้าเอามารวมกันทั้งทีม
+#        ถ้าเขียนไม่ได้ก็เงียบไป ห้ามทำให้โปรแกรมหลักพัง
+# ============================================================================
+SESSION_ID = datetime.now().strftime('%y%m%d%H%M%S')
+
+
+def set_central_dir(path):
+    """ตั้ง/ล้างโฟลเดอร์กลางของทีม — เก็บลง prefs ไม่ต้องแก้โค้ด"""
+    global CENTRAL_LOG_DIR
+    CENTRAL_LOG_DIR = (path or '').strip()
+    try:
+        pr = load_prefs()
+        pr['central_log_dir'] = CENTRAL_LOG_DIR
+        save_prefs(pr)
+    except Exception:
+        pass
+    return CENTRAL_LOG_DIR
+
+
+def load_central_dir():
+    """อ่านค่าที่เคยตั้งไว้ตอนเปิดโปรแกรม"""
+    global CENTRAL_LOG_DIR
+    try:
+        saved = (load_prefs().get('central_log_dir') or '').strip()
+        if saved:
+            CENTRAL_LOG_DIR = saved
+    except Exception:
+        pass
+    return CENTRAL_LOG_DIR
+
+
+def pending_items():
+    """สิ่งที่ยังตั้งค่าไม่ครบ — เอาไว้เตือนบนหน้าจอ จะได้ไม่ลืม"""
+    todo = []
+    if not CENTRAL_LOG_DIR:
+        todo.append('ยังไม่ได้ตั้งโฟลเดอร์กลางของทีม — log ตอนนี้เก็บเฉพาะในเครื่องนี้ '
+                    'ถ้าอยากรวมสถิติทั้งทีม กดปุ่ม "เลือกโฟลเดอร์" ข้างบน')
+    elif not os.path.isdir(CENTRAL_LOG_DIR):
+        todo.append(f'โฟลเดอร์กลางที่ตั้งไว้หายไป: {CENTRAL_LOG_DIR}')
+    return todo
+
+
+def _central_path():
+    if not CENTRAL_LOG_DIR:
+        return None
+    try:
+        os.makedirs(CENTRAL_LOG_DIR, exist_ok=True)
+        safe = re.sub(r'[^A-Za-z0-9._@-]', '_', f'{TR_USER}@{TR_MACHINE}')
+        return os.path.join(CENTRAL_LOG_DIR, f'log_{safe}.jsonl')
+    except Exception:
+        return None
+
+
+def log_event(_ev, **fields):
+    """บันทึก 1 เหตุการณ์
+
+    ชื่อพารามิเตอร์แรกขึ้นต้นด้วย _ เพราะฟิลด์ที่ส่งเข้ามามีชื่อ kind ด้วย
+    (kind = ItemKind ของไอเทม) ถ้าตั้งชื่อซ้ำจะชนกันแล้วโปรแกรมล้ม
+    """
+    ev = {
+        'ts': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'kind': _ev,
+        'user': TR_USER,
+        'machine': TR_MACHINE,
+        'session': SESSION_ID,
+        'app': APP_VERSION,
+    }
+    ev.update(fields)
+    line = json.dumps(ev, ensure_ascii=False)
+    for path in (HISTORY_FILE, _central_path()):
+        if not path:
+            continue
+        try:
+            with open(path, 'a', encoding='utf-8') as f:
+                f.write(line + '\n')
+        except Exception:
+            pass
+    _bump_stats(_ev, fields)
+    return ev
+
+
+def _bump_stats(kind, fields):
+    """ตัวนับรวม เอาไว้โชว์เร็วๆ โดยไม่ต้องอ่านไฟล์ทั้งก้อน"""
+    try:
+        st = read_stats()
+        st['total_events'] = st.get('total_events', 0) + 1
+        st['last_used'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        st.setdefault('first_used', st['last_used'])
+        st['by_kind'] = st.get('by_kind', {})
+        st['by_kind'][kind] = st['by_kind'].get(kind, 0) + 1
+        day = datetime.now().strftime('%Y-%m-%d')
+        st['by_day'] = st.get('by_day', {})
+        st['by_day'][day] = st['by_day'].get(day, 0) + 1
+        if kind == 'search_done':
+            st['items_found'] = st.get('items_found', 0) + int(fields.get('found') or 0)
+        if kind == 'error':
+            st['errors'] = st.get('errors', 0) + 1
+        with open(STATS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(st, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def read_stats():
+    try:
+        with open(STATS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def read_events(limit=None, kinds=None):
+    """อ่าน history ย้อนหลัง (ใหม่สุดอยู่ท้ายไฟล์)"""
+    out = []
+    try:
+        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except Exception:
+                    continue
+                if kinds and ev.get('kind') not in kinds:
+                    continue
+                out.append(ev)
+    except Exception:
+        return []
+    return out[-limit:] if limit else out
+
+
+def trim_history():
+    """ตัด log เก่าทิ้งถ้ายาวเกิน LOG_MAX_EVENTS"""
+    try:
+        if not os.path.exists(HISTORY_FILE):
+            return
+        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        if len(lines) <= LOG_MAX_EVENTS:
+            return
+        with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+            f.writelines(lines[-LOG_MAX_EVENTS:])
+    except Exception:
+        pass
 
 
 # ============================================================================
@@ -933,6 +1097,26 @@ def run_logic_tests():
     r.append(_t(not duration_only_numeric({'dur': '15', 'trade': 'yes', 'qty': ''}),
                 'ไม่ใช้ทางลัดเมื่อมีเงื่อนไขอื่นด้วย'))
 
+    # ---- ระบบบันทึกการใช้งาน ----
+    try:
+        before = len(read_events())
+        log_event('selftest_ping')
+        after = len(read_events())
+        ok_log = after == before + 1
+        detail = f'{after} เหตุการณ์ในไฟล์'
+    except Exception as ex:
+        ok_log, detail = False, str(ex)[:80]
+    r.append(_t(ok_log, 'บันทึกการใช้งานลงไฟล์ได้', detail, 'เช็กสิทธิ์เขียนโฟลเดอร์ข้อมูล'))
+    st = read_stats()
+    r.append(_t(st.get('total_events', 0) > 0, 'ตัวนับสถิติทำงาน',
+                f"รวม {st.get('total_events', 0)} ครั้ง · เริ่มเก็บ {st.get('first_used', '-')}"))
+    if CENTRAL_LOG_DIR:
+        r.append(_t(os.path.isdir(CENTRAL_LOG_DIR), 'โฟลเดอร์กลางของทีมเขียนได้',
+                    CENTRAL_LOG_DIR, 'โฟลเดอร์หายไป — ตั้งใหม่ที่ปุ่มข้างบน'))
+    else:
+        r.append(_t(True, 'โฟลเดอร์กลางของทีม',
+                    'ยังไม่ได้ตั้ง — เก็บเฉพาะในเครื่องนี้ (ตั้งได้ที่ปุ่มข้างบน)'))
+
     # ---- สภาพแวดล้อม ----
     r.append(_t(XLSX_OK, 'อ่านไฟล์ Excel ได้ (openpyxl)', 'ok' if XLSX_OK else 'ไม่มี openpyxl'))
     chrome = find_chrome_exe()
@@ -1068,7 +1252,12 @@ class App:
         self.running = False
         self.cancel = False
 
+        load_central_dir()
         self._build_ui()
+        trim_history()
+        log_event('app_open', launcher=globals().get('TRPU_LAUNCHER', ''))
+        for t in pending_items():
+            self.log('⚠  ' + t, 'WARN')
 
     # ---------- UI ----------
     def _build_ui(self):
@@ -1240,6 +1429,37 @@ class App:
     # ------------------------------------------------------------------
     def _build_check(self):
         p = self.tab_check
+
+        # ---- แถบตั้งค่าที่เก็บ log ----
+        box = tk.LabelFrame(p, text='  ที่เก็บบันทึกการใช้งาน  ', bg=C['bg'], fg=C['dim'],
+                            font=('Segoe UI', 9, 'bold'), bd=1, relief='solid')
+        box.pack(fill='x', padx=14, pady=(12, 0))
+        inner = tk.Frame(box, bg=C['bg'])
+        inner.pack(fill='x', padx=12, pady=10)
+
+        r1 = tk.Frame(inner, bg=C['bg'])
+        r1.pack(fill='x')
+        tk.Label(r1, text='ในเครื่องนี้', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9),
+                 width=16, anchor='w').pack(side='left')
+        tk.Label(r1, text=DATA_DIR, bg=C['bg'], fg=C['fg'], font=('Consolas', 9),
+                 anchor='w').pack(side='left')
+        self._btn(r1, '📂  เปิดโฟลเดอร์', self.open_data_dir).pack(side='right', ipadx=8, ipady=2)
+
+        r2 = tk.Frame(inner, bg=C['bg'])
+        r2.pack(fill='x', pady=(8, 0))
+        tk.Label(r2, text='โฟลเดอร์กลางของทีม', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9),
+                 width=16, anchor='w').pack(side='left')
+        self.lbl_central = tk.Label(r2, text='', bg=C['bg'], fg=C['fg'],
+                                    font=('Consolas', 9), anchor='w')
+        self.lbl_central.pack(side='left')
+        self._btn(r2, '✕  ล้าง', self.clear_central).pack(side='right', padx=(8, 0), ipadx=8, ipady=2)
+        self._btn(r2, '📁  เลือกโฟลเดอร์', self.pick_central).pack(side='right', ipadx=8, ipady=2)
+
+        self.lbl_todo = tk.Label(inner, text='', bg=C['bg'], fg=C['warn'],
+                                 font=('Segoe UI', 9), wraplength=980, justify='left', anchor='w')
+        self.lbl_todo.pack(fill='x', pady=(9, 0))
+        self._refresh_central()
+
         bar = tk.Frame(p, bg=C['bg'])
         bar.pack(fill='x', padx=14, pady=12)
         self.btn_chk_logic = self._btn(bar, '⚡  ตรวจตรรกะ (เร็ว ไม่ต้องต่อเน็ต)', self.run_check_logic)
@@ -1269,6 +1489,40 @@ class App:
         self.chk_tree.pack(side='left', fill='both', expand=True)
         sb.pack(side='right', fill='y')
         self.check_rows = []
+
+    def _refresh_central(self):
+        self.lbl_central.config(
+            text=CENTRAL_LOG_DIR or '— ยังไม่ได้ตั้ง (เก็บเฉพาะในเครื่องนี้) —',
+            fg=C['fg'] if CENTRAL_LOG_DIR else C['dim'])
+        todo = pending_items()
+        self.lbl_todo.config(text=('⚠  ' + todo[0]) if todo else
+                             '✓  ตั้งค่าครบแล้ว — log จะถูกเขียนทั้งในเครื่องและโฟลเดอร์กลาง',
+                             fg=C['warn'] if todo else C['ok'])
+
+    def open_data_dir(self):
+        try:
+            os.startfile(DATA_DIR)
+        except Exception:
+            messagebox.showinfo('ที่เก็บข้อมูล', DATA_DIR)
+
+    def pick_central(self):
+        path = filedialog.askdirectory(title='เลือกโฟลเดอร์กลางของทีม (ที่ทุกคนเข้าถึงได้)')
+        if not path:
+            return
+        set_central_dir(path)
+        self._refresh_central()
+        log_event('set_central_dir', path=path)
+        self.log(f'ตั้งโฟลเดอร์กลางเป็น {path}', 'OK')
+        messagebox.showinfo('โฟลเดอร์กลาง',
+                            'ตั้งค่าเรียบร้อย\n\nจากนี้ log จะถูกเขียนทั้งในเครื่องและในโฟลเดอร์นี้\n'
+                            'ให้คนอื่นในทีมตั้งโฟลเดอร์เดียวกัน แล้วจะรวมกันเอง')
+
+    def clear_central(self):
+        if not CENTRAL_LOG_DIR:
+            return
+        set_central_dir('')
+        self._refresh_central()
+        self.log('ล้างโฟลเดอร์กลางแล้ว — กลับไปเก็บเฉพาะในเครื่อง', 'WARN')
 
     def _show_check(self, results, append=False):
         if not append:
@@ -1303,7 +1557,11 @@ class App:
     def run_check_logic(self):
         self.nb.select(self.tab_check)
         try:
-            self._show_check(run_logic_tests())
+            res = run_logic_tests()
+            self._show_check(res)
+            bad = sum(1 for x in res if not x['ok'])
+            log_event('selfcheck', mode='logic', total=len(res), failed=bad,
+                      failed_items=[x['name'] for x in res if not x['ok']][:20])
             self.log('ตรวจตรรกะเสร็จ', 'OK')
         except Exception as ex:
             messagebox.showerror('ตรวจระบบ', str(ex))
@@ -1342,6 +1600,8 @@ class App:
                     pass
         self.root.after(0, lambda: self._show_check(res, append=True))
         bad = sum(1 for x in res if not x['ok'])
+        log_event('selfcheck', mode='web', total=len(res), failed=bad,
+                  failed_items=[x['name'] for x in res if not x['ok']][:20])
         self.log(f'ตรวจเว็บเสร็จ — พัง {bad} จุด' if bad else 'ตรวจเว็บเสร็จ — ปกติดีทุกจุด',
                  'WARN' if bad else 'OK')
 
@@ -1424,6 +1684,7 @@ class App:
                 w.writerow(header)
                 w.writerows(rows)
         self.log(f'บันทึกไฟล์แล้ว: {path}', 'OK')
+        log_event('export', format=kind, rows=len(rows), file=os.path.basename(path))
 
     def download_template(self):
         path = filedialog.asksaveasfilename(
@@ -1461,7 +1722,10 @@ class App:
             self.lbl_file.config(text=f'{src} — {len(rows)} รายการ')
             self.btn_multi.config(state='normal')
             self.log(f'นำเข้าจาก {src}: {len(rows)} รายการ', 'OK')
+            log_event('import', file=os.path.basename(path), source=src, rows=len(rows))
         except Exception as ex:
+            log_event('error', where='import', message=str(ex)[:300],
+                      file=os.path.basename(path))
             messagebox.showerror('อ่านไฟล์ไม่ได้', str(ex))
 
     def save_now(self):
@@ -1486,6 +1750,7 @@ class App:
     def open_login(self):
         if self.running:
             return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
+        log_event('login_open')
         threading.Thread(target=lambda: asyncio.run(self._login()), daemon=True).start()
 
     async def _login(self):
@@ -1533,12 +1798,18 @@ class App:
         self.nb.select(self.tab_log)
         self.log('=' * 46, 'STEP')
         self.log(f'เริ่มค้นหา {len(criteria)} รายการ', 'STEP')
+        self._run_started = datetime.now()
+        d = self.deep_criteria()
+        log_event('search_start', count=len(criteria), deep=bool(self.v_deep.get()),
+                  dur=d['dur'], trade=d['trade'], qty=d['qty'],
+                  kinds=[c.get('kind') for c in criteria][:50])
         threading.Thread(target=self._thread, args=(criteria,), daemon=True).start()
 
     def _thread(self, criteria):
         try:
             asyncio.run(self._work(criteria))
         except Exception as ex:
+            log_event('error', where='search', message=str(ex)[:300])
             self.log('ผิดพลาด: ' + str(ex), 'ERR')
             self.log(traceback.format_exc(), 'ERR')
         finally:
@@ -1661,6 +1932,9 @@ class App:
             if not (has_deep(c) and not use_filter):
                 for r in rows:
                     self.add_result(r, f"{c['dur']} วัน" if use_filter else '')
+                log_event('search_item', kind=c.get('kind'), name=c.get('disp') or c.get('name'),
+                          found=len(rows), passed=len(rows), deep=False,
+                          ids=[r['id'] for r in rows][:20])
                 self.set_progress(i + 1, len(criteria), 'เสร็จ')
                 continue
 
@@ -1684,6 +1958,10 @@ class App:
                     self.log(f"  ! {r['id']} ตรวจไม่ได้: {ex}", 'WARN')
                 await page.go_back(wait_until='domcontentloaded')
                 await page.wait_for_timeout(500)
+            log_event('search_item', kind=c.get('kind'), name=c.get('disp') or c.get('name'),
+                      found=len(rows), passed=passed, deep=True,
+                      want_dur=c.get('dur'), want_trade=c.get('trade'), want_qty=c.get('qty'),
+                      ids=[r['id'] for r in self.results][-passed:][:20] if passed else [])
             if not passed and not self.cancel:
                 self.not_found.append((label, f'เจอ {len(rows)} แต่ไม่ผ่าน deep check'))
             self.set_progress(i + 1, len(criteria), 'เสร็จ')
@@ -1696,6 +1974,14 @@ class App:
             self.log('IDs: ' + ', '.join(r['id'] for r in self.results), 'OK')
         for lb, why in self.not_found:
             self.log(f'  ✗ {lb}  ({why})', 'WARN')
+        secs = 0
+        try:
+            secs = round((datetime.now() - self._run_started).total_seconds(), 1)
+        except Exception:
+            pass
+        log_event('search_done', criteria=len(criteria), found=len(self.results),
+                  not_found=len(self.not_found), seconds=secs, cancelled=bool(self.cancel),
+                  ids=[r['id'] for r in self.results][:200])
 
     def run(self):
         self.root.mainloop()
