@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.7.7 : แก้ Fame Point ตั้ง Tier ไม่ได้ (ดรอปดาวน์ตัวก่อนหน้ายังปิดไม่เสร็จ)
+V0.7.8 : แก้ Fame Point ตั้ง Tier ไม่ได้ — โปรแกรมคว้าช่อง "ประเภท" มาแทนช่อง Tier
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -1203,25 +1203,75 @@ JS_BUNDLE_ACT = """
   }
   if (!card) return 'ไม่เจอการ์ด ' + key;
 
-  // ---- 2. หา "ช่อง" ในการ์ดใบนั้น (เฉพาะที่มองเห็นได้) ----
-  let ctl = null;
-  if (what === 'qty') {
-    ctl = [...card.querySelectorAll('input')].filter(
-      e => e.type !== 'checkbox' && e.type !== 'file' && vis(e))[0];
-  } else {
+  // ---- 2. หา "ช่อง" ในการ์ดใบนั้น ----
+  //
+  //  ยึด "ป้ายชื่อช่อง" เป็นหลัก ไม่ใช่ "ตัวแรกที่เจอในการ์ด"
+  //  เพราะการ์ด Fame Point มี 2 ช่องอยู่ในใบเดียวกัน (ประเภท กับ Tier)
+  //  ถ้าเอาตัวแรก จะได้ช่อง "ประเภท" มาแทน "Tier" ทุกครั้ง
+  //  -> ตั้งค่าไม่เข้า แล้วไปกดเปิดดรอปดาวน์ผิดตัว (ต้นเหตุที่ Fame Point ไม่ได้ Tier)
+  function clean(s) {
+    s = (s || '').split('*').join(' ');
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+      if (s.charCodeAt(i) <= 32) {
+        if (out && out.charAt(out.length - 1) !== ' ') out += ' ';
+      } else out += s.charAt(i);
+    }
+    return out.trim();
+  }
+  function ownText(el) {
+    let s = '';
+    for (const n of el.childNodes) if (n.nodeType === 3) s += n.nodeValue;
+    return clean(s);
+  }
+  function ctlsIn(el) {
+    if (!el) return [];
+    if (what === 'qty')
+      return [...el.querySelectorAll('input')].filter(
+        e => e.type !== 'checkbox' && e.type !== 'file' && vis(e));
     // select ที่ซ่อนอยู่ไม่เอา — Radix/shadcn แอบใส่ <select> ซ่อนไว้
     // ซึ่ง textContent ของมันมีชื่อ "ทุกตัวเลือก" อยู่ครบ ทำให้อ่านค่าปัจจุบันผิด
-    ctl = [...card.querySelectorAll('select')].filter(vis)[0];
-    if (!ctl) {
-      const names = (what === 'tier')
-        ? (tiers || []).concat(['เลือก Tier'])
-        : null;
-      ctl = [...card.querySelectorAll('[role="combobox"],button')].filter(e => {
-        if (!vis(e)) return false;
-        const t = (e.textContent || '').trim();
-        if (names) return names.indexOf(t) >= 0;
-        return t.indexOf('WALLET') >= 0 || t.indexOf('เลือก') === 0;
-      })[0];
+    const ss = [...el.querySelectorAll('select')].filter(vis);
+    if (ss.length) return ss;
+    return [...el.querySelectorAll('[role="combobox"],button')].filter(vis);
+  }
+  // เอาตัวที่ "อยู่ถัดจากป้าย" ก่อนเสมอ — ช่องของป้ายไหนก็อยู่ใต้ป้ายนั้น
+  function pickNear(list, lab) {
+    for (const c of list) if (lab.compareDocumentPosition(c) & 4) return c;
+    return list.length ? list[list.length - 1] : null;
+  }
+  const wantLab = (what === 'kind') ? 'ประเภท'
+                : (what === 'tier') ? 'Tier' : 'จำนวน (Quantity)';
+  let ctl = null;
+  const labs = [];
+  for (const el of card.querySelectorAll('label,div,span,p,td,th'))
+    if (ownText(el) === wantLab) labs.push(el);
+  for (const lab of labs) {
+    let up = lab;
+    for (let d = 0; d < 5 && up; d++) {
+      const c = pickNear(ctlsIn(up), lab);
+      if (c) { ctl = c; break; }
+      if (up === card) break;
+      up = up.parentElement;
+    }
+    if (ctl) break;
+  }
+  if (!ctl) {                       // ไม่เจอป้าย — ใช้วิธีเดิมเป็นตัวสำรอง
+    if (what === 'qty') {
+      ctl = ctlsIn(card)[0];
+    } else {
+      ctl = [...card.querySelectorAll('select')].filter(vis)[0];
+      if (!ctl) {
+        const names = (what === 'tier')
+          ? (tiers || []).concat(['เลือก Tier'])
+          : null;
+        ctl = [...card.querySelectorAll('[role="combobox"],button')].filter(e => {
+          if (!vis(e)) return false;
+          const t = (e.textContent || '').trim();
+          if (names) return names.indexOf(t) >= 0;
+          return t.indexOf('WALLET') >= 0 || t.indexOf('เลือก') === 0;
+        })[0];
+      }
     }
   }
   if (!ctl) return 'ไม่เจอช่อง ' + what + ' ในการ์ด ' + key;
@@ -1237,6 +1287,10 @@ JS_BUNDLE_ACT = """
   }
 
   if (act === 'read') return 'ok|' + cur();
+  // บอกว่าช่องที่เจอเป็นชนิดไหน — ช่องแบบ <select> ห้ามกดเปิด
+  // เพราะหน้าต่างตัวเลือกของมันเป็นของเบราว์เซอร์ ไม่ได้อยู่ในหน้าเว็บ
+  // กดแล้วจะค้างและมองไม่เห็นตัวเลือกใดๆ เลย
+  if (act === 'tag') return 'ok|' + ctl.tagName;
 
   if (act === 'set') {
     if (ctl.tagName === 'SELECT') {
@@ -1244,7 +1298,8 @@ JS_BUNDLE_ACT = """
       let j = opts.findIndex(o => o.text.trim() === String(value));
       if (j < 0) j = opts.findIndex(o => (o.text || '').indexOf(String(value)) >= 0
                                       || (o.value || '').indexOf(String(value)) >= 0);
-      if (j < 0) return 'ไม่มีตัวเลือก ' + value;
+      if (j < 0) return 'ไม่มีตัวเลือก ' + value + ' (ช่องนี้มี: '
+                        + opts.map(o => (o.text || '').trim()).slice(0, 8).join(', ') + ')';
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')
             .set.call(ctl, opts[j].value);
     } else if (ctl.tagName === 'INPUT') {
@@ -1263,6 +1318,21 @@ JS_BUNDLE_ACT = """
   if (act === 'click') {
     ctl.scrollIntoView({block: 'center'});
     ctl.click();
+    return 'ok|' + cur();
+  }
+  if (act === 'press') {
+    // ดรอปดาวน์แบบ shadcn/Radix เปิดตอน "กดเมาส์ลง" ไม่ใช่ตอน click
+    // สั่ง .click() เฉยๆ เลยไม่เปิดให้
+    ctl.scrollIntoView({block: 'center'});
+    const r = ctl.getBoundingClientRect();
+    const o = {bubbles: true, cancelable: true, composed: true,
+               clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+               button: 0, buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true};
+    try { ctl.dispatchEvent(new PointerEvent('pointerdown', o)); } catch (e) {}
+    ctl.dispatchEvent(new MouseEvent('mousedown', o));
+    try { ctl.dispatchEvent(new PointerEvent('pointerup', o)); } catch (e) {}
+    ctl.dispatchEvent(new MouseEvent('mouseup', o));
+    ctl.dispatchEvent(new MouseEvent('click', o));
     return 'ok|' + cur();
   }
   if (act === 'point') {
@@ -4241,11 +4311,8 @@ class App:
         """เปิดดรอปดาวน์ให้ได้จริง — ลองกดด้วย JS ก่อน ไม่ติดค่อยกดด้วยเมาส์จริง"""
         for attempt in range(3):
             await self._b_settle(page)
-            if attempt < 2:
-                r = await page.evaluate(JS_BUNDLE_ACT,
-                                        [how, str(key), what, 'click', '', TIERS])
-            else:
-                # กดด้วยเมาส์จริง — ดรอปดาวน์บางตัวเปิดเฉพาะตอนกดจริงเท่านั้น
+            if attempt == 0:
+                # กดด้วยเมาส์จริงก่อน — เหมือนคนกดที่สุด
                 r = await page.evaluate(JS_BUNDLE_ACT,
                                         [how, str(key), what, 'point', '', TIERS])
                 if str(r).startswith('ok'):
@@ -4254,6 +4321,13 @@ class App:
                         await page.mouse.click(float(x), float(y))
                     except Exception:
                         pass
+            elif attempt == 1:
+                # ยิงเหตุการณ์กดเมาส์ครบชุด — ดรอปดาวน์พวกนี้เปิดตอน "กดลง"
+                r = await page.evaluate(JS_BUNDLE_ACT,
+                                        [how, str(key), what, 'press', '', TIERS])
+            else:
+                r = await page.evaluate(JS_BUNDLE_ACT,
+                                        [how, str(key), what, 'click', '', TIERS])
             if not str(r).startswith('ok'):
                 return r
             for _ in range(12):
@@ -4290,10 +4364,19 @@ class App:
         if r == 'ok':
             self.log('   · %s %s = %s' % (who, what, want), 'INFO')
             return True
+        why = str(r)
+
+        # ช่องแบบ <select> ห้ามกดเปิด — ตัวเลือกของมันเป็นหน้าต่างของเบราว์เซอร์
+        # ไม่ได้อยู่ในหน้าเว็บ กดแล้วจะค้างและหาตัวเลือกไม่เจอสักอัน
+        tag = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'tag', '', TIERS])
+        if str(tag).endswith('SELECT') and why != 'combobox':
+            self.log('   ✗ %s (%s): %s' % (who, what, why), 'ERR')
+            return False
 
         opened = await self._b_open_dd(page, how, key, what)
         if opened != 'ok':
-            self.log('   ✗ %s (%s) เปิดดรอปดาวน์ไม่ได้: %s' % (who, what, opened), 'ERR')
+            self.log('   ✗ %s (%s) เปิดดรอปดาวน์ไม่ได้: %s (ตอนตั้งค่าตรงๆ: %s)'
+                     % (who, what, opened, why), 'ERR')
             return False
 
         opt = None
