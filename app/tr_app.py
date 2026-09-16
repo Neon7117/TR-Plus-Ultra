@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.7.3 : เลิกยึดตำแหน่ง/เวลาตายตัวในหน้าบันเดิล
+V0.7.4 : famepoint/exp เลือก Tier General ให้ด้วย
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -93,6 +93,7 @@ FAME_CREDIT_TYPE = 'WALLET_REALTIME_CREDIT'
 FAME_CREDIT_LABEL = 'เครดิตเรียลไทม์ (WALLET_REALTIME_CREDIT)'
 FAME_OPTION = 'hof-fame-point'          # ตัวเลือกในดรอปดาวน์แท็บ Credit
 FAME_NAME = 'Fame Point'
+EXP_NAME = 'Player Experience'
 
 SEL_BUNDLE = {
     'name':        'ชื่อ Bundle',
@@ -1093,6 +1094,55 @@ JS_BUNDLE_MARK_CARD = """
   ctl.scrollIntoView({block: 'center'});
   return 'ok|' + (ctl.value !== undefined && ctl.tagName === 'INPUT'
                   ? ctl.value : (ctl.textContent || '').trim());
+}"""
+
+# การ์ด famepoint / exp ไม่มี Item ID เลยต้องหาจาก "ชื่อการ์ด" แทน
+# แต่ยังใช้หลักเดิม: หากล่องที่เล็กที่สุดที่ครอบทั้งชื่อและช่องที่ต้องการ
+JS_BUNDLE_MARK_NAMED = """
+([name, what, tiers]) => {
+  function vis(el){
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  const need = (what === 'kind') ? 'ประเภท' : 'Tier';
+  let card = null, bl = 1e9;
+  for (const el of document.querySelectorAll('div,section,li')) {
+    const t = el.textContent || '';
+    if (t.indexOf(name) < 0) continue;
+    if (t.indexOf(need) < 0) continue;
+    if (!vis(el)) continue;
+    if (t.length < bl) { bl = t.length; card = el; }
+  }
+  if (!card) return 'ไม่เจอการ์ด ' + name;
+  let ctl = null;
+  if (what === 'kind') {
+    ctl = card.querySelector('select');
+    if (!ctl) {
+      ctl = [...card.querySelectorAll('[role="combobox"],button')].filter(
+        e => vis(e) && (e.textContent || '').indexOf('WALLET') >= 0)[0];
+    }
+    if (!ctl) {
+      ctl = [...card.querySelectorAll('[role="combobox"]')].filter(vis)[0];
+    }
+  } else if (what === 'tier') {
+    ctl = card.querySelector('select');
+    if (!ctl) {
+      const names = (tiers || []).concat(['เลือก Tier']);
+      ctl = [...card.querySelectorAll('[role="combobox"],button')].filter(
+        e => vis(e) && names.indexOf((e.textContent || '').trim()) >= 0)[0];
+    }
+  } else {
+    ctl = [...card.querySelectorAll('input')].filter(
+      e => e.type !== 'checkbox' && e.type !== 'file' && vis(e))[0];
+  }
+  if (!ctl) return 'ไม่เจอช่อง ' + what + ' ในการ์ด ' + name;
+  document.querySelectorAll('[data-trpu]').forEach(e => e.removeAttribute('data-trpu'));
+  ctl.setAttribute('data-trpu', what);
+  ctl.scrollIntoView({block: 'center'});
+  return 'ok|' + (ctl.tagName === 'INPUT' ? ctl.value : (ctl.textContent || '').trim());
 }"""
 
 JS_BUNDLE_SET_MARKED = """
@@ -3821,6 +3871,7 @@ class App:
             self.log('   ⚠ ไอเทมที่เพิ่มไม่ได้: %s' % ', '.join(missed), 'ERR')
 
         # [3] famepoint / exp
+        wallet_bad = []
         for rw in b.get('rewards', []):
             if self.b_cancel:
                 break
@@ -3828,12 +3879,13 @@ class App:
                 if await self._b_add_wallet(page, SEL_BUNDLE['tab_credit'],
                                             FAME_OPTION, rw['qty']):
                     added += 1
-                    await self._b_expand(page)
-                    # สำคัญ: ต้องเปลี่ยนเป็นเครดิตเรียลไทม์ ไม่งั้นผิด
-                    await self._b_fix_fame(page)
+                    if not await self._b_finish_wallet(page, FAME_NAME, True):
+                        wallet_bad.append(FAME_NAME)
             else:
                 if await self._b_add_wallet(page, SEL_BUNDLE['tab_exp'], None, rw['qty']):
                     added += 1
+                    if not await self._b_finish_wallet(page, EXP_NAME, False):
+                        wallet_bad.append(EXP_NAME)
 
         self.log('   เพิ่มเข้าบันเดิลแล้ว %d รายการ' % added,
                  'INFO' if added else 'WARN')
@@ -3863,6 +3915,12 @@ class App:
                 self.log('   ✗ แก้ชื่อ Bundle ไม่สำเร็จ (ยังเป็น "%s")' % (got or ''), 'ERR')
                 if do:
                     return False
+
+        if wallet_bad:
+            self.log('   ✗ ยังตั้งค่าไม่ครบ: %s — เว็บจะกดสร้างไม่ผ่าน'
+                     % ', '.join(wallet_bad), 'ERR')
+            if do:
+                return False
 
         if not do:
             self.log('   ✓ กรอกครบแล้ว (โหมดทดสอบ — ไม่กดสร้าง)', 'OK')
@@ -4014,45 +4072,94 @@ class App:
         self.log('   · เพิ่ม %s จำนวน %s' % (tab, qty), 'INFO')
         return True
 
-    async def _b_fix_fame(self, page):
-        """เปลี่ยนประเภทของ Fame Point เป็นเครดิตเรียลไทม์ (WALLET_REALTIME_CREDIT)"""
-        r = await page.evaluate(JS_BUNDLE_FAME_TYPE, [1, FAME_CREDIT_TYPE])
-        if r == 'ok':
-            self.log('   · ตั้งประเภท Fame Point = %s' % FAME_CREDIT_LABEL, 'OK')
-            return True
-        # สำรอง: หาดรอปดาวน์ "ประเภท" ในการ์ด Fame Point แล้วเลือกตัวที่มีคำว่า REALTIME
-        try:
-            mk = await page.evaluate(JS_BUNDLE_MARK_KIND, [FAME_NAME])
-            if str(mk).startswith('ok'):
-                await page.locator('[data-trpu="kind"]').first.click(timeout=4000)
-                await page.wait_for_timeout(500)
-                opt = page.locator('[role="option"]').filter(has_text='REALTIME').first
-                if await opt.count() > 0:
-                    await opt.click(timeout=4000)
-                    await page.wait_for_timeout(300)
-                    self.log('   · ตั้งประเภท Fame Point = %s' % FAME_CREDIT_LABEL, 'OK')
-                    return True
-            else:
-                self.log('   ! หาการ์ด Fame Point ไม่เจอ: %s' % mk, 'WARN')
-        except Exception as ex:
-            self.log('   ! %s' % str(ex)[:70], 'WARN')
-        self.log('   ⚠ เปลี่ยนประเภท Fame Point เป็นเครดิตเรียลไทม์ไม่สำเร็จ — '
-                 'ต้องแก้เองบนเว็บก่อนกดสร้าง', 'ERR')
-        return False
+    async def _b_named_pick(self, page, name, what, want, exact=True):
+        """เลือกค่าในดรอปดาวน์ของการ์ดที่ชื่อ name (famepoint / exp)
 
-    async def _b_expand(self, page):
-        """กด "ขยายทั้งหมด" — การ์ดที่ย่ออยู่ไม่มีช่องจำนวน/Tier ให้กรอก"""
+        what = 'kind' (ประเภท) หรือ 'tier'
+        exact=False = เทียบแบบ "มีคำนี้อยู่" (ใช้กับ WALLET_REALTIME_CREDIT ที่ข้อความยาว)
+        """
         try:
-            r = await page.evaluate(JS_BUNDLE_EXPAND)
-            if r != 'ok':
-                btn = page.locator('button:has-text("ขยายทั้งหมด")').first
-                if await btn.count() > 0:
-                    await btn.click(timeout=4000)
-                    r = 'ok'
-            await page.wait_for_timeout(700)
-            return r == 'ok'
+            await page.keyboard.press('Escape')
+            await page.wait_for_timeout(150)
         except Exception:
+            pass
+        mk = await page.evaluate(JS_BUNDLE_MARK_NAMED, [name, what, TIERS])
+        if not str(mk).startswith('ok'):
+            self.log('   ✗ %s: %s' % (name, mk), 'ERR')
             return False
+        cur = str(mk).split('|', 1)[1] if '|' in str(mk) else ''
+        if (want in cur) if not exact else (cur == want):
+            return True
+        # <select> ธรรมดา
+        if await page.evaluate(JS_BUNDLE_SET_MARKED, [what, want]) == 'ok':
+            self.log('   · %s %s = %s' % (name, what, want), 'INFO')
+            return True
+        try:
+            await page.locator('[data-trpu="%s"]' % what).first.click(timeout=5000)
+            opt = None
+            for _ in range(20):                      # รอดรอปดาวน์เปิด ไม่หน่วงตายตัว
+                await page.wait_for_timeout(200)
+                opts = page.locator('[role="option"]')
+                n = await opts.count()
+                if n == 0:
+                    continue
+                for i in range(n):
+                    try:
+                        txt = (await opts.nth(i).inner_text()).strip()
+                    except Exception:
+                        continue
+                    if (txt == want) if exact else (want in txt):
+                        opt = opts.nth(i)
+                        break
+                break
+            if opt is None:
+                seen = []
+                opts = page.locator('[role="option"]')
+                for i in range(min(await opts.count(), 8)):
+                    try:
+                        seen.append((await opts.nth(i).inner_text()).strip())
+                    except Exception:
+                        pass
+                self.log('   ✗ %s: ไม่มีตัวเลือก "%s" (เจอ: %s)'
+                         % (name, want, ', '.join(seen) or 'ไม่มีเลย'), 'ERR')
+                await page.keyboard.press('Escape')
+                return False
+            await opt.click(timeout=5000)
+            await page.wait_for_timeout(400)
+        except Exception as ex:
+            self.log('   ✗ %s %s: %s' % (name, what, str(ex)[:70]), 'ERR')
+            try:
+                await page.keyboard.press('Escape')
+            except Exception:
+                pass
+            return False
+        got = await page.evaluate(JS_BUNDLE_GET_MARKED, [what])
+        ok = (want in (got or '')) if not exact else ((got or '').strip() == want)
+        if not ok:
+            self.log('   ✗ %s %s ตั้งเป็น "%s" ไม่สำเร็จ (ตอนนี้ "%s")'
+                     % (name, what, want, got or ''), 'ERR')
+            return False
+        self.log('   · %s %s = %s' % (name, what, want), 'OK')
+        return True
+
+    async def _b_finish_wallet(self, page, name, is_fame):
+        """เก็บงานการ์ด famepoint / exp ให้ครบ
+
+        ทั้งคู่ "ต้องมี Tier" ไม่งั้นเว็บจะกดสร้างไม่ได้
+        และ famepoint ต้องเป็นเครดิตเรียลไทม์ ไม่ใช่เครดิตธรรมดา
+        """
+        await self._b_expand(page)
+        ok = True
+        if is_fame:
+            if not await self._b_named_pick(page, name, 'kind', FAME_CREDIT_TYPE,
+                                            exact=False):
+                self.log('   ⚠ %s ยังไม่ใช่เครดิตเรียลไทม์ — ต้องแก้เองบนเว็บก่อนกดสร้าง'
+                         % name, 'ERR')
+                ok = False
+        if not await self._b_named_pick(page, name, 'tier', DEFAULT_TIER):
+            self.log('   ⚠ %s ยังไม่ได้เลือก Tier — เว็บจะกดสร้างไม่ผ่าน' % name, 'ERR')
+            ok = False
+        return ok
 
     async def _b_set_row(self, page, item_id, qty, tier):
         """ตั้งจำนวน + Tier ของการ์ด "ของไอเทมนี้"
