@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.5.2 : ย้ายที่เก็บ log ได้ทั้งในเครื่องและโฟลเดอร์กลาง
+V0.6.0 : เพิ่มแท็บ "สร้าง Item" — โยนไฟล์ต้นฉบับเข้าไปแล้วสร้างได้เลย
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -58,6 +58,27 @@ SEL = {
     'd_qty': '#display-quantity',
     'd_trade_label': 'แลกเปลี่ยน',
 }
+
+# ---- หน้าสร้างไอเทม ----
+ITEM_CREATE_URL = BASE + '/hof/talesrunner/shop/items/create'
+SEL_CREATE = {
+    # ช่องกรอก (id ของเว็บ v2)
+    'name':     '#item-name',            # ชื่อไอเทม
+    'kind':     '#item-game-item-id',    # game_item_id (ItemKind / fdItemNum)
+    'desc':     '#item-detail',          # คำอธิบาย
+    'price':    '#item-option',          # Price
+    'duration': '#duration-index',       # ระยะเวลาไอเทม (วัน)
+    'mail':     '#mail-title',           # หัวข้อจดหมาย
+    'qty':      '#display-quantity',     # จำนวน (ส่วนแสดงบนเว็บ)
+    # ตัวที่ไม่มี id แน่นอน -> หาโดยอ้าง "ข้อความที่อยู่ข้างๆ"
+    'type_label':  'ประเภทไอเทม',
+    'type_ph':     'เลือกประเภท',
+    'web_label':   'เปิดใช้งานการแสดงผลบนเว็บ',
+    'trade_label': 'แลกเปลี่ยนได้',
+    'submit':      'สร้าง Item',
+}
+DEFAULT_TYPE = 'GENERAL'
+DEFAULT_SUFFIX = '(Gift)'
 # ลำดับคอลัมน์ในตาราง: Aztek Item Id | ชื่อ | ประเภท | ItemKind | Actions
 COL = {'id': 0, 'name': 1, 'type': 2, 'kind': 3}
 
@@ -709,6 +730,107 @@ JS_CLICK_ROW = """
   return false;
 }"""
 
+# ---------------------------------------------------------------------------
+#  JS สำหรับหน้า "สร้างไอเทม"
+#  เว็บเป็น React — กรอกด้วย .value เฉยๆ ไม่พอ ต้องใช้ native setter
+#  แล้วยิง event input/change เอง ไม่งั้น React ไม่รู้ว่าค่าเปลี่ยน
+#  (วิธีเดียวกับเครื่องมือเดิม)
+# ---------------------------------------------------------------------------
+JS_SET_VALUE = """
+([sel, val]) => {
+  const el = document.querySelector(sel);
+  if (!el) return 'ไม่เจอช่อง';
+  el.scrollIntoView({block:'center'});
+  const proto = el.tagName === 'TEXTAREA'
+      ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const d = Object.getOwnPropertyDescriptor(proto, 'value');
+  if (d && d.set) { d.set.call(el, String(val)); } else { el.value = String(val); }
+  el.dispatchEvent(new Event('input',  {bubbles:true}));
+  el.dispatchEvent(new Event('change', {bubbles:true}));
+  return 'ok';
+}"""
+
+# กรอกโดยอ้างข้อความที่อยู่ข้างๆ — ใช้เป็นตัวสำรองเวลา id เปลี่ยน
+JS_SET_BY_LABEL = """
+([lbl, val]) => {
+  const vis = el => { if(!el) return false; const s=getComputedStyle(el);
+    if(s.display==='none'||s.visibility==='hidden') return false;
+    const r=el.getBoundingClientRect(); return r.width>0 && r.height>0; };
+  const hit = t => { t=(t||'').trim();
+    return t===lbl || t.replace(/\\s*\\*\\s*$/,'')===lbl ||
+           (t.length<=lbl.length+3 && t.indexOf(lbl)===0); };
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+  let node, target=null;
+  while ((node = w.nextNode()) && !target) {
+    if (!hit(node.textContent)) continue;
+    let c = node.parentElement;
+    for (let i=0; i<5 && c && !target; i++) {
+      for (const el of c.querySelectorAll('input,textarea')) {
+        if (vis(el) && el.type!=='checkbox' && el.type!=='file') { target = el; break; }
+      }
+      c = c.parentElement;
+    }
+  }
+  if (!target) return 'ไม่เจอช่อง';
+  target.scrollIntoView({block:'center'});
+  const proto = target.tagName === 'TEXTAREA'
+      ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(proto,'value').set.call(target, String(val));
+  target.dispatchEvent(new Event('input',  {bubbles:true}));
+  target.dispatchEvent(new Event('change', {bubbles:true}));
+  return 'ok';
+}"""
+
+# ติ๊ก/ปลดติ๊ก checkbox หรือสวิตช์ ที่อยู่ใกล้ข้อความที่ระบุ
+JS_SET_SWITCH = """
+([lbl, on]) => {
+  const nz = t => (t||'').trim();
+  const nodes = [...document.querySelectorAll('*')].filter(
+    e => e.children.length === 0 && (nz(e.textContent) === lbl ||
+         nz(e.textContent).indexOf(lbl) === 0));
+  for (const el of nodes) {
+    let n = el.parentElement;
+    for (let i=0; i<6 && n; i++) {
+      const cb = n.querySelector('input[type="checkbox"],[role="checkbox"],[role="switch"]');
+      if (cb) {
+        const cur = (cb.checked !== undefined)
+            ? cb.checked : (cb.getAttribute('aria-checked') === 'true');
+        if (cur !== on) cb.click();
+        return 'ok';
+      }
+      n = n.parentElement;
+    }
+  }
+  return 'ไม่เจอสวิตช์';
+}"""
+
+# เลือกประเภทไอเทม (game_item_type) — รองรับทั้ง <select> และ combobox ของ React
+JS_PICK_TYPE = """
+([val, ph]) => {
+  for (const s of document.querySelectorAll('select')) {
+    const opts = [...s.options];
+    let i = opts.findIndex(o => o.text.trim().toLowerCase() === val.toLowerCase());
+    if (i < 0) i = opts.findIndex(o => o.text.trim().toLowerCase().includes(val.toLowerCase()));
+    if (i >= 0) {
+      const d = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+      d.set.call(s, opts[i].value);
+      s.dispatchEvent(new Event('input',  {bubbles:true}));
+      s.dispatchEvent(new Event('change', {bubbles:true}));
+      return 'ok';
+    }
+  }
+  return 'combobox';
+}"""
+
+# อ่านค่าที่อยู่ในฟอร์มตอนนี้กลับมา — ใช้ตรวจว่ากรอกเข้าไปจริงไหม
+JS_READ_FORM = """
+(sel) => {
+  const v = s => { const e = document.querySelector(s); return e ? e.value : null; };
+  return { name: v(sel.name), kind: v(sel.kind), price: v(sel.price),
+           duration: v(sel.duration), qty: v(sel.qty), mail: v(sel.mail),
+           desc: v(sel.desc) };
+}"""
+
 
 # ============================================================================
 #  [5.4] อ่านชีทต้นฉบับแบบเดียวกับเครื่องมือเดิม (parse_master_rows)
@@ -728,6 +850,63 @@ MASTER_TRADE_YES = ('yes', 'y', 'true', 'ได้', 'แลกเปลี่�
 def read_sheet_rows(wb, sheet):
     return [list(r) if r else []
             for r in wb[sheet].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True)]
+
+
+def split_name_qty(raw_name):
+    """แยก "ชื่อ" กับ "จำนวนชิ้น" ออกจากกัน — กฎเดียวกับเครื่องมือเดิมเป๊ะ
+
+    ตัด "N ชิ้น" ตัวสุดท้ายออกจากชื่อ แล้วต่อส่วนหน้า+ส่วนหลังเข้าด้วยกัน
+    -> จำนวนชิ้น "ไม่" ติดไปในชื่อ แต่ ชม./อย่างอื่น ยังอยู่ครบ
+       'กล่อง 2 ชั่วโมง 3 ชิ้น' -> ชื่อ 'กล่อง 2 ชั่วโมง' · จำนวน 3
+    ชื่อที่ไม่มีคำว่า 'ชิ้น' -> คงชื่อเดิม จำนวน 1
+    คืนค่า (ชื่อ, จำนวน, มีคำว่าชิ้นไหม)
+    """
+    s = (raw_name or '').strip()
+    mqs = list(re.finditer(r'(\d+)\s*ชิ้น', s))
+    if not mqs:
+        return s, '1', False
+    m = mqs[-1]
+    base = (s[:m.start()] + s[m.end():]).strip()
+    base = re.sub(r'\s{2,}', ' ', base)
+    return base, m.group(1), True
+
+
+def make_item_name(cname, suffix='', dur=''):
+    """ประกอบชื่อที่จะกรอกลงเว็บ: <ชื่อ> <คำต่อท้าย> (<X> วัน)
+
+    กฎเดิม: คำต่อท้ายกับ '(X วัน)' เติมเฉพาะชื่อที่เคยมี 'ชิ้น' เท่านั้น
+    (ตัวเรียกเป็นคนตัดสินใจ — ฟังก์ชันนี้ต่อให้ตามที่ส่งมา)
+    """
+    s = (cname or '').strip()
+    suffix = (suffix or '').strip()
+    dur = str(dur or '').strip()
+    if suffix:
+        s = (s + ' ' + suffix).strip()
+    if dur:
+        s = (s + ' (%s วัน)' % dur).strip()
+    return s
+
+
+def row_to_item(r, type_name=DEFAULT_TYPE, suffix=DEFAULT_SUFFIX, price='', mail=''):
+    """แปลงแถวที่อ่านจากชีท -> ข้อมูลไอเทมสำหรับหน้า create"""
+    cname = r.get('cname') or r.get('disp') or ''
+    if r.get('has_qty'):
+        name = make_item_name(cname, suffix, r.get('dur', ''))
+    else:
+        name = cname          # ชื่อไม่มี 'ชิ้น' -> ไม่เติมอะไรเลย
+    return {
+        'kind': r.get('kind', ''),
+        'name': name,
+        'cname': cname,
+        'desc': r.get('desc', ''),
+        'type': type_name,
+        'price': str(price or ''),
+        'dur': r.get('dur', ''),
+        'mail': str(mail or ''),
+        'qty': r.get('amount', '1'),
+        'trade': r.get('trade', 'any') == 'yes',
+        'web': True,
+    }
 
 
 def parse_master_rows(rows, seen=None):
@@ -761,6 +940,9 @@ def parse_master_rows(rows, seen=None):
 
                 name_col = findin([lambda h: h == 'name', lambda h: 'display name' in h,
                                    lambda h: h == 'item name', lambda h: h == 'itemname'])
+                desc_col = findin([lambda h: 'item des' in h, lambda h: h == 'des',
+                                   lambda h: 'description' in h, lambda h: 'รายละเอียด' in h,
+                                   lambda h: 'item dec' in h])
                 dur_col = findin([lambda h: 'ระยะเวลา' in h, lambda h: 'ของขวัญ' in h,
                                   lambda h: 'duration' in h])
                 move_col = findin([lambda h: 'itemmove' in h])
@@ -769,7 +951,8 @@ def parse_master_rows(rows, seen=None):
                         if j < len(top) and 'itemmove' in top[j]:
                             move_col = j
                             break
-                tables.append({'kind': a, 'name': name_col, 'dur': dur_col, 'move': move_col})
+                tables.append({'kind': a, 'name': name_col, 'dur': dur_col,
+                               'move': move_col, 'desc': desc_col})
             prev = cells
             continue
 
@@ -808,9 +991,18 @@ def parse_master_rows(rows, seen=None):
             else:
                 trade = 'any'
 
+            dsc = ''
+            if t.get('desc') is not None and t['desc'] < len(cells):
+                dsc = cells[t['desc']].strip()
+
+            cname, amount, has_qty = split_name_qty(name)
+
             out.append({'kind': kind, 'name': '', 'disp': disp,
                         'dur': dur, 'trade': trade, 'qty': qty,
-                        'has_move': t['move'] is not None})
+                        'has_move': t['move'] is not None,
+                        # ---- ใช้ตอน "สร้างไอเทม" ----
+                        'raw': name.strip(), 'cname': cname,
+                        'amount': amount, 'has_qty': has_qty, 'desc': dsc})
     return out
 
 
@@ -1183,6 +1375,27 @@ def run_logic_tests():
         r.append(_t(True, 'โฟลเดอร์กลางของทีม',
                     'ยังไม่ได้ตั้ง — เก็บเฉพาะในเครื่องนี้ (ตั้งได้ที่ปุ่มข้างบน)'))
 
+    # ---- กติกาหน้า "สร้างไอเทม" ----
+    a = split_name_qty('กล่องแอนิมอล 1 ชิ้น')
+    r.append(_t(a == ('กล่องแอนิมอล', '1', True),
+                'สร้างไอเทม: ตัด "จำนวนชิ้น" ออกจากชื่อ', repr(a),
+                'กฎเดิม: จำนวนชิ้นไม่ติดไปในชื่อ'))
+    b = split_name_qty('แพ็กเบ็ดตกปลา 2 ชั่วโมง 3 ชิ้น')
+    r.append(_t(b == ('แพ็กเบ็ดตกปลา 2 ชั่วโมง', '3', True),
+                'สร้างไอเทม: เก็บ "ชม." ไว้ในชื่อ ตัดแต่จำนวน', repr(b),
+                'กฎเดิม: ชม. อยู่ในชื่อได้ จำนวนอยู่คนละช่อง'))
+    c = split_name_qty('ค้อนซ่อมแซม')
+    r.append(_t(c == ('ค้อนซ่อมแซม', '1', False),
+                'สร้างไอเทม: ชื่อที่ไม่มี "ชิ้น" คงชื่อเดิม จำนวน 1', repr(c)))
+    d1 = make_item_name('กล่องแอนิมอล', '(Gift)', '3')
+    r.append(_t(d1 == 'กล่องแอนิมอล (Gift) (3 วัน)',
+                'สร้างไอเทม: ประกอบชื่อ + คำต่อท้าย + (X วัน)', d1))
+    e1 = row_to_item({'kind': '1', 'cname': 'ค้อน', 'amount': '1',
+                      'has_qty': False, 'dur': '5', 'trade': 'yes'}, 'GENERAL', '(Gift)')
+    r.append(_t(e1['name'] == 'ค้อน',
+                'สร้างไอเทม: ชื่อไม่มี "ชิ้น" -> ไม่เติมคำต่อท้าย/วัน', e1['name'],
+                'กฎเดิมเติมเฉพาะชื่อที่มี "ชิ้น"'))
+
     # ---- สภาพแวดล้อม ----
     r.append(_t(XLSX_OK, 'อ่านไฟล์ Excel ได้ (openpyxl)', 'ok' if XLSX_OK else 'ไม่มี openpyxl'))
     chrome = find_chrome_exe()
@@ -1354,15 +1567,18 @@ class App:
         self.nb.pack(fill='both', expand=True, padx=10, pady=(8, 10))
 
         self.tab_search = tk.Frame(self.nb, bg=C['bg'])
+        self.tab_create = tk.Frame(self.nb, bg=C['bg'])
         self.tab_result = tk.Frame(self.nb, bg=C['bg'])
         self.tab_log = tk.Frame(self.nb, bg=C['bg'])
         self.tab_check = tk.Frame(self.nb, bg=C['bg'])
         self.nb.add(self.tab_search, text='🔍  ค้นหา')
+        self.nb.add(self.tab_create, text='➕  สร้าง Item')
         self.nb.add(self.tab_result, text='📋  ผลลัพธ์')
         self.nb.add(self.tab_log, text='📜  Log')
         self.nb.add(self.tab_check, text='🩺  ตรวจระบบ')
 
         self._build_search()
+        self._build_create()
         self._build_result()
         self._build_log()
         self._build_check()
@@ -1462,6 +1678,465 @@ class App:
         self.progress.pack(fill='x')
         self.lbl_stat = tk.Label(s5, text='', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w')
         self.lbl_stat.pack(fill='x', pady=(5, 0))
+
+    # ========================================================================
+    #  แท็บ "สร้าง Item"
+    #  แนวคิด: โยนไฟล์ต้นฉบับเข้าไป -> ได้คิวไอเทม -> แก้ได้ทุกช่อง -> ยิงเข้าเว็บ
+    #  ไม่ต้องกรอก template เองเหมือนแต่ก่อน
+    # ========================================================================
+    def _build_create(self):
+        p = self.tab_create
+        self.cq = []                       # คิวไอเทมที่จะสร้าง
+        self.c_running = False
+        self.c_cancel = False
+
+        # ---------- ค่าเริ่มต้นที่ใช้กับทุกแถว ----------
+        s1 = self._card(p, 'ค่าเริ่มต้น (ใช้ตอนนำเข้าไฟล์ — แก้รายตัวทีหลังได้)')
+        self.cv_type = tk.StringVar(value=self.prefs.get('c_type', DEFAULT_TYPE))
+        self.cv_suffix = tk.StringVar(value=self.prefs.get('c_suffix', DEFAULT_SUFFIX))
+        self.cv_price = tk.StringVar(value=self.prefs.get('c_price', ''))
+        self.cv_mail = tk.StringVar(value=self.prefs.get('c_mail', ''))
+
+        for col, (lbl, var, w) in enumerate((
+                ('ประเภทไอเทม', self.cv_type, 14),
+                ('คำต่อท้ายชื่อ', self.cv_suffix, 12),
+                ('Price', self.cv_price, 10),
+                ('หัวข้อจดหมาย', self.cv_mail, 20))):
+            tk.Label(s1, text=lbl, bg=C['bg'], fg=C['dim'],
+                     font=('Segoe UI', 9)).grid(row=0, column=col * 2, sticky='w', padx=(0 if col == 0 else 14, 6))
+            e = self._entry(s1, width=w)
+            e.config(textvariable=var)
+            e.grid(row=0, column=col * 2 + 1, sticky='w', ipady=3)
+
+        tk.Label(s1, text='คำต่อท้ายกับ “(X วัน)” จะเติมให้เฉพาะชื่อที่มีคำว่า “ชิ้น” เท่านั้น — '
+                          'จำนวนชิ้นจะถูก “ตัดออกจากชื่อ” แต่ ชม. ยังอยู่ในชื่อเหมือนเดิม',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), wraplength=940,
+                 justify='left').grid(row=1, column=0, columnspan=8, sticky='w', pady=(8, 0))
+
+        # ---------- คิว ----------
+        s2 = self._card(p, 'คิวไอเทมที่จะสร้าง')
+        bar = tk.Frame(s2, bg=C['bg'])
+        bar.pack(fill='x')
+        self._btn(bar, '📂  นำเข้าไฟล์ต้นฉบับ (.xlsx)', self.c_import,
+                  primary=True).pack(side='left', ipadx=10, ipady=4)
+        self._btn(bar, '➕  เพิ่มเอง', self.c_add).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
+        self._btn(bar, '✏  แก้ไข', self.c_edit).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
+        self._btn(bar, '🗑  ลบที่เลือก', self.c_del).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
+        self._btn(bar, 'ล้างคิว', self.c_clear).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
+        self.c_count = tk.Label(bar, text='คิวว่าง', bg=C['bg'], fg=C['dim'], font=FM)
+        self.c_count.pack(side='right')
+
+        tw = tk.Frame(s2, bg=C['bg'])
+        tw.pack(fill='both', expand=True, pady=(10, 0))
+        cols = ('n', 'kind', 'name', 'type', 'price', 'dur', 'qty', 'trade')
+        self.c_tree = ttk.Treeview(tw, columns=cols, show='headings',
+                                   style='TR.Treeview', height=11)
+        for c, t, w in (('n', '#', 40), ('kind', 'ItemKind', 90),
+                        ('name', 'ชื่อที่จะกรอกลงเว็บ', 330), ('type', 'ประเภท', 90),
+                        ('price', 'Price', 65), ('dur', 'ระยะเวลา', 80),
+                        ('qty', 'จำนวน', 60), ('trade', 'แลกเปลี่ยน', 85)):
+            self.c_tree.heading(c, text=t)
+            self.c_tree.column(c, width=w, anchor='w')
+        csb = ttk.Scrollbar(tw, orient='vertical', command=self.c_tree.yview)
+        self.c_tree.configure(yscrollcommand=csb.set)
+        self.c_tree.pack(side='left', fill='both', expand=True)
+        csb.pack(side='right', fill='y')
+        self.c_tree.bind('<Double-1>', lambda e: self.c_edit())
+
+        # ---------- ลงมือ ----------
+        s3 = self._card(p, 'ลงมือสร้าง')
+        self.cv_do = tk.BooleanVar(value=False)
+        cb = tk.Checkbutton(s3, variable=self.cv_do, command=self._c_do_changed,
+                            text='กดปุ่ม “สร้าง Item” จริง',
+                            bg=C['bg'], fg=C['fg'], selectcolor=C['input'],
+                            activebackground=C['bg'], activeforeground=C['fg'],
+                            font=FB, bd=0, highlightthickness=0)
+        cb.grid(row=0, column=0, sticky='w')
+        self.c_mode = tk.Label(s3, text='', bg=C['bg'], fg=C['warn'], font=FM)
+        self.c_mode.grid(row=0, column=1, sticky='w', padx=(10, 0))
+
+        self.cv_hold = tk.StringVar(value=self.prefs.get('c_hold', '3'))
+        tk.Label(s3, text='โหมดทดสอบ: กรอกเสร็จแล้วค้างหน้าไว้ให้ดู (วินาที)',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9)
+                 ).grid(row=1, column=0, sticky='w', pady=(8, 0))
+        eh = self._entry(s3, width=6)
+        eh.config(textvariable=self.cv_hold)
+        eh.grid(row=1, column=1, sticky='w', padx=(10, 0), pady=(8, 0), ipady=3)
+
+        run = tk.Frame(s3, bg=C['bg'])
+        run.grid(row=2, column=0, columnspan=3, sticky='w', pady=(12, 0))
+        self.c_btn_run = self._btn(run, '▶  เริ่มทำงาน', self.c_start, primary=True)
+        self.c_btn_run.pack(side='left', ipadx=18, ipady=5)
+        self.c_btn_stop = self._btn(run, '■  ยกเลิก', self.c_stop)
+        self.c_btn_stop.config(state='disabled')
+        self.c_btn_stop.pack(side='left', padx=(8, 0), ipadx=12, ipady=5)
+
+        self._c_do_changed()
+        self._c_refresh()
+
+    def _c_do_changed(self):
+        if self.cv_do.get():
+            self.c_mode.config(text='⚠  จะสร้างไอเทมจริงบนเว็บ', fg=C['err'])
+        else:
+            self.c_mode.config(text='โหมดทดสอบ — กรอกฟอร์มให้ดูเฉยๆ ไม่กดสร้าง', fg=C['ok'])
+
+    def _c_refresh(self):
+        self.c_tree.delete(*self.c_tree.get_children())
+        for i, d in enumerate(self.cq, 1):
+            self.c_tree.insert('', 'end', values=(
+                i, d['kind'], d['name'], d['type'], d['price'] or '—',
+                (d['dur'] + ' วัน') if d['dur'] else 'ถาวร',
+                d['qty'] or '—', 'ได้' if d['trade'] else 'ไม่ได้'))
+        self.c_count.config(text=('คิวว่าง' if not self.cq else f'ในคิว {len(self.cq)} ไอเทม'))
+
+    def _c_sel(self):
+        s = self.c_tree.selection()
+        if not s:
+            return None
+        return self.c_tree.index(s[0])
+
+    # ---------- นำเข้า / แก้ไขคิว ----------
+    def c_import(self):
+        if self.c_running:
+            return
+        path = filedialog.askopenfilename(title='เลือกไฟล์ต้นฉบับ',
+                                          filetypes=[('Excel', '*.xlsx *.xlsm'), ('ทุกไฟล์', '*.*')])
+        if not path:
+            return
+        dlg = ImportDialog(self.root, path)
+        if not dlg.result:
+            return
+        self.save_now()
+        t = self.cv_type.get().strip() or DEFAULT_TYPE
+        sfx = self.cv_suffix.get().strip()
+        pr = self.cv_price.get().strip()
+        ml = self.cv_mail.get().strip()
+        got = [row_to_item(r, t, sfx, pr, ml) for r in dlg.result]
+        self.cq.extend(got)
+        self._c_refresh()
+        self.log(f'นำเข้าเข้าคิวสร้างไอเทม {len(got)} รายการ (รวม {len(self.cq)})', 'OK')
+        log_event('create_import', count=len(got), total=len(self.cq),
+                  file=os.path.basename(path))
+
+    def c_add(self):
+        if self.c_running:
+            return
+        d = {'kind': '', 'name': '', 'cname': '', 'desc': '',
+             'type': self.cv_type.get().strip() or DEFAULT_TYPE,
+             'price': self.cv_price.get().strip(), 'dur': '',
+             'mail': self.cv_mail.get().strip(), 'qty': '1',
+             'trade': False, 'web': True}
+        if self._c_form(d, 'เพิ่มไอเทมเข้าคิว'):
+            self.cq.append(d)
+            self._c_refresh()
+
+    def c_edit(self):
+        if self.c_running:
+            return
+        i = self._c_sel()
+        if i is None:
+            return messagebox.showinfo('แก้ไข', 'เลือกแถวในคิวก่อนนะ')
+        d = dict(self.cq[i])
+        if self._c_form(d, f'แก้ไขไอเทม #{i + 1}'):
+            self.cq[i] = d
+            self._c_refresh()
+
+    def c_del(self):
+        i = self._c_sel()
+        if i is None:
+            return
+        del self.cq[i]
+        self._c_refresh()
+
+    def c_clear(self):
+        if self.c_running or not self.cq:
+            return
+        if messagebox.askyesno('ล้างคิว', f'ลบทั้ง {len(self.cq)} รายการออกจากคิว?'):
+            self.cq = []
+            self._c_refresh()
+
+    def _c_form(self, d, title):
+        """หน้าต่างแก้ไขไอเทม — แก้ได้ทุกช่อง คืน True ถ้ากดบันทึก"""
+        top = tk.Toplevel(self.root)
+        top.title(title)
+        top.configure(bg=C['bg'])
+        top.transient(self.root)
+        top.grab_set()
+        try:    # วางกลางหน้าต่างหลัก ไม่ให้ไปโผล่มุมจอ
+            self.root.update_idletasks()
+            x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - 640) // 2)
+            y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - 520) // 2)
+            top.geometry('640x520+%d+%d' % (x, y))
+        except Exception:
+            top.geometry('640x520')
+        ok = {'v': False}
+
+        body = tk.Frame(top, bg=C['bg'])
+        body.pack(fill='both', expand=True, padx=18, pady=14)
+
+        fields = (('ชื่อไอเทม (ที่จะกรอกลงเว็บ)', 'name', 48),
+                  ('ItemKind / game_item_id', 'kind', 20),
+                  ('ประเภทไอเทม', 'type', 20),
+                  ('Price', 'price', 12),
+                  ('ระยะเวลา (วัน) — เว้นว่าง = ถาวร', 'dur', 12),
+                  ('จำนวน (แสดงบนเว็บ)', 'qty', 12),
+                  ('หัวข้อจดหมาย', 'mail', 32),
+                  ('คำอธิบาย', 'desc', 48))
+        vs = {}
+        for r, (lbl, key, w) in enumerate(fields):
+            tk.Label(body, text=lbl, bg=C['bg'], fg=C['dim'],
+                     font=('Segoe UI', 9)).grid(row=r, column=0, sticky='w', pady=4)
+            v = tk.StringVar(value=str(d.get(key, '') or ''))
+            vs[key] = v
+            e = self._entry(body, width=w)
+            e.config(textvariable=v)
+            e.grid(row=r, column=1, sticky='w', padx=(12, 0), ipady=3)
+
+        vt = tk.BooleanVar(value=bool(d.get('trade')))
+        vw = tk.BooleanVar(value=bool(d.get('web', True)))
+        for r, (txt, var) in enumerate(((' แลกเปลี่ยนได้', vt),
+                                        (' เปิดใช้งานการแสดงผลบนเว็บ', vw)),
+                                       start=len(fields)):
+            tk.Checkbutton(body, text=txt, variable=var, bg=C['bg'], fg=C['fg'],
+                           selectcolor=C['input'], activebackground=C['bg'],
+                           activeforeground=C['fg'], font=FM, bd=0,
+                           highlightthickness=0).grid(row=r, column=1, sticky='w',
+                                                      padx=(12, 0), pady=2)
+
+        # ตัวช่วย: ประกอบชื่อใหม่จาก "ชื่อฐาน" + คำต่อท้าย + ระยะเวลา
+        hint = tk.Label(body, text='ชื่อฐาน (ตัดจำนวนชิ้นออกแล้ว): ' + (d.get('cname') or '—'),
+                        bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8),
+                        wraplength=560, justify='left')
+        hint.grid(row=len(fields) + 2, column=0, columnspan=2, sticky='w', pady=(10, 0))
+
+        def _rebuild():
+            vs['name'].set(make_item_name(d.get('cname') or vs['name'].get(),
+                                          self.cv_suffix.get().strip(),
+                                          vs['dur'].get().strip()))
+        self._btn(body, '↻ ประกอบชื่อใหม่จากชื่อฐาน + คำต่อท้าย + ระยะเวลา', _rebuild
+                  ).grid(row=len(fields) + 3, column=0, columnspan=2,
+                         sticky='w', pady=(6, 0), ipadx=6, ipady=3)
+
+        foot = tk.Frame(top, bg=C['card'], height=58)
+        foot.pack(fill='x', side='bottom')
+        foot.pack_propagate(False)
+
+        def _save():
+            for key, v in vs.items():
+                d[key] = v.get().strip()
+            d['trade'] = vt.get()
+            d['web'] = vw.get()
+            if not d['kind'] or not d['name']:
+                return messagebox.showwarning('กรอกไม่ครบ', 'ต้องมี ItemKind และชื่อไอเทม')
+            ok['v'] = True
+            top.destroy()
+
+        self._btn(foot, 'บันทึก', _save, primary=True).pack(side='right', padx=18, pady=12,
+                                                            ipadx=20, ipady=4)
+        self._btn(foot, 'ยกเลิก', top.destroy).pack(side='right', pady=12, ipadx=14, ipady=4)
+        self.root.wait_window(top)
+        return ok['v']
+
+    # ---------- รัน ----------
+    def c_stop(self):
+        self.c_cancel = True
+        self.log('กำลังยกเลิกการสร้างไอเทม...', 'WARN')
+
+    def c_start(self):
+        if self.c_running or self.running:
+            return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
+        if not self.cq:
+            return messagebox.showwarning('คิวว่าง', 'ยังไม่มีไอเทมในคิว — นำเข้าไฟล์ต้นฉบับก่อน')
+        do = self.cv_do.get()
+        if do and not messagebox.askyesno(
+                'ยืนยัน',
+                f'จะสร้างไอเทมจริงบนเว็บ {len(self.cq)} รายการ\n'
+                'ตรวจชื่อ/ItemKind ในคิวเรียบร้อยแล้วใช่ไหม?'):
+            return
+        self.save_now()
+        self.c_running = True
+        self.c_cancel = False
+        self.c_btn_run.config(state='disabled')
+        self.c_btn_stop.config(state='normal')
+        self.nb.select(self.tab_log)
+        self.log('=' * 46, 'STEP')
+        self.log(('เริ่มสร้างไอเทมจริง ' if do else 'เริ่มทดสอบกรอกฟอร์ม ')
+                 + f'{len(self.cq)} รายการ', 'STEP')
+        log_event('create_start', count=len(self.cq), commit=bool(do))
+        threading.Thread(target=self._c_thread, args=(list(self.cq), do), daemon=True).start()
+
+    def _c_thread(self, queue_rows, do):
+        try:
+            asyncio.run(self._c_work(queue_rows, do))
+        except Exception as ex:
+            log_event('error', where='create', message=str(ex)[:300])
+            self.log('ผิดพลาด: ' + str(ex), 'ERR')
+            self.log(traceback.format_exc(), 'ERR')
+        finally:
+            self.c_running = False
+
+            def _rst():
+                self.c_btn_run.config(state='normal')
+                self.c_btn_stop.config(state='disabled')
+                if self.results:
+                    self.nb.select(self.tab_result)
+            self.root.after(0, _rst)
+
+    async def _c_work(self, rows, do):
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch_persistent_context(**launch_kwargs(False))
+            page = browser.pages[0] if browser.pages else await browser.new_page()
+            try:
+                try:
+                    hold = max(0, int(float(self.cv_hold.get() or 0)))
+                except Exception:
+                    hold = 3
+                okc = errc = 0
+                for i, d in enumerate(rows, 1):
+                    if self.c_cancel:
+                        self.log('ยกเลิกแล้ว', 'WARN')
+                        break
+                    self.set_progress(i - 1, len(rows), d['name'][:28])
+                    self.log(f'[{i}/{len(rows)}] {d["name"]}  (ItemKind={d["kind"]})', 'STEP')
+                    try:
+                        if await self._c_one(page, d, do, hold):
+                            okc += 1
+                        else:
+                            errc += 1
+                    except Exception as ex:
+                        errc += 1
+                        self.log('   ✗ ' + str(ex)[:160], 'ERR')
+                        log_event('error', where='create_one', kind_id=d.get('kind'),
+                                  message=str(ex)[:200])
+                self.set_progress(len(rows), len(rows), 'เสร็จ')
+                self.log(f'จบ — สำเร็จ {okc} · ไม่ผ่าน {errc}', 'OK' if not errc else 'WARN')
+                log_event('create_done', ok=okc, fail=errc, commit=bool(do))
+            finally:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+
+    async def _c_fill(self, page, key, value, label=''):
+        """กรอกช่องเดียว: ลอง id ก่อน ถ้าไม่เจอค่อยหาโดยอ้างข้อความข้างๆ"""
+        if value is None or str(value) == '':
+            return True
+        sel = SEL_CREATE.get(key, '')
+        r = await page.evaluate(JS_SET_VALUE, [sel, str(value)])
+        if r != 'ok' and label:
+            r = await page.evaluate(JS_SET_BY_LABEL, [label, str(value)])
+        if r == 'ok':
+            self.log(f'   · {label or key} = {str(value)[:40]}', 'INFO')
+            return True
+        self.log(f'   ! ไม่เจอช่อง {label or key} ({sel})', 'WARN')
+        return False
+
+    async def _c_one(self, page, d, do, hold):
+        await page.goto(ITEM_CREATE_URL, wait_until='domcontentloaded', timeout=45000)
+        await page.wait_for_timeout(2000)
+        if any(k in page.url.lower() for k in ('login', 'signin', 'auth')):
+            self.log('   ✗ ยังไม่ได้ล็อกอิน — กด “เปิดหน้า Login” ด้านบนก่อน', 'ERR')
+            return False
+        try:
+            await page.wait_for_selector(SEL_CREATE['name'], timeout=15000)
+        except Exception:
+            self.log('   ! ไม่เจอฟอร์มตาม id เดิม — จะลองหาโดยอ้างชื่อช่องแทน', 'WARN')
+
+        # [1] รายละเอียดไอเทม
+        await self._c_fill(page, 'name', d['name'], 'ชื่อไอเทม')
+        await self._c_fill(page, 'desc', d.get('desc', ''), 'คำอธิบาย')
+        if d.get('type'):
+            r = await page.evaluate(JS_PICK_TYPE, [d['type'], SEL_CREATE['type_ph']])
+            if r == 'ok':
+                self.log(f'   · ประเภทไอเทม = {d["type"]}', 'INFO')
+            else:
+                await self._c_pick_combo(page, d['type'])
+
+        # [2] พารามิเตอร์ส่งเข้าเกม
+        await self._c_fill(page, 'kind', d['kind'], 'game_item_id (ItemKind)')
+        await self._c_fill(page, 'price', d.get('price', ''), 'Price')
+        await self._c_fill(page, 'duration', d.get('dur', ''), 'ระยะเวลาไอเทม (วัน)')
+        await self._c_fill(page, 'mail', d.get('mail', ''), 'หัวข้อจดหมาย')
+        await self._c_switch(page, SEL_CREATE['trade_label'], bool(d.get('trade')))
+
+        # [3] พารามิเตอร์แสดงบนเว็บ
+        await self._c_switch(page, SEL_CREATE['web_label'], bool(d.get('web', True)))
+        await page.wait_for_timeout(300)
+        await self._c_fill(page, 'qty', d.get('qty', ''), 'จำนวน')
+
+        # ตรวจว่าค่าเข้าไปจริง
+        got = await page.evaluate(JS_READ_FORM, SEL_CREATE)
+        bad = []
+        for k, want in (('name', d['name']), ('kind', d['kind'])):
+            if (got.get(k) or '').strip() != str(want).strip():
+                bad.append(f'{k}: อยากได้ “{want}” แต่ในฟอร์มเป็น “{got.get(k)}”')
+        if bad:
+            for b in bad:
+                self.log('   ! ' + b, 'WARN')
+
+        if not do:
+            self.log('   ✓ กรอกฟอร์มครบแล้ว (โหมดทดสอบ — ไม่กดสร้าง)', 'OK')
+            if hold:
+                await page.wait_for_timeout(hold * 1000)
+            self.add_result({'kind': d['kind'], 'name': d['name'], 'id': '',
+                             'type': d['type'], 'dur': d.get('dur', ''),
+                             'qty': d.get('qty', '')}, 'กรอกฟอร์มแล้ว (ไม่สร้าง)')
+            return not bad
+
+        # [4] กดสร้างจริง
+        btn = page.locator(f'button:has-text("{SEL_CREATE["submit"]}")').last
+        if await btn.count() == 0:
+            self.log(f'   ✗ ไม่เจอปุ่ม “{SEL_CREATE["submit"]}”', 'ERR')
+            return False
+        try:
+            async with page.expect_response(
+                    lambda r: r.request.method in ('POST', 'PUT', 'PATCH')
+                    and 'item' in r.url.lower(), timeout=20000) as ri:
+                await btn.click(timeout=10000)
+            resp = await ri.value
+            code = resp.status
+        except Exception:
+            code = 0
+        await page.wait_for_timeout(1500)
+        good = (code == 0) or (200 <= code < 300)
+        self.log('   ' + ('✓ สร้างแล้ว' if good else f'✗ เว็บตอบ HTTP {code}')
+                 + (f' (HTTP {code})' if good and code else ''),
+                 'OK' if good else 'ERR')
+        self.add_result({'kind': d['kind'], 'name': d['name'], 'id': '',
+                         'type': d['type'], 'dur': d.get('dur', ''),
+                         'qty': d.get('qty', '')},
+                        'สร้างแล้ว' if good else f'ไม่สำเร็จ (HTTP {code})')
+        log_event('create_item', kind_id=d['kind'], name=d['name'],
+                  ok=bool(good), http=code)
+        return good
+
+    async def _c_switch(self, page, label, want):
+        r = await page.evaluate(JS_SET_SWITCH, [label, bool(want)])
+        if r == 'ok':
+            self.log(f'   · {label} = {"เปิด" if want else "ปิด"}', 'INFO')
+        else:
+            self.log(f'   ! ไม่เจอสวิตช์ “{label}”', 'WARN')
+
+    async def _c_pick_combo(self, page, value):
+        """combobox แบบ React — คลิกเปิดแล้วคลิกตัวเลือก"""
+        for trig in ('[role="combobox"]', 'text="%s"' % SEL_CREATE['type_ph']):
+            try:
+                t = page.locator(trig).first
+                if await t.count() == 0:
+                    continue
+                await t.click(timeout=4000)
+                await page.wait_for_timeout(400)
+                opt = page.locator(f'[role="option"]:has-text("{value}")').first
+                if await opt.count() == 0:
+                    opt = page.locator(f'text="{value}"').last
+                if await opt.count() > 0:
+                    await opt.click(timeout=4000)
+                    self.log(f'   · ประเภทไอเทม = {value}', 'INFO')
+                    return True
+            except Exception:
+                continue
+        self.log(f'   ! เลือกประเภทไอเทม “{value}” ไม่ได้', 'WARN')
+        return False
 
     def _build_result(self):
         bar = tk.Frame(self.tab_result, bg=C['bg'])
@@ -1687,8 +2362,9 @@ class App:
         try:
             asyncio.run(self._check_web())
         except Exception as ex:
-            self.root.after(0, lambda: self._show_check(
-                [_t(False, 'เปิดเบราว์เซอร์ได้', str(ex)[:120])], append=True))
+            msg = str(ex)[:120]
+            self.root.after(0, lambda m=msg: self._show_check(
+                [_t(False, 'เปิดเบราว์เซอร์ได้', m)], append=True))
         finally:
             self.running = False
             self.root.after(0, lambda: self.btn_chk_full.config(
@@ -1736,7 +2412,7 @@ class App:
         self.root.after(0, _do)
 
     def add_result(self, row, notes=''):
-        if any(r['id'] == row['id'] for r in self.results):
+        if row.get('id') and any(r['id'] == row['id'] for r in self.results):
             return
         row = dict(row)
         row['notes'] = notes
@@ -1841,6 +2517,11 @@ class App:
             'deep': self.v_deep.get(), 'dur': self.v_dur.get().strip(),
             'trade': self.v_trade.get(), 'qty': self.v_qty.get().strip(),
             'headless': self.v_headless.get(),
+            'c_type': self.cv_type.get().strip(),
+            'c_suffix': self.cv_suffix.get().strip(),
+            'c_price': self.cv_price.get().strip(),
+            'c_mail': self.cv_mail.get().strip(),
+            'c_hold': self.cv_hold.get().strip(),
         })
         save_prefs(self.prefs)
 
