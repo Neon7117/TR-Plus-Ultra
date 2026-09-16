@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.7.5 : แก้เมธอดขยายทั้งหมดหายไป (famepoint/exp ไม่ถูกเพิ่ม)
+V0.7.6 : แก้ famepoint ไม่ได้เครดิตเรียลไทม์และไม่ได้ Tier
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -1143,6 +1143,119 @@ JS_BUNDLE_MARK_NAMED = """
   ctl.setAttribute('data-trpu', what);
   ctl.scrollIntoView({block: 'center'});
   return 'ok|' + (ctl.tagName === 'INPUT' ? ctl.value : (ctl.textContent || '').trim());
+}"""
+
+
+# ===========================================================================
+#  ตัวกลางเดียวสำหรับ "หาช่องในการ์ด แล้วลงมือเลย" — ครั้งเดียวจบใน JS
+#
+#  ทำไมต้องครั้งเดียวจบ:
+#    เดิมใช้วิธี "ติดป้าย data-trpu ไว้ก่อน แล้วค่อยให้ Playwright มากด"
+#    แต่เว็บเป็น React พอมีอะไรเปลี่ยน มัน render ใหม่ ป้ายที่ติดไว้หายเกลี้ยง
+#    -> กดไม่โดน ขึ้น Timeout (เจอกับการ์ด Fame Point ที่เพิ่งถูกเพิ่มเข้ามา)
+#
+#  how  : 'id' = หาจาก Item ID ในการ์ด · 'name' = หาจากชื่อการ์ด (Fame Point / exp)
+#  what : 'qty' | 'tier' | 'kind'
+#  act  : 'read' | 'set' | 'click'
+# ===========================================================================
+JS_BUNDLE_ACT = """
+([how, key, what, act, value, tiers]) => {
+  function vis(el){
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  function idAfter(t, prefix) {
+    const i = t.indexOf(prefix);
+    if (i < 0) return null;
+    let j = i + prefix.length, out = '';
+    while (j < t.length && t.charCodeAt(j) <= 32) j++;
+    while (j < t.length && t.charAt(j) >= '0' && t.charAt(j) <= '9') { out += t.charAt(j); j++; }
+    return out || null;
+  }
+  // ---- 1. หา "การ์ด" ----
+  const need = (what === 'kind') ? 'ประเภท'
+             : (what === 'tier') ? 'Tier' : 'จำนวน (Quantity)';
+  let card = null, bl = 1e9;
+  for (const el of document.querySelectorAll('div,section,li')) {
+    const t = el.textContent || '';
+    if (t.indexOf(need) < 0) continue;
+    if (how === 'id') {
+      if (t.indexOf('จำนวน (Quantity)') < 0) continue;
+      if (idAfter(t, 'Item ID') !== String(key)) continue;
+    } else {
+      if (t.indexOf(String(key)) < 0) continue;
+    }
+    if (!vis(el)) continue;
+    if (t.length < bl) { bl = t.length; card = el; }
+  }
+  if (!card) return 'ไม่เจอการ์ด ' + key;
+
+  // ---- 2. หา "ช่อง" ในการ์ดใบนั้น (เฉพาะที่มองเห็นได้) ----
+  let ctl = null;
+  if (what === 'qty') {
+    ctl = [...card.querySelectorAll('input')].filter(
+      e => e.type !== 'checkbox' && e.type !== 'file' && vis(e))[0];
+  } else {
+    // select ที่ซ่อนอยู่ไม่เอา — Radix/shadcn แอบใส่ <select> ซ่อนไว้
+    // ซึ่ง textContent ของมันมีชื่อ "ทุกตัวเลือก" อยู่ครบ ทำให้อ่านค่าปัจจุบันผิด
+    ctl = [...card.querySelectorAll('select')].filter(vis)[0];
+    if (!ctl) {
+      const names = (what === 'tier')
+        ? (tiers || []).concat(['เลือก Tier'])
+        : null;
+      ctl = [...card.querySelectorAll('[role="combobox"],button')].filter(e => {
+        if (!vis(e)) return false;
+        const t = (e.textContent || '').trim();
+        if (names) return names.indexOf(t) >= 0;
+        return t.indexOf('WALLET') >= 0 || t.indexOf('เลือก') === 0;
+      })[0];
+    }
+  }
+  if (!ctl) return 'ไม่เจอช่อง ' + what + ' ในการ์ด ' + key;
+
+  // อ่านค่าปัจจุบัน — select ต้องอ่านจาก .value ไม่ใช่ textContent
+  function cur() {
+    if (ctl.tagName === 'SELECT') {
+      const o = ctl.options[ctl.selectedIndex];
+      return o ? o.text.trim() : (ctl.value || '');
+    }
+    if (ctl.tagName === 'INPUT') return ctl.value;
+    return (ctl.dataset.value || ctl.textContent || '').trim();
+  }
+
+  if (act === 'read') return 'ok|' + cur();
+
+  if (act === 'set') {
+    if (ctl.tagName === 'SELECT') {
+      const opts = [...ctl.options];
+      let j = opts.findIndex(o => o.text.trim() === String(value));
+      if (j < 0) j = opts.findIndex(o => (o.text || '').indexOf(String(value)) >= 0
+                                      || (o.value || '').indexOf(String(value)) >= 0);
+      if (j < 0) return 'ไม่มีตัวเลือก ' + value;
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')
+            .set.call(ctl, opts[j].value);
+    } else if (ctl.tagName === 'INPUT') {
+      ctl.scrollIntoView({block: 'center'});
+      ctl.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+            .set.call(ctl, String(value));
+    } else {
+      return 'combobox';
+    }
+    ctl.dispatchEvent(new Event('input', {bubbles: true}));
+    ctl.dispatchEvent(new Event('change', {bubbles: true}));
+    return 'ok';
+  }
+
+  if (act === 'click') {
+    ctl.scrollIntoView({block: 'center'});
+    ctl.click();
+    return 'ok|' + cur();
+  }
+  return 'ไม่รู้จักคำสั่ง ' + act;
 }"""
 
 JS_BUNDLE_SET_MARKED = """
@@ -4086,161 +4199,116 @@ class App:
         except Exception:
             return False
 
-    async def _b_named_pick(self, page, name, what, want, exact=True):
-        """เลือกค่าในดรอปดาวน์ของการ์ดที่ชื่อ name (famepoint / exp)
+    async def _b_choose(self, page, how, key, what, want, exact=True, label=None):
+        """ตั้งค่าดรอปดาวน์/ช่องในการ์ด แล้วอ่านกลับมาตรวจว่าเข้าจริง
 
-        what = 'kind' (ประเภท) หรือ 'tier'
-        exact=False = เทียบแบบ "มีคำนี้อยู่" (ใช้กับ WALLET_REALTIME_CREDIT ที่ข้อความยาว)
+        ทุกขั้นตอนหาช่องใหม่ทุกครั้ง ไม่เก็บตัวชี้ไว้ข้ามคำสั่ง
+        เพราะเว็บเป็น React — render ใหม่เมื่อไหร่ ตัวชี้เก่าใช้ไม่ได้ทันที
         """
+        who = label or str(key)
         try:
             await page.keyboard.press('Escape')
             await page.wait_for_timeout(150)
         except Exception:
             pass
-        mk = await page.evaluate(JS_BUNDLE_MARK_NAMED, [name, what, TIERS])
-        if not str(mk).startswith('ok'):
-            self.log('   ✗ %s: %s' % (name, mk), 'ERR')
+
+        def _match(v):
+            v = (v or '').strip()
+            return (v == want) if exact else (want in v)
+
+        r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'read', '', TIERS])
+        if not str(r).startswith('ok'):
+            self.log('   ✗ %s (%s): %s' % (who, what, r), 'ERR')
             return False
-        cur = str(mk).split('|', 1)[1] if '|' in str(mk) else ''
-        if (want in cur) if not exact else (cur == want):
+        if _match(str(r).split('|', 1)[1] if '|' in str(r) else ''):
             return True
-        # <select> ธรรมดา
-        if await page.evaluate(JS_BUNDLE_SET_MARKED, [what, want]) == 'ok':
-            self.log('   · %s %s = %s' % (name, what, want), 'INFO')
+
+        # <select> ธรรมดา ตั้งได้เลย
+        r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'set', want, TIERS])
+        if r == 'ok':
+            self.log('   · %s %s = %s' % (who, what, want), 'INFO')
             return True
-        try:
-            await page.locator('[data-trpu="%s"]' % what).first.click(timeout=5000)
-            opt = None
-            for _ in range(20):                      # รอดรอปดาวน์เปิด ไม่หน่วงตายตัว
-                await page.wait_for_timeout(200)
-                opts = page.locator('[role="option"]')
+
+        # ดรอปดาวน์แบบกดเปิด — กดด้วย JS (ไม่ต้องพึ่งตัวชี้ที่อาจหายไป)
+        r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'click', '', TIERS])
+        if not str(r).startswith('ok'):
+            self.log('   ✗ %s (%s) เปิดดรอปดาวน์ไม่ได้: %s' % (who, what, r), 'ERR')
+            return False
+
+        opt = None
+        seen = []
+        for _ in range(25):                       # รอจนตัวเลือกโผล่ ไม่หน่วงตายตัว
+            await page.wait_for_timeout(200)
+            opts = page.locator('[role="option"]')
+            try:
                 n = await opts.count()
-                if n == 0:
+            except Exception:
+                n = 0
+            if n == 0:
+                continue
+            seen = []
+            for i in range(n):
+                try:
+                    txt = (await opts.nth(i).inner_text()).strip()
+                except Exception:
                     continue
-                for i in range(n):
-                    try:
-                        txt = (await opts.nth(i).inner_text()).strip()
-                    except Exception:
-                        continue
-                    if (txt == want) if exact else (want in txt):
-                        opt = opts.nth(i)
-                        break
-                break
-            if opt is None:
-                seen = []
-                opts = page.locator('[role="option"]')
-                for i in range(min(await opts.count(), 8)):
-                    try:
-                        seen.append((await opts.nth(i).inner_text()).strip())
-                    except Exception:
-                        pass
-                self.log('   ✗ %s: ไม่มีตัวเลือก "%s" (เจอ: %s)'
-                         % (name, want, ', '.join(seen) or 'ไม่มีเลย'), 'ERR')
-                await page.keyboard.press('Escape')
-                return False
-            await opt.click(timeout=5000)
-            await page.wait_for_timeout(400)
-        except Exception as ex:
-            self.log('   ✗ %s %s: %s' % (name, what, str(ex)[:70]), 'ERR')
+                seen.append(txt)
+                if _match(txt):
+                    opt = opts.nth(i)
+                    break
+            break
+        if opt is None:
+            self.log('   ✗ %s (%s): ไม่มีตัวเลือก "%s" (เจอ: %s)'
+                     % (who, what, want, ', '.join(seen[:6]) or 'ไม่มีเลย'), 'ERR')
             try:
                 await page.keyboard.press('Escape')
             except Exception:
                 pass
             return False
-        got = await page.evaluate(JS_BUNDLE_GET_MARKED, [what])
-        ok = (want in (got or '')) if not exact else ((got or '').strip() == want)
-        if not ok:
-            self.log('   ✗ %s %s ตั้งเป็น "%s" ไม่สำเร็จ (ตอนนี้ "%s")'
-                     % (name, what, want, got or ''), 'ERR')
+        try:
+            await opt.click(timeout=6000)
+            await page.wait_for_timeout(400)
+        except Exception as ex:
+            self.log('   ✗ %s (%s) กดตัวเลือกไม่ได้: %s' % (who, what, str(ex)[:60]), 'ERR')
             return False
-        self.log('   · %s %s = %s' % (name, what, want), 'OK')
+
+        r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'read', '', TIERS])
+        got = str(r).split('|', 1)[1] if '|' in str(r) else ''
+        if not _match(got):
+            self.log('   ✗ %s %s ตั้งเป็น "%s" ไม่สำเร็จ (ตอนนี้ "%s")'
+                     % (who, what, want, got), 'ERR')
+            return False
+        self.log('   · %s %s = %s' % (who, what, want), 'OK')
         return True
 
     async def _b_finish_wallet(self, page, name, is_fame):
         """เก็บงานการ์ด famepoint / exp ให้ครบ
 
-        ทั้งคู่ "ต้องมี Tier" ไม่งั้นเว็บจะกดสร้างไม่ได้
+        ทั้งคู่ "ต้องมี Tier" ไม่งั้นเว็บจะกดสร้างไม่ผ่าน
         และ famepoint ต้องเป็นเครดิตเรียลไทม์ ไม่ใช่เครดิตธรรมดา
         """
         await self._b_expand(page)
         ok = True
         if is_fame:
-            if not await self._b_named_pick(page, name, 'kind', FAME_CREDIT_TYPE,
-                                            exact=False):
+            if not await self._b_choose(page, 'name', name, 'kind', FAME_CREDIT_TYPE,
+                                        exact=False, label=name):
                 self.log('   ⚠ %s ยังไม่ใช่เครดิตเรียลไทม์ — ต้องแก้เองบนเว็บก่อนกดสร้าง'
                          % name, 'ERR')
                 ok = False
-        if not await self._b_named_pick(page, name, 'tier', DEFAULT_TIER):
+        if not await self._b_choose(page, 'name', name, 'tier', DEFAULT_TIER, label=name):
             self.log('   ⚠ %s ยังไม่ได้เลือก Tier — เว็บจะกดสร้างไม่ผ่าน' % name, 'ERR')
             ok = False
         return ok
 
     async def _b_set_row(self, page, item_id, qty, tier):
-        """ตั้งจำนวน + Tier ของการ์ด "ของไอเทมนี้"
-
-        หาโดยใช้ Item ID ที่อยู่ในการ์ด ไม่ใช่ลำดับที่เท่าไหร่
-        เพราะหน้าเว็บย่อ/ขยาย/สลับที่ได้ ลำดับเลยเชื่อไม่ได้
-        """
-        mk = await page.evaluate(JS_BUNDLE_MARK_CARD, [str(item_id), 'qty', TIERS])
-        if str(mk).startswith('ok'):
-            if await page.evaluate(JS_BUNDLE_SET_MARKED, ['qty', str(qty)]) != 'ok':
-                self.log('   ! ตั้งจำนวนของไอเทม %s ไม่ได้' % item_id, 'WARN')
-        else:
-            self.log('   ! %s' % mk, 'WARN')
+        """ตั้งจำนวน + Tier ของการ์ด "ของไอเทมนี้" (หาโดย Item ID ไม่ใช่ลำดับ)"""
+        r = await page.evaluate(JS_BUNDLE_ACT,
+                                ['id', str(item_id), 'qty', 'set', str(qty), TIERS])
+        if r != 'ok':
+            self.log('   ! ตั้งจำนวนของไอเทม %s ไม่ได้ (%s)' % (item_id, r), 'WARN')
         if tier:
-            await self._b_tier(page, item_id, tier)
-
-    async def _b_tier(self, page, item_id, tier):
-        """ตั้ง Tier ของการ์ดของไอเทมนี้ (หาโดย Item ID ไม่ใช่ลำดับ)"""
-        try:
-            await page.keyboard.press('Escape')
-            await page.wait_for_timeout(150)
-        except Exception:
-            pass
-        mk = await page.evaluate(JS_BUNDLE_MARK_CARD, [str(item_id), 'tier', TIERS])
-        if not str(mk).startswith('ok'):
-            self.log('   ✗ ตั้ง Tier ของไอเทม %s ไม่ได้: %s' % (item_id, mk), 'ERR')
-            return False
-        if await page.evaluate(JS_BUNDLE_SET_MARKED, ['tier', tier]) == 'ok':
-            self.log('   · ไอเทม %s Tier = %s' % (item_id, tier), 'INFO')
-            return True
-        try:
-            await page.locator('[data-trpu="tier"]').first.click(timeout=5000)
-            await page.wait_for_timeout(500)
-            opt = await self._b_exact_option(page, tier)
-            if opt is None:
-                self.log('   ✗ ไอเทม %s: ไม่มีตัวเลือก Tier "%s"' % (item_id, tier), 'ERR')
-                await page.keyboard.press('Escape')
-                return False
-            await opt.click(timeout=5000)
-            await page.wait_for_timeout(400)
-        except Exception as ex:
-            self.log('   ✗ ตั้ง Tier ไอเทม %s ไม่ได้: %s' % (item_id, str(ex)[:70]), 'ERR')
-            try:
-                await page.keyboard.press('Escape')
-            except Exception:
-                pass
-            return False
-        got = await page.evaluate(JS_BUNDLE_GET_MARKED, ['tier'])
-        if (got or '').strip() != tier:
-            self.log('   ✗ ไอเทม %s ตั้ง Tier เป็น "%s" ไม่สำเร็จ (ตอนนี้ "%s")'
-                     % (item_id, tier, got or ''), 'ERR')
-            return False
-        self.log('   · ไอเทม %s Tier = %s' % (item_id, tier), 'INFO')
-        return True
-
-    async def _b_exact_option(self, page, text):
-        """หา option ที่ข้อความ "ตรงเป๊ะ" — กัน S ไปโดน SS / SS+ / SSS"""
-        opts = page.locator('[role="option"]')
-        n = await opts.count()
-        for i in range(n):
-            o = opts.nth(i)
-            try:
-                if (await o.inner_text()).strip() == text:
-                    return o
-            except Exception:
-                continue
-        return None
+            await self._b_choose(page, 'id', item_id, 'tier', tier,
+                                 label='ไอเทม %s' % item_id)
 
     async def _b_pick(self, page, label, value):
         r = await page.evaluate(JS_PICK_TYPE, [value, label])
