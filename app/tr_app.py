@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.6.5 : แก้ชีทติดมาเองตอนเปิดไฟล์ (ทำให้ไอเทมหายไปจากรายการ)
+V0.7.0 : เพิ่มแท็บสร้าง Bundle (อ่านไฟล์ต้นฉบับ + famepoint เครดิตเรียลไทม์)
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -79,6 +79,36 @@ SEL_CREATE = {
 }
 DEFAULT_TYPE = 'GENERAL'
 DEFAULT_SUFFIX = '(Gift)'
+
+# ---- หน้าสร้างบันเดิล ----
+BUNDLE_CREATE_URL = BASE + '/hof/talesrunner/shop/bundles/create'
+TIERS = ['General', 'A', 'S', 'SS', 'SS+', 'SSS']
+DEFAULT_TIER = 'General'
+BUNDLE_TYPES = ['FIXED', 'CHOICE', 'RANDOM', 'GACHAPON', 'GACHAPON_LIMIT']
+DEFAULT_BUNDLE_TYPE = 'FIXED'
+
+# famepoint ต้องเป็น "เครดิตเรียลไทม์" ไม่ใช่ "เครดิต" ธรรมดา (เว็บตั้งค่าเริ่มต้นเป็นแบบธรรมดา)
+FAME_CREDIT_TYPE = 'WALLET_REALTIME_CREDIT'
+FAME_CREDIT_LABEL = 'เครดิตเรียลไทม์ (WALLET_REALTIME_CREDIT)'
+FAME_OPTION = 'hof-fame-point'          # ตัวเลือกในดรอปดาวน์แท็บ Credit
+FAME_NAME = 'Fame Point'
+
+SEL_BUNDLE = {
+    'name':        'ชื่อ Bundle',
+    'type':        'ประเภท Bundle',
+    'deliver':     'ส่งทันที',
+    'tab_item':    'Item',
+    'tab_credit':  'Credit',
+    'tab_debit':   'Debit',
+    'tab_mileage': 'Mileage',
+    'tab_exp':     'Player Exp.',
+    'search_ph':   'ค้นหา',
+    'add_btn':     'เพิ่ม',
+    'qty_label':   'จำนวน (Quantity)',
+    'tier_label':  'Tier',
+    'kind_label':  'ประเภท',
+    'submit':      'สร้าง Bundle',
+}
 # ลำดับคอลัมน์ในตาราง: Aztek Item Id | ชื่อ | ประเภท | ItemKind | Actions
 COL = {'id': 0, 'name': 1, 'type': 2, 'kind': 3}
 
@@ -831,6 +861,142 @@ JS_READ_FORM = """
            desc: v(sel.desc) };
 }"""
 
+# ---------------------------------------------------------------------------
+#  JS สำหรับหน้า "สร้างบันเดิล"
+#  การ์ดแต่ละใบในรายการไอเท็มมีช่อง "จำนวน (Quantity)" กับดรอปดาวน์ Tier
+#  หาโดยไล่จากข้อความ แล้ววิ่งขึ้นไปหา container ของการ์ดใบนั้น
+# ---------------------------------------------------------------------------
+JS_BUNDLE_QTY_BOXES = """
+() => {
+  const out = [];
+  for (const el of document.querySelectorAll('*')) {
+    if (el.children.length) continue;
+    const t = (el.textContent || '').trim();
+    if (!t.startsWith('จำนวน (Quantity)')) continue;
+    let n = el.parentElement;
+    for (let i = 0; i < 5 && n; i++) {
+      const inp = n.querySelector('input:not([type="checkbox"]):not([type="file"])');
+      if (inp) { out.push(inp); break; }
+      n = n.parentElement;
+    }
+  }
+  return out;
+}"""
+
+JS_BUNDLE_ROW_QTY = """
+([idx, val]) => {
+  const boxes = [];
+  for (const el of document.querySelectorAll('*')) {
+    if (el.children.length) continue;
+    const t = (el.textContent || '').trim();
+    if (!t.startsWith('จำนวน (Quantity)')) continue;
+    let n = el.parentElement;
+    for (let i = 0; i < 5 && n; i++) {
+      const inp = n.querySelector('input:not([type="checkbox"]):not([type="file"])');
+      if (inp) { boxes.push(inp); break; }
+      n = n.parentElement;
+    }
+  }
+  const el = boxes[idx - 1];
+  if (!el) return 'ไม่เจอช่องจำนวน (' + boxes.length + ' ใบ)';
+  el.scrollIntoView({block: 'center'});
+  const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  d.set.call(el, String(val));
+  el.dispatchEvent(new Event('input', {bubbles: true}));
+  el.dispatchEvent(new Event('change', {bubbles: true}));
+  return 'ok';
+}"""
+
+JS_BUNDLE_ROW_TIER = """
+([idx, tier]) => {
+  // <select> ธรรมดา ตั้งค่าได้เลย · ถ้าเป็น combobox ของ React ให้ฝั่ง python คลิกเอง
+  const cards = [];
+  for (const el of document.querySelectorAll('*')) {
+    if (el.children.length) continue;
+    if ((el.textContent || '').trim() !== 'Tier') continue;
+    let n = el.parentElement;
+    for (let i = 0; i < 5 && n; i++) {
+      const s = n.querySelector('select');
+      if (s) { cards.push(s); break; }
+      n = n.parentElement;
+    }
+  }
+  const s = cards[idx - 1];
+  if (!s) return 'combobox';
+  const opts = [...s.options];
+  const j = opts.findIndex(o => o.text.trim().toLowerCase() === String(tier).toLowerCase());
+  if (j < 0) return 'ไม่มีตัวเลือก ' + tier;
+  const d = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+  d.set.call(s, opts[j].value);
+  s.dispatchEvent(new Event('input', {bubbles: true}));
+  s.dispatchEvent(new Event('change', {bubbles: true}));
+  return 'ok';
+}"""
+
+JS_BUNDLE_SEARCH = """
+(val) => {
+  // ช่องค้นหาไอเทมในกล่อง "เพิ่มของเข้า Bundle"
+  const cands = [...document.querySelectorAll('input')].filter(el => {
+    if (el.type === 'checkbox' || el.type === 'file') return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 150 && r.height > 0;
+  });
+  const el = cands[cands.length - 1];
+  if (!el) return 'ไม่เจอช่องค้นหา';
+  el.scrollIntoView({block: 'center'});
+  el.focus();
+  const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  d.set.call(el, String(val));
+  el.dispatchEvent(new Event('input', {bubbles: true}));
+  el.dispatchEvent(new Event('change', {bubbles: true}));
+  return 'ok';
+}"""
+
+JS_BUNDLE_WALLET_QTY = """
+(val) => {
+  // ช่องจำนวนเล็กๆ ที่อยู่ข้างปุ่ม "+ เพิ่ม" ในกล่องเพิ่มของ
+  const cands = [...document.querySelectorAll('input')].filter(el => {
+    if (el.type === 'checkbox' || el.type === 'file') return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.width < 150 && r.height > 0;
+  });
+  const el = cands[cands.length - 1];
+  if (!el) return 'ไม่เจอช่องจำนวน';
+  const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  d.set.call(el, String(val));
+  el.dispatchEvent(new Event('input', {bubbles: true}));
+  el.dispatchEvent(new Event('change', {bubbles: true}));
+  return 'ok';
+}"""
+
+JS_BUNDLE_FAME_TYPE = """
+([idx, want]) => {
+  // การ์ด Fame Point มีดรอปดาวน์ "ประเภท" — ถ้าเป็น <select> ตั้งได้เลย
+  for (const s of document.querySelectorAll('select')) {
+    const opts = [...s.options];
+    const j = opts.findIndex(o => (o.text || '').includes(want) ||
+                                  (o.value || '').includes(want));
+    if (j >= 0) {
+      const d = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+      d.set.call(s, opts[j].value);
+      s.dispatchEvent(new Event('input', {bubbles: true}));
+      s.dispatchEvent(new Event('change', {bubbles: true}));
+      return 'ok';
+    }
+  }
+  return 'combobox';
+}"""
+
+JS_BUNDLE_COUNT = """
+() => {
+  const m = (document.body.innerText || '').match(/รายการไอเท็ม\\s*\\((\\d+)\\)/);
+  return m ? parseInt(m[1], 10) : -1;
+}"""
+
 
 # ============================================================================
 #  [5.4] อ่านชีทต้นฉบับแบบเดียวกับเครื่องมือเดิม (parse_master_rows)
@@ -1050,6 +1216,217 @@ def parse_master_rows(rows, seen=None):
                         'amount': amount, 'has_qty': has_qty, 'desc': dsc})
     return out
 
+
+
+# ============================================================================
+#  [5.8] อ่านไฟล์ต้นฉบับ -> บันเดิล
+#        ยกกฎมาจากเครื่องมือเดิม (parse_source_sheet ใน tr_studio.py) ทั้งดุ้น
+#
+#        หัวตาราง = แถวที่มีคำว่า fdItemNum
+#        Aztek Item Id = คอลัมน์ "ตัวเลขที่ไม่มีหัวตาราง" ที่อยู่ในบล็อกเดียวกัน
+#                        (เลขซ้ายมือของตาราง — ตัวที่เอาไปค้นบนเว็บ)
+#        เลข Bundle    = เลขในคอลัมน์เดียวกันนั้น ที่อยู่เหนือหัวตาราง 1-2 แถว
+#        ชื่อบันเดิล    = Product Name > แถวหัวข้อเดี่ยวๆ > หัวคอลัมน์ Id > ชื่อชีท#n
+#        จำนวน         = Amt / Amount / จำนวน
+#        Tier          = Rank / ยศ / Tier
+#        famepoint/exp = กล่อง "ได้รับ famepoint กับ exp" เหนือหัวตาราง
+# ============================================================================
+_SRC_TIER = {t.lower(): t for t in TIERS}
+_SRC_STOP = {'start', 'end', 'limit', 'reset', 'category', 'product name', 'bundle',
+             'date', 'announce', 'channel', 'detail', 'reward', 'fditemnum'}
+_SRC_KNOWN = ('fditemnum', 'fdposition', 'fditemkind', 'rank', 'display name', 'item des',
+              'status', 'ระยะเวลา', 'ของขวัญ', 'amount', 'amt', 'จำนวน', 'ราคา', 'price',
+              'thb', 'รวม', 'duration')
+
+
+def src_int(v):
+    """อ่านจำนวนเต็มจากเซลล์ ('2074' / 2074.0 -> '2074') ไม่ใช่ตัวเลข -> None"""
+    s = ('' if v is None else str(v)).strip()
+    m = re.fullmatch(r'(\d+)(?:\.0+)?', s)
+    return m.group(1) if m else None
+
+
+def bundle_rewards(rows, hr):
+    """จับกล่อง 'ได้รับ famepoint กับ exp' ที่อยู่เหนือหัวตาราง
+    famepoint -> Credit (ต้องตั้งเป็นเครดิตเรียลไทม์)  ·  exp -> Player Experience
+    ค่าจำนวน: หาจากเซลล์ทางขวา ถ้าไม่มีก็ดูเซลล์ด้านล่างคอลัมน์เดียวกัน"""
+    region = rows[max(0, hr - 8):hr]
+    out = []
+    seen = set()
+    for ri, row in enumerate(region):
+        cs = [('' if c is None else str(c)).strip() for c in (row or [])]
+        for j, c in enumerate(cs):
+            cl = c.lower()
+            if 'fame' not in cl:
+                continue
+            val = None
+            for k in range(j + 1, len(cs)):
+                num = re.sub(r'[, ]', '', cs[k])
+                if re.fullmatch(r'\d+(\.\d+)?', num):
+                    val = re.sub(r'\.0+$', '', num)
+                    break
+            if val is None and ri + 1 < len(region):
+                below = region[ri + 1] or []
+                bc = ('' if j >= len(below) or below[j] is None else str(below[j])).strip()
+                num = re.sub(r'[, ]', '', bc)
+                if re.fullmatch(r'\d+(\.\d+)?', num):
+                    val = re.sub(r'\.0+$', '', num)
+            if not val:
+                continue
+            if 'credit' not in seen:
+                out.append({'type': 'CREDIT', 'value': FAME_NAME, 'qty': val})
+                seen.add('credit')
+            if 'exp' in cl and 'exp' not in seen:
+                out.append({'type': 'PLAYER_EXP', 'value': 'Player Experience', 'qty': val})
+                seen.add('exp')
+    return out
+
+
+def parse_bundle_sheet(rows, sheet_name):
+    """คืน (bundles, warnings) — แต่ละ bundle พร้อมเอาไปกรอกหน้าเว็บได้เลย"""
+    bundles = []
+    warns = []
+    hdr = [i for i, row in enumerate(rows)
+           if any('fditemnum' in str(c).lower() for c in (row or []))]
+    for bi, hr in enumerate(hdr):
+        header = [('' if c is None else str(c)).strip() for c in rows[hr]]
+        low = [h.lower() for h in header]
+
+        def col(preds, _low=low):
+            for j, h in enumerate(_low):
+                if any(pr(h) for pr in preds):
+                    return j
+            return None
+        kindc = col([lambda h: 'fditemnum' in h])
+        rankc = col([lambda h: h == 'rank', lambda h: h == 'ยศ', lambda h: h == 'tier'])
+        amtc = col([lambda h: h == 'amount', lambda h: h == 'amt', lambda h: h == 'จำนวน'])
+        posc = col([lambda h: 'fdposition' in h])
+        ikc = col([lambda h: 'fditemkind' in h])
+        namec = col([lambda h: 'display name' in h, lambda h: h == 'name'])
+
+        end = hdr[bi + 1] if bi + 1 < len(hdr) else len(rows)
+        drows = []
+        for r in range(hr + 1, end):
+            if kindc is None:
+                break
+            row = rows[r] or []
+            kv = src_int(row[kindc]) if kindc < len(row) else None
+            if kv is None:
+                if drows:
+                    break
+                continue
+            drows.append(r)
+        if not drows:
+            continue
+
+        # คอลัมน์ Aztek Item Id = คอลัมน์ตัวเลขที่ "ไม่มีหัวตารางที่รู้จัก"
+        labeled = set(j for j, h in enumerate(low) if any(k in h for k in _SRC_KNOWN))
+        for c in (kindc, posc, ikc, amtc, rankc, namec):
+            if c is not None:
+                labeled.add(c)
+        ncols = max(len(rows[r] or []) for r in drows)
+        cand = [c for c in range(ncols) if c not in labeled and
+                sum(1 for r in drows
+                    if c < len(rows[r] or []) and src_int((rows[r] or [])[c]) is not None)
+                >= max(1, int(len(drows) * 0.6))]
+
+        # เลข Bundle: ดูแค่ 1-2 แถวเหนือหัวตาราง (กันไปหยิบเลขของบล็อกก่อนหน้า)
+        idcol = bid = None
+        above = hdr[bi - 1] + 1 if bi > 0 else 0
+        bid_top = max(hr - 2, above)
+        for c in cand:
+            for r in range(hr - 1, bid_top - 1, -1):
+                row = rows[r] or []
+                b = src_int(row[c]) if c < len(row) else None
+                if b is not None:
+                    idcol, bid = c, b
+                    break
+            if idcol is not None:
+                break
+        if idcol is None and cand:
+            idcol = cand[0]
+        if idcol is None:
+            warns.append('%s บล็อก %d: หาคอลัมน์ Aztek Item Id ไม่เจอ -> ข้าม'
+                         % (sheet_name, bi + 1))
+            continue
+
+        # ชื่อบันเดิล
+        name = None
+        for r in range(hr - 1, max(hr - 14, 0) - 1, -1):
+            rl = [('' if c is None else str(c)).strip() for c in (rows[r] or [])]
+            for j, cell in enumerate(rl):
+                if 'product name' in cell.lower():
+                    for k in range(j + 1, len(rl)):
+                        if rl[k]:
+                            name = rl[k]
+                            break
+                    break
+            if name:
+                break
+        if not name:
+            for r in range(hr - 1, max(hr - 4, 0) - 1, -1):
+                texts = [('' if c is None else str(c)).strip() for c in (rows[r] or [])]
+                nz = [t for t in texts if t and src_int(t) is None]
+                if len(nz) == 1 and nz[0].lower() not in _SRC_STOP:
+                    name = nz[0]
+                    break
+        if not name:
+            h0 = header[idcol] if idcol < len(header) else ''
+            if h0 and src_int(h0) is None and h0.lower() not in _SRC_STOP:
+                name = h0
+        if not name:
+            name = '%s #%d' % (sheet_name, bi + 1)
+
+        items = []
+        for r in drows:
+            row = rows[r] or []
+            iid = src_int(row[idcol]) if idcol < len(row) else None
+            disp = ''
+            if namec is not None and namec < len(row):
+                disp = ('' if row[namec] is None else str(row[namec])).strip()
+            if iid is None:
+                warns.append('%s "%s" แถว %d: ไม่มี Aztek Item Id -> ข้าม'
+                             % (sheet_name, name, r + 1))
+                continue
+            qty = (src_int(row[amtc]) if (amtc is not None and amtc < len(row)) else None) or '1'
+            tier = DEFAULT_TIER
+            if rankc is not None and rankc < len(row):
+                rv = ('' if row[rankc] is None else str(row[rankc])).strip()
+                t = _SRC_TIER.get(rv.lower())
+                if t:
+                    tier = t
+                elif rv and rv != '-':
+                    warns.append('%s "%s" แถว %d: Rank "%s" ไม่รู้จัก -> %s'
+                                 % (sheet_name, name, r + 1, rv, DEFAULT_TIER))
+            items.append({'id': iid, 'qty': qty, 'tier': tier, 'disp': disp})
+        if items:
+            bundles.append({'name': name, 'type': DEFAULT_BUNDLE_TYPE, 'deliver': True,
+                            'items': items, 'rewards': bundle_rewards(rows, hr),
+                            'sheet': sheet_name, 'src_bundle_id': bid})
+    return bundles, warns
+
+
+def scan_bundle_sheets_wb(wb, progress=None):
+    """คืน list ของ (ชื่อชีท, จำนวนบันเดิลที่เจอ)"""
+    out = []
+    names = wb.sheetnames
+    for i, s in enumerate(names, 1):
+        if progress:
+            progress(i, len(names), s)
+        try:
+            rows = [list(r) if r else [] for r in
+                    wb[s].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True)]
+            b, _ = parse_bundle_sheet(rows, s)
+        except Exception:
+            b = []
+        out.append((s, len(b)))
+    return out
+
+
+def read_bundles_wb(wb, sheet):
+    rows = [list(r) if r else [] for r in
+            wb[sheet].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True)]
+    return parse_bundle_sheet(rows, sheet)
 
 # ============================================================================
 #  [5.5] หน้าต่างนำเข้า Excel — เลือกชีท แล้วอ่านให้อัตโนมัติ
@@ -1383,6 +1760,291 @@ class ImportDialog:
 
 
 # ============================================================================
+#  [5.9] หน้าต่างนำเข้าบันเดิลจากไฟล์ต้นฉบับ — เลือกชีท แล้วดูว่าได้บันเดิลอะไรบ้าง
+# ============================================================================
+class BundleImportDialog:
+    def __init__(self, parent, path):
+        self.path = path
+        self.result = None
+        self.warns = []
+        self.sheets = []
+        self.bundles = []
+        self._pending = None
+
+        self.top = tk.Toplevel(parent)
+        self.top.title('นำเข้าบันเดิลจาก Excel')
+        self.top.configure(bg=C['bg'])
+        self.top.geometry('1010x660')
+        self.top.transient(parent)
+        self.top.grab_set()
+
+        head = tk.Frame(self.top, bg=C['card'], height=56)
+        head.pack(fill='x')
+        head.pack_propagate(False)
+        tk.Label(head, text='นำเข้าบันเดิลจาก Excel', bg=C['card'], fg=C['fg'],
+                 font=('Segoe UI', 13, 'bold')).pack(side='left', padx=18)
+        tk.Label(head, text=os.path.basename(path), bg=C['card'], fg=C['dim'],
+                 font=('Segoe UI', 9)).pack(side='left')
+
+        foot = tk.Frame(self.top, bg=C['card'], height=62)
+        foot.pack(fill='x', side='bottom')
+        foot.pack_propagate(False)
+        self.count_lbl = tk.Label(foot, text='', bg=C['card'], fg=C['dim'],
+                                  font=('Segoe UI', 10))
+        self.count_lbl.pack(side='left', padx=18)
+        self.ok_btn = tk.Button(foot, text='ใช้ข้อมูลนี้', bg=C['input'], fg=C['dim'], bd=0,
+                                font=('Segoe UI', 10, 'bold'), cursor='hand2',
+                                activebackground='#3d55cf', activeforeground='white',
+                                state='disabled', command=self._ok)
+        self.ok_btn.pack(side='right', padx=18, pady=12, ipadx=22, ipady=5)
+        tk.Button(foot, text='ยกเลิก', bg=C['input'], fg=C['fg'], bd=0,
+                  font=('Segoe UI', 10), cursor='hand2', activebackground=C['line'],
+                  command=self._cancel).pack(side='right', pady=12, ipadx=16, ipady=5)
+
+        body = tk.Frame(self.top, bg=C['bg'])
+        body.pack(fill='both', expand=True, padx=14, pady=12)
+
+        left = tk.Frame(body, bg=C['bg'], width=280)
+        left.pack(side='left', fill='y')
+        left.pack_propagate(False)
+        tk.Label(left, text='เลือกชีท', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9, 'bold')).pack(anchor='w')
+        lw = tk.Frame(left, bg=C['bg'])
+        lw.pack(fill='both', expand=True, pady=(5, 0))
+        self.lb = tk.Listbox(lw, bg=C['input'], fg=C['fg'], bd=0, highlightthickness=1,
+                             highlightbackground=C['line'], selectbackground=C['accent'],
+                             selectforeground='white', font=('Segoe UI', 9),
+                             activestyle='none', selectmode='multiple')
+        sb = ttk.Scrollbar(lw, orient='vertical', command=self.lb.yview)
+        self.lb.configure(yscrollcommand=sb.set)
+        self.lb.pack(side='left', fill='both', expand=True)
+        sb.pack(side='right', fill='y')
+        self.lb.bind('<<ListboxSelect>>', lambda e: self._on_sheet())
+        self.sel_lbl = tk.Label(left, text='ยังไม่ได้เลือกชีท', bg=C['bg'], fg=C['dim'],
+                                font=('Segoe UI', 9, 'bold'), anchor='w')
+        self.sel_lbl.pack(fill='x', pady=(8, 2))
+        bf = tk.Frame(left, bg=C['bg'])
+        bf.pack(fill='x')
+        for txt, cmd in (('เลือกชีทที่มีบันเดิลทั้งหมด', self._pick_all),
+                         ('ล้างที่เลือก', self._pick_none)):
+            tk.Button(bf, text=txt, bg=C['input'], fg=C['fg'], bd=0, font=('Segoe UI', 9),
+                      cursor='hand2', activebackground=C['line'], command=cmd).pack(
+                side='left', padx=(0, 6), ipadx=6, ipady=3)
+        tk.Label(left, text='คลิกชีทเพื่อเลือก คลิกซ้ำเพื่อเอาออก — เลือกได้หลายชีท',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w',
+                 justify='left', wraplength=265).pack(fill='x', pady=(8, 0))
+
+        right = tk.Frame(body, bg=C['bg'])
+        right.pack(side='left', fill='both', expand=True, padx=(14, 0))
+        self.info = tk.Label(right, text='กำลังสแกนไฟล์…', bg=C['bg'], fg=C['dim'],
+                             font=('Segoe UI', 9), anchor='w', justify='left')
+        self.info.pack(fill='x')
+        tk.Label(right, text='อ่านให้อัตโนมัติ — Aztek Item Id เอาจากเลขซ้ายมือของตาราง · '
+                             'จำนวนเอาจาก Amt/Amount · Tier เอาจาก Rank · '
+                             'famepoint/exp เอาจากกล่อง “ได้รับ famepoint กับ exp”',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), wraplength=690,
+                 justify='left', anchor='w').pack(fill='x', pady=(6, 0))
+        self.warn_lbl = tk.Label(right, text='', bg=C['bg'], fg=C['warn'],
+                                 font=('Segoe UI', 9), anchor='w', justify='left',
+                                 wraplength=690)
+        self.warn_lbl.pack(fill='x', pady=(6, 0))
+
+        tk.Label(right, text='บันเดิลที่เจอ', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(10, 4))
+        pv = tk.Frame(right, bg=C['bg'])
+        pv.pack(fill='both', expand=True)
+        self.tree = ttk.Treeview(pv, columns=('qty', 'tier', 'info'), show='tree headings',
+                                 style='TR.Treeview', height=13)
+        self.tree.heading('#0', text='บันเดิล / ไอเทม')
+        self.tree.column('#0', width=330, anchor='w')
+        for c, t, w in (('qty', 'จำนวน', 70), ('tier', 'Tier', 70), ('info', 'รายละเอียด', 220)):
+            self.tree.heading(c, text=t)
+            self.tree.column(c, width=w, anchor='w')
+        self.tree.tag_configure('rw', foreground=C['ok'])
+        tsb = ttk.Scrollbar(pv, orient='vertical', command=self.tree.yview)
+        self.tree.configure(yscrollcommand=tsb.set)
+        self.tree.pack(side='left', fill='both', expand=True)
+        tsb.pack(side='right', fill='y')
+
+        self.top.protocol('WM_DELETE_WINDOW', self._cancel)
+        self.wb = None
+        self.cache = {}
+        self.lock = threading.Lock()
+        self.q = queue.Queue()
+        self.inflight = set()
+        threading.Thread(target=self._scan, daemon=True).start()
+        self.top.after(80, self._pump)
+        parent.wait_window(self.top)
+
+    def _pump(self):
+        try:
+            while True:
+                msg = self.q.get_nowait()
+                if msg[0] == 'info':
+                    self.info.config(text=msg[1])
+                elif msg[0] == 'sheets':
+                    self.sheets = msg[1]
+                    self._fill()
+                elif msg[0] == 'rows':
+                    key, bs, ws, note = msg[1], msg[2], msg[3], msg[4]
+                    self.cache[key] = (bs, ws, note)
+                    self.inflight.discard(key)
+                    if self._key() == key:
+                        self._show(bs, ws, note)
+        except queue.Empty:
+            pass
+        except Exception:
+            pass
+        try:
+            self.top.after(80, self._pump)
+        except Exception:
+            pass
+
+    def _scan(self):
+        try:
+            with self.lock:
+                self.q.put(('info', 'กำลังเปิดไฟล์…'))
+                self.wb = open_workbook(self.path)
+                sheets = scan_bundle_sheets_wb(
+                    self.wb, progress=lambda k, n, nm: self.q.put(
+                        ('info', 'กำลังสแกน… %d/%d   %s' % (k, n, nm))))
+        except Exception as ex:
+            self.q.put(('info', 'อ่านไฟล์ไม่ได้: ' + str(ex)))
+            return
+        self.q.put(('sheets', sheets))
+
+    def _fill(self):
+        self.lb.delete(0, tk.END)
+        first = None
+        for i, (name, n) in enumerate(self.sheets):
+            self.lb.insert(tk.END, ('★ (%d)  ' % n if n else '     ') + name)
+            if n and first is None:
+                first = i
+        hits = sum(1 for _, n in self.sheets if n)
+        self.info.config(text='ไฟล์นี้มี %d ชีท · พบบันเดิลใน %d ชีท · เลือกชีททางซ้าย'
+                              % (len(self.sheets), hits))
+        if first is not None:
+            self.lb.see(first)
+        self._on_sheet()
+
+    def _selected(self):
+        return [self.sheets[i][0] for i in self.lb.curselection()
+                if 0 <= i < len(self.sheets)]
+
+    def _key(self):
+        return '\x00'.join(self._selected())
+
+    def _pick_all(self):
+        self.lb.selection_clear(0, tk.END)
+        for i, (_, n) in enumerate(self.sheets):
+            if n:
+                self.lb.selection_set(i)
+        self._on_sheet()
+
+    def _pick_none(self):
+        self.lb.selection_clear(0, tk.END)
+        self._on_sheet()
+
+    def _on_sheet(self):
+        names = self._selected()
+        if not names:
+            self.sel_lbl.config(text='ยังไม่ได้เลือกชีท', fg=C['dim'])
+        else:
+            show = ', '.join(names[:4]) + (' …อีก %d' % (len(names) - 4)
+                                           if len(names) > 4 else '')
+            self.sel_lbl.config(text='เลือกไว้ %d ชีท: %s' % (len(names), show), fg=C['fg'])
+        if self._pending is not None:
+            try:
+                self.top.after_cancel(self._pending)
+            except Exception:
+                pass
+        self._pending = self.top.after(300, self._request)
+
+    def _request(self):
+        self._pending = None
+        key = self._key()
+        if not key:
+            self._clear()
+            self.info.config(text='เลือกชีทอย่างน้อยหนึ่งชีท')
+            return
+        if key in self.cache:
+            self._show(*self.cache[key])
+            return
+        self._clear()
+        names = self._selected()
+        self.info.config(text='กำลังอ่าน %d ชีท…' % len(names))
+        if key in self.inflight:
+            return
+        self.inflight.add(key)
+        threading.Thread(target=self._work, args=(key, names), daemon=True).start()
+
+    def _work(self, key, names):
+        bs, ws = [], []
+        try:
+            with self.lock:
+                for nm in names:
+                    b, w = read_bundles_wb(self.wb, nm)
+                    bs.extend(b)
+                    ws.extend(w)
+        except Exception as ex:
+            self.q.put(('info', 'อ่านไม่ได้: ' + str(ex)))
+        note = ('ชีท “%s”' % names[0]) if len(names) == 1 else ('รวม %d ชีท' % len(names))
+        self.q.put(('rows', key, bs, ws, note))
+
+    def _clear(self):
+        self.bundles = []
+        self.warns = []
+        self.tree.delete(*self.tree.get_children())
+        self.count_lbl.config(text='')
+        self.warn_lbl.config(text='')
+        self.ok_btn.config(state='disabled', bg=C['input'], fg=C['dim'])
+
+    def _show(self, bs, ws, note):
+        self.bundles = bs
+        self.warns = ws
+        self.tree.delete(*self.tree.get_children())
+        for b in bs:
+            rw = ' · '.join(('famepoint' if r['type'] == 'CREDIT' else 'exp') + ' ' + r['qty']
+                            for r in b.get('rewards', []))
+            pid = self.tree.insert('', 'end', text='📦  ' + b['name'], open=True,
+                                   values=('', '', '%d ไอเทม%s' % (len(b['items']),
+                                                                   ('  ·  ' + rw) if rw else '')))
+            for it in b['items']:
+                self.tree.insert(pid, 'end', text='      ' + (it.get('disp') or ''),
+                                 values=(it['qty'], it['tier'], 'Id ' + it['id']))
+            for r in b.get('rewards', []):
+                nm = FAME_NAME if r['type'] == 'CREDIT' else 'Player Experience'
+                self.tree.insert(pid, 'end', text='      ⭐ ' + nm, tags=('rw',),
+                                 values=(r['qty'], DEFAULT_TIER,
+                                         'เครดิตเรียลไทม์' if r['type'] == 'CREDIT' else 'exp'))
+        self.info.config(text='%s · พบ %d บันเดิล' % (note, len(bs)))
+        self.warn_lbl.config(text=('⚠  %d จุดที่ต้องดู เช่น %s' % (len(ws), ws[0][:90]))
+                             if ws else '')
+        self.count_lbl.config(text='จะนำเข้า %d บันเดิล' % len(bs) if bs else '')
+        self.ok_btn.config(state='normal' if bs else 'disabled',
+                           bg=C['accent'] if bs else C['input'],
+                           fg='white' if bs else C['dim'])
+
+    def _close(self):
+        try:
+            if self.wb:
+                self.wb.close()
+        except Exception:
+            pass
+        self.wb = None
+
+    def _ok(self):
+        self.result = list(self.bundles)
+        self._close()
+        self.top.destroy()
+
+    def _cancel(self):
+        self.result = None
+        self._close()
+        self.top.destroy()
+
+
+# ============================================================================
 #  [5.6] ระบบตรวจสอบตัวเอง (Self Test)
 #        แบ่งเป็น 2 ชุด
 #          A. ตรวจตรรกะ  — ไม่ต้องเปิดเว็บ เช็กว่ากฎการอ่านชีทยังถูกต้อง
@@ -1530,6 +2192,40 @@ def run_logic_tests():
     junk[3]['kind'] = '128110'
     r.append(_t(mark_suspects(junk) == 0,
                 'แก้ ItemKind แล้วคำเตือนหายเอง'))
+
+    # ---- กติกาหน้า "สร้างบันเดิล" ----
+    brows = [
+        ['', '', 'ได้รับ famepoint กับ exp'],
+        ['', '', '99'],
+        ['', 'Product Name', 'แพ็กเกจทดสอบ (Gift)'],
+        ['2800', 'fdItemNum', 'fdPosition', 'fdItemKind', 'Name', 'Rank', 'Amount'],
+        ['2074', '89369', '2', '5', 'ฮันบก ซ่อมแซม', 'A', '1'],
+        ['2077', '110256', '121', '52', 'เสียงรีเมค 30 วัน', 'General', '2'],
+    ]
+    bb, _bw = parse_bundle_sheet(brows, 'ทดสอบ')
+    r.append(_t(len(bb) == 1, 'บันเดิล: อ่านบล็อกจากชีทได้', '%d บันเดิล' % len(bb)))
+    if bb:
+        b0 = bb[0]
+        r.append(_t([i['id'] for i in b0['items']] == ['2074', '2077'],
+                    'บันเดิล: Aztek Item Id เอาจากเลขซ้ายมือของตาราง',
+                    str([i['id'] for i in b0['items']]),
+                    'เลขนี้คือตัวที่เอาไปค้นบนเว็บ'))
+        r.append(_t([i['qty'] for i in b0['items']] == ['1', '2'],
+                    'บันเดิล: จำนวนเอาจากคอลัมน์ Amount/Amt',
+                    str([i['qty'] for i in b0['items']])))
+        r.append(_t([i['tier'] for i in b0['items']] == ['A', 'General'],
+                    'บันเดิล: Tier เอาจากคอลัมน์ Rank',
+                    str([i['tier'] for i in b0['items']])))
+        r.append(_t(b0['name'] == 'แพ็กเกจทดสอบ (Gift)',
+                    'บันเดิล: ชื่อเอาจาก Product Name', b0['name']))
+        fame = [x for x in b0['rewards'] if x['type'] == 'CREDIT']
+        exp = [x for x in b0['rewards'] if x['type'] == 'PLAYER_EXP']
+        r.append(_t(bool(fame) and fame[0]['qty'] == '99' and bool(exp) and exp[0]['qty'] == '99',
+                    'บันเดิล: อ่าน famepoint กับ exp จากกล่องด้านบน',
+                    str(b0['rewards'])))
+    r.append(_t(FAME_CREDIT_TYPE == 'WALLET_REALTIME_CREDIT',
+                'บันเดิล: famepoint ตั้งเป็นเครดิตเรียลไทม์', FAME_CREDIT_LABEL,
+                'ถ้าเป็นเครดิตธรรมดาจะผิด'))
 
     # ---- สภาพแวดล้อม ----
     r.append(_t(XLSX_OK, 'อ่านไฟล์ Excel ได้ (openpyxl)', 'ok' if XLSX_OK else 'ไม่มี openpyxl'))
@@ -1704,17 +2400,20 @@ class App:
 
         self.tab_search = tk.Frame(self.nb, bg=C['bg'])
         self.tab_create = tk.Frame(self.nb, bg=C['bg'])
+        self.tab_bundle = tk.Frame(self.nb, bg=C['bg'])
         self.tab_result = tk.Frame(self.nb, bg=C['bg'])
         self.tab_log = tk.Frame(self.nb, bg=C['bg'])
         self.tab_check = tk.Frame(self.nb, bg=C['bg'])
         self.nb.add(self.tab_search, text='🔍  ค้นหา')
         self.nb.add(self.tab_create, text='➕  สร้าง Item')
+        self.nb.add(self.tab_bundle, text='📦  สร้าง Bundle')
         self.nb.add(self.tab_result, text='📋  ผลลัพธ์')
         self.nb.add(self.tab_log, text='📜  Log')
         self.nb.add(self.tab_check, text='🩺  ตรวจระบบ')
 
         self._build_search()
         self._build_create()
+        self._build_bundle()
         self._build_result()
         self._build_log()
         self._build_check()
@@ -2346,6 +3045,604 @@ class App:
             except Exception:
                 continue
         self.log(f'   ! เลือกประเภทไอเทม “{value}” ไม่ได้', 'WARN')
+        return False
+
+    # ========================================================================
+    #  แท็บ "สร้าง Bundle"
+    #  โยนไฟล์ต้นฉบับเข้าไป -> ได้บันเดิลพร้อมไอเทมข้างใน -> ติ๊กเลือกอันที่จะสร้าง
+    # ========================================================================
+    def _build_bundle(self):
+        p = self.tab_bundle
+        self.bq = []                 # บันเดิลทั้งหมดที่นำเข้ามา
+        self.b_running = False
+        self.b_cancel = False
+        self._b_rowmap = {}          # iid ของ treeview -> ('b', i) หรือ ('i', i, j)
+
+        s1 = self._card(p, 'นำเข้าจากไฟล์ต้นฉบับ')
+        bar = tk.Frame(s1, bg=C['bg'])
+        bar.pack(fill='x')
+        self._btn(bar, '📂  นำเข้าไฟล์ต้นฉบับ (.xlsx)', self.b_import,
+                  primary=True).pack(side='left', ipadx=10, ipady=4)
+        self._btn(bar, '✔  เลือกทั้งหมด', lambda: self._b_all(True)).pack(
+            side='left', padx=(8, 0), ipadx=8, ipady=4)
+        self._btn(bar, '✗  ไม่เลือกเลย', lambda: self._b_all(False)).pack(
+            side='left', padx=(8, 0), ipadx=8, ipady=4)
+        self._btn(bar, '🗑  ล้าง', self.b_clear).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
+        self.b_count = tk.Label(bar, text='ยังไม่ได้นำเข้า', bg=C['bg'], fg=C['dim'], font=FM)
+        self.b_count.pack(side='right')
+        tk.Label(s1, text='คลิกช่อง “ใช้” เพื่อเลือก/ไม่เลือกบันเดิล · ดับเบิลคลิกเพื่อแก้ '
+                          '(ชื่อบันเดิล / จำนวน / Tier / famepoint / exp)',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(
+            fill='x', pady=(8, 0))
+
+        s2 = self._card(p, 'บันเดิลที่จะสร้าง')
+        tw = tk.Frame(s2, bg=C['bg'])
+        tw.pack(fill='both', expand=True)
+        cols = ('use', 'qty', 'tier', 'info')
+        self.b_tree = ttk.Treeview(tw, columns=cols, show='tree headings',
+                                   style='TR.Treeview', height=9)
+        self.b_tree.heading('#0', text='บันเดิล / ไอเทมข้างใน')
+        self.b_tree.column('#0', width=420, anchor='w')
+        for c, t, w in (('use', 'ใช้', 44), ('qty', 'จำนวน', 70),
+                        ('tier', 'Tier', 80), ('info', 'รายละเอียด', 300)):
+            self.b_tree.heading(c, text=t)
+            self.b_tree.column(c, width=w, anchor='w')
+        self.b_tree.tag_configure('off', foreground=C['dim'])
+        self.b_tree.tag_configure('rw', foreground=C['ok'])
+        bsb = ttk.Scrollbar(tw, orient='vertical', command=self.b_tree.yview)
+        self.b_tree.configure(yscrollcommand=bsb.set)
+        self.b_tree.pack(side='left', fill='both', expand=True)
+        bsb.pack(side='right', fill='y')
+        self.b_tree.bind('<Button-1>', self._b_click)
+        self.b_tree.bind('<Double-1>', lambda e: self.b_edit())
+
+        s3 = self._card(p, 'ลงมือสร้าง')
+        self.bv_do = tk.BooleanVar(value=False)
+        tk.Checkbutton(s3, variable=self.bv_do, command=self._b_do_changed,
+                       text='กดปุ่ม “สร้าง Bundle” จริง', bg=C['bg'], fg=C['fg'],
+                       selectcolor=C['input'], activebackground=C['bg'],
+                       activeforeground=C['fg'], font=FB, bd=0,
+                       highlightthickness=0).grid(row=0, column=0, sticky='w')
+        self.b_mode = tk.Label(s3, text='', bg=C['bg'], fg=C['warn'], font=FM)
+        self.b_mode.grid(row=0, column=1, sticky='w', padx=(10, 0))
+
+        self.bv_hold = tk.StringVar(value=self.prefs.get('b_hold', '4'))
+        tk.Label(s3, text='โหมดทดสอบ: กรอกเสร็จแล้วค้างหน้าไว้ให้ดู (วินาที)',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9)).grid(
+            row=1, column=0, sticky='w', pady=(8, 0))
+        eh = self._entry(s3, width=6)
+        eh.config(textvariable=self.bv_hold)
+        eh.grid(row=1, column=1, sticky='w', padx=(10, 0), pady=(8, 0), ipady=3)
+
+        run = tk.Frame(s3, bg=C['bg'])
+        run.grid(row=2, column=0, columnspan=3, sticky='w', pady=(12, 0))
+        self.b_btn_run = self._btn(run, '▶  เริ่มทำงาน', self.b_start, primary=True)
+        self.b_btn_run.pack(side='left', ipadx=18, ipady=5)
+        self.b_btn_stop = self._btn(run, '■  ยกเลิก', self.b_stop)
+        self.b_btn_stop.config(state='disabled')
+        self.b_btn_stop.pack(side='left', padx=(8, 0), ipadx=12, ipady=5)
+
+        self._b_do_changed()
+        self._b_refresh()
+
+    def _b_do_changed(self):
+        if self.bv_do.get():
+            self.b_mode.config(text='⚠  จะสร้างบันเดิลจริงบนเว็บ', fg=C['err'])
+        else:
+            self.b_mode.config(text='โหมดทดสอบ — กรอกให้ดูเฉยๆ ไม่กดสร้าง', fg=C['ok'])
+
+    # ---------- ตาราง ----------
+    def _b_refresh(self):
+        self.b_tree.delete(*self.b_tree.get_children())
+        self._b_rowmap = {}
+        for i, b in enumerate(self.bq):
+            rw = []
+            for r in b.get('rewards', []):
+                rw.append(('famepoint' if r['type'] == 'CREDIT' else 'exp') + ' ' + str(r['qty']))
+            info = '%d ไอเทม' % len(b['items'])
+            if rw:
+                info += '  ·  ' + ' · '.join(rw)
+            if b.get('sheet'):
+                info += '  ·  ชีท ' + b['sheet']
+            on = b.get('use', True)
+            pid = self.b_tree.insert('', 'end', text='📦  ' + b['name'],
+                                     values=('✔' if on else '✗', '', '', info),
+                                     open=True, tags=() if on else ('off',))
+            self._b_rowmap[pid] = ('b', i)
+            for j, it in enumerate(b['items']):
+                cid = self.b_tree.insert(
+                    pid, 'end', text='      %d. %s' % (j + 1, it.get('disp') or ''),
+                    values=('', it['qty'], it['tier'], 'Aztek Item Id = ' + it['id']),
+                    tags=() if on else ('off',))
+                self._b_rowmap[cid] = ('i', i, j)
+            for r in b.get('rewards', []):
+                nm = FAME_NAME if r['type'] == 'CREDIT' else 'Player Experience'
+                extra = ('ประเภท: ' + FAME_CREDIT_LABEL) if r['type'] == 'CREDIT' else 'จากช่อง exp'
+                rid = self.b_tree.insert(pid, 'end', text='      ⭐ ' + nm,
+                                         values=('', r['qty'], DEFAULT_TIER, extra),
+                                         tags=('rw',) if on else ('off',))
+                self._b_rowmap[rid] = ('r', i, r['type'])
+        n = len(self.bq)
+        use = sum(1 for b in self.bq if b.get('use', True))
+        self.b_count.config(text=('ยังไม่ได้นำเข้า' if not n
+                                  else 'ทั้งหมด %d บันเดิล · จะสร้าง %d' % (n, use)))
+
+    def _b_click(self, ev):
+        """คลิกที่ช่อง "ใช้" ของแถวบันเดิล = สลับเลือก/ไม่เลือก"""
+        if self.b_running:
+            return
+        if self.b_tree.identify_region(ev.x, ev.y) != 'cell':
+            return
+        if self.b_tree.identify_column(ev.x) != '#1':
+            return
+        row = self.b_tree.identify_row(ev.y)
+        m = self._b_rowmap.get(row)
+        if not m or m[0] != 'b':
+            return
+        b = self.bq[m[1]]
+        b['use'] = not b.get('use', True)
+        self._b_refresh()
+
+    def _b_all(self, on):
+        for b in self.bq:
+            b['use'] = on
+        self._b_refresh()
+
+    def b_clear(self):
+        if self.b_running or not self.bq:
+            return
+        if messagebox.askyesno('ล้าง', 'ลบบันเดิลทั้งหมด %d อันออกจากรายการ?' % len(self.bq)):
+            self.bq = []
+            self._b_refresh()
+
+    # ---------- นำเข้า ----------
+    def b_import(self):
+        if self.b_running:
+            return
+        path = filedialog.askopenfilename(title='เลือกไฟล์ต้นฉบับ',
+                                          filetypes=[('Excel', '*.xlsx *.xlsm'), ('ทุกไฟล์', '*.*')])
+        if not path:
+            return
+        dlg = BundleImportDialog(self.root, path)
+        if not dlg.result:
+            return
+        for b in dlg.result:
+            b['use'] = True
+            self.bq.append(b)
+        self._b_refresh()
+        self.log('นำเข้าบันเดิล %d อัน (รวม %d)' % (len(dlg.result), len(self.bq)), 'OK')
+        for w in (dlg.warns or [])[:20]:
+            self.log('  ⚠ ' + w, 'WARN')
+        log_event('bundle_import', count=len(dlg.result), total=len(self.bq),
+                  file=os.path.basename(path))
+
+    # ---------- แก้ไข ----------
+    def b_edit(self):
+        if self.b_running:
+            return
+        sel = self.b_tree.selection()
+        if not sel:
+            return
+        m = self._b_rowmap.get(sel[0])
+        if not m:
+            return
+        if m[0] == 'b':
+            self._b_form_bundle(self.bq[m[1]])
+        elif m[0] == 'i':
+            self._b_form_item(self.bq[m[1]]['items'][m[2]])
+        else:
+            b = self.bq[m[1]]
+            for r in b['rewards']:
+                if r['type'] == m[2]:
+                    self._b_form_reward(r)
+                    break
+        self._b_refresh()
+
+    def _b_dialog(self, title, h=300):
+        top = tk.Toplevel(self.root)
+        top.title(title)
+        top.configure(bg=C['bg'])
+        top.transient(self.root)
+        top.grab_set()
+        try:
+            self.root.update_idletasks()
+            x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - 560) // 2)
+            y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - h) // 2)
+            top.geometry('560x%d+%d+%d' % (h, x, y))
+        except Exception:
+            top.geometry('560x%d' % h)
+        return top
+
+    def _b_form_bundle(self, b):
+        top = self._b_dialog('แก้ไขบันเดิล', 300)
+        body = tk.Frame(top, bg=C['bg'])
+        body.pack(fill='both', expand=True, padx=18, pady=14)
+        tk.Label(body, text='ชื่อบันเดิล', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9)).grid(row=0, column=0, sticky='w', pady=4)
+        v_name = tk.StringVar(value=b['name'])
+        e = self._entry(body, width=46)
+        e.config(textvariable=v_name)
+        e.grid(row=0, column=1, sticky='w', padx=(12, 0), ipady=3)
+
+        tk.Label(body, text='ประเภท Bundle', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9)).grid(row=1, column=0, sticky='w', pady=4)
+        v_type = ttk.Combobox(body, values=BUNDLE_TYPES, width=20, state='readonly', font=FM)
+        v_type.set(b.get('type', DEFAULT_BUNDLE_TYPE))
+        v_type.grid(row=1, column=1, sticky='w', padx=(12, 0))
+
+        v_del = tk.BooleanVar(value=bool(b.get('deliver', True)))
+        tk.Checkbutton(body, text=' ส่งทันที (Immediately Send)', variable=v_del,
+                       bg=C['bg'], fg=C['fg'], selectcolor=C['input'],
+                       activebackground=C['bg'], activeforeground=C['fg'], font=FM,
+                       bd=0, highlightthickness=0).grid(row=2, column=1, sticky='w',
+                                                        padx=(12, 0), pady=6)
+        ok = {'v': False}
+
+        def _save():
+            b['name'] = v_name.get().strip() or b['name']
+            b['type'] = v_type.get()
+            b['deliver'] = v_del.get()
+            ok['v'] = True
+            top.destroy()
+        foot = tk.Frame(top, bg=C['card'], height=58)
+        foot.pack(fill='x', side='bottom')
+        foot.pack_propagate(False)
+        self._btn(foot, 'บันทึก', _save, primary=True).pack(side='right', padx=18, pady=12,
+                                                            ipadx=20, ipady=4)
+        self._btn(foot, 'ยกเลิก', top.destroy).pack(side='right', pady=12, ipadx=14, ipady=4)
+        self.root.wait_window(top)
+
+    def _b_form_item(self, it):
+        top = self._b_dialog('แก้ไขไอเทมในบันเดิล', 290)
+        body = tk.Frame(top, bg=C['bg'])
+        body.pack(fill='both', expand=True, padx=18, pady=14)
+        vs = {}
+        for r, (lbl, key, w) in enumerate((('Aztek Item Id (เลขที่เอาไปค้น)', 'id', 18),
+                                           ('จำนวน (Quantity)', 'qty', 12))):
+            tk.Label(body, text=lbl, bg=C['bg'], fg=C['dim'],
+                     font=('Segoe UI', 9)).grid(row=r, column=0, sticky='w', pady=5)
+            v = tk.StringVar(value=str(it.get(key, '') or ''))
+            vs[key] = v
+            e = self._entry(body, width=w)
+            e.config(textvariable=v)
+            e.grid(row=r, column=1, sticky='w', padx=(12, 0), ipady=3)
+        tk.Label(body, text='Tier', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9)).grid(row=2, column=0, sticky='w', pady=5)
+        cb = ttk.Combobox(body, values=TIERS, width=12, state='readonly', font=FM)
+        cb.set(it.get('tier', DEFAULT_TIER))
+        cb.grid(row=2, column=1, sticky='w', padx=(12, 0))
+        tk.Label(body, text='ชื่อที่ชีทเขียนไว้: ' + (it.get('disp') or '—'),
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), wraplength=500,
+                 anchor='w', justify='left').grid(row=3, column=0, columnspan=2,
+                                                  sticky='w', pady=(10, 0))
+
+        def _save():
+            nid = vs['id'].get().strip()
+            if not nid.isdigit():
+                return messagebox.showwarning('ไม่ถูกต้อง', 'Aztek Item Id ต้องเป็นตัวเลข')
+            it['id'] = nid
+            it['qty'] = vs['qty'].get().strip() or '1'
+            it['tier'] = cb.get()
+            top.destroy()
+        foot = tk.Frame(top, bg=C['card'], height=58)
+        foot.pack(fill='x', side='bottom')
+        foot.pack_propagate(False)
+        self._btn(foot, 'บันทึก', _save, primary=True).pack(side='right', padx=18, pady=12,
+                                                            ipadx=20, ipady=4)
+        self._btn(foot, 'ยกเลิก', top.destroy).pack(side='right', pady=12, ipadx=14, ipady=4)
+        self.root.wait_window(top)
+
+    def _b_form_reward(self, r):
+        nm = FAME_NAME if r['type'] == 'CREDIT' else 'Player Experience'
+        top = self._b_dialog('แก้ไข ' + nm, 250)
+        body = tk.Frame(top, bg=C['bg'])
+        body.pack(fill='both', expand=True, padx=18, pady=14)
+        tk.Label(body, text='จำนวน', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9)).grid(row=0, column=0, sticky='w', pady=5)
+        v = tk.StringVar(value=str(r.get('qty', '')))
+        e = self._entry(body, width=14)
+        e.config(textvariable=v)
+        e.grid(row=0, column=1, sticky='w', padx=(12, 0), ipady=3)
+        note = ('บนเว็บจะตั้งประเภทเป็น “%s” ให้อัตโนมัติ' % FAME_CREDIT_LABEL
+                if r['type'] == 'CREDIT' else 'เพิ่มจากแท็บ Player Exp.')
+        tk.Label(body, text=note, bg=C['bg'], fg=C['warn'], font=('Segoe UI', 8),
+                 wraplength=500, anchor='w', justify='left').grid(
+            row=1, column=0, columnspan=2, sticky='w', pady=(10, 0))
+
+        def _save():
+            r['qty'] = v.get().strip() or r['qty']
+            top.destroy()
+        foot = tk.Frame(top, bg=C['card'], height=58)
+        foot.pack(fill='x', side='bottom')
+        foot.pack_propagate(False)
+        self._btn(foot, 'บันทึก', _save, primary=True).pack(side='right', padx=18, pady=12,
+                                                            ipadx=20, ipady=4)
+        self._btn(foot, 'ยกเลิก', top.destroy).pack(side='right', pady=12, ipadx=14, ipady=4)
+        self.root.wait_window(top)
+
+    # ---------- รัน ----------
+    def b_stop(self):
+        self.b_cancel = True
+        self.log('กำลังยกเลิกการสร้างบันเดิล...', 'WARN')
+
+    def b_start(self):
+        if self.b_running or self.running or getattr(self, 'c_running', False):
+            return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
+        use = [b for b in self.bq if b.get('use', True)]
+        if not use:
+            return messagebox.showwarning('ยังไม่ได้เลือก', 'ติ๊กเลือกบันเดิลที่จะสร้างก่อนนะ')
+        do = self.bv_do.get()
+        if do:
+            msg = 'จะสร้างบันเดิลจริงบนเว็บ %d อัน\n\n' % len(use)
+            msg += '\n'.join('  • %s (%d ไอเทม)' % (b['name'][:40], len(b['items']))
+                             for b in use[:8])
+            if len(use) > 8:
+                msg += '\n  … อีก %d อัน' % (len(use) - 8)
+            msg += '\n\nตรวจชื่อ/จำนวน/Tier เรียบร้อยแล้วใช่ไหม?'
+            if not messagebox.askyesno('ยืนยัน', msg):
+                return
+        self.prefs['b_hold'] = self.bv_hold.get().strip()
+        save_prefs(self.prefs)
+        self.b_running = True
+        self.b_cancel = False
+        self.b_btn_run.config(state='disabled')
+        self.b_btn_stop.config(state='normal')
+        self.nb.select(self.tab_log)
+        self.log('=' * 46, 'STEP')
+        self.log(('เริ่มสร้างบันเดิลจริง ' if do else 'เริ่มทดสอบกรอกบันเดิล ')
+                 + '%d อัน' % len(use), 'STEP')
+        log_event('bundle_start', count=len(use), commit=bool(do))
+        threading.Thread(target=self._b_thread, args=([dict(b) for b in use], do),
+                         daemon=True).start()
+
+    def _b_thread(self, rows, do):
+        try:
+            asyncio.run(self._b_work(rows, do))
+        except Exception as ex:
+            log_event('error', where='bundle', message=str(ex)[:300])
+            self.log('ผิดพลาด: ' + str(ex), 'ERR')
+            self.log(traceback.format_exc(), 'ERR')
+        finally:
+            self.b_running = False
+
+            def _rst():
+                self.b_btn_run.config(state='normal')
+                self.b_btn_stop.config(state='disabled')
+            self.root.after(0, _rst)
+
+    async def _b_work(self, bundles, do):
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch_persistent_context(**launch_kwargs(False))
+            page = browser.pages[0] if browser.pages else await browser.new_page()
+            try:
+                try:
+                    hold = max(0, int(float(self.bv_hold.get() or 0)))
+                except Exception:
+                    hold = 4
+                okc = errc = 0
+                for i, b in enumerate(bundles, 1):
+                    if self.b_cancel:
+                        self.log('ยกเลิกแล้ว', 'WARN')
+                        break
+                    self.set_progress(i - 1, len(bundles), b['name'][:30])
+                    self.log('[%d/%d] %s  (%d ไอเทม)'
+                             % (i, len(bundles), b['name'], len(b['items'])), 'STEP')
+                    try:
+                        if await self._b_one(page, b, do, hold):
+                            okc += 1
+                        else:
+                            errc += 1
+                    except Exception as ex:
+                        errc += 1
+                        self.log('   ✗ ' + str(ex)[:160], 'ERR')
+                        log_event('error', where='bundle_one', name=b['name'],
+                                  message=str(ex)[:200])
+                self.set_progress(len(bundles), len(bundles), 'เสร็จ')
+                self.log('จบ — สำเร็จ %d · ไม่ผ่าน %d' % (okc, errc),
+                         'OK' if not errc else 'WARN')
+                log_event('bundle_done', ok=okc, fail=errc, commit=bool(do))
+            finally:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+
+    async def _b_one(self, page, b, do, hold):
+        await page.goto(BUNDLE_CREATE_URL, wait_until='domcontentloaded', timeout=45000)
+        await page.wait_for_timeout(2500)
+        if any(k in page.url.lower() for k in ('login', 'signin', 'auth')):
+            self.log('   ✗ ยังไม่ได้ล็อกอิน — กด “เปิดหน้า Login” ด้านบนก่อน', 'ERR')
+            return False
+
+        # [1] ข้อมูลบันเดิล
+        r = await page.evaluate(JS_SET_BY_LABEL, [SEL_BUNDLE['name'], b['name']])
+        self.log('   · ชื่อ Bundle = %s%s' % (b['name'], '' if r == 'ok' else '  (ไม่เจอช่อง)'),
+                 'INFO' if r == 'ok' else 'WARN')
+        if b.get('type') and b['type'] != DEFAULT_BUNDLE_TYPE:
+            await self._b_pick(page, SEL_BUNDLE['type'], b['type'])
+
+        # [2] ไอเทม
+        added = 0
+        for it in b['items']:
+            if self.b_cancel:
+                break
+            if await self._b_add_item(page, it):
+                added += 1
+                await self._b_set_row(page, added, it['qty'], it['tier'])
+            else:
+                self.log('   ! เพิ่มไอเทม %s ไม่สำเร็จ' % it['id'], 'WARN')
+
+        # [3] famepoint / exp
+        for rw in b.get('rewards', []):
+            if self.b_cancel:
+                break
+            if rw['type'] == 'CREDIT':
+                if await self._b_add_wallet(page, SEL_BUNDLE['tab_credit'],
+                                            FAME_OPTION, rw['qty']):
+                    added += 1
+                    # สำคัญ: ต้องเปลี่ยนเป็นเครดิตเรียลไทม์ ไม่งั้นผิด
+                    await self._b_fix_fame(page, added)
+                    await self._b_set_row(page, added, rw['qty'], DEFAULT_TIER)
+            else:
+                if await self._b_add_wallet(page, SEL_BUNDLE['tab_exp'], None, rw['qty']):
+                    added += 1
+
+        self.log('   เพิ่มเข้าบันเดิลแล้ว %d รายการ' % added,
+                 'INFO' if added else 'WARN')
+
+        if not do:
+            self.log('   ✓ กรอกครบแล้ว (โหมดทดสอบ — ไม่กดสร้าง)', 'OK')
+            if hold:
+                await page.wait_for_timeout(hold * 1000)
+            return added > 0
+
+        btn = page.locator('button:has-text("%s")' % SEL_BUNDLE['submit']).last
+        if await btn.count() == 0:
+            self.log('   ✗ ไม่เจอปุ่ม “%s”' % SEL_BUNDLE['submit'], 'ERR')
+            return False
+        code = 0
+        try:
+            async with page.expect_response(
+                    lambda rr: rr.request.method in ('POST', 'PUT', 'PATCH')
+                    and 'bundle' in rr.url.lower(), timeout=25000) as ri:
+                await btn.click(timeout=10000)
+            code = (await ri.value).status
+        except Exception:
+            code = 0
+        await page.wait_for_timeout(1500)
+        good = (code == 0) or (200 <= code < 300)
+        self.log('   ' + ('✓ สร้างบันเดิลแล้ว' if good else '✗ เว็บตอบ HTTP %d' % code),
+                 'OK' if good else 'ERR')
+        log_event('bundle_create', name=b['name'], items=len(b['items']),
+                  ok=bool(good), http=code)
+        return good
+
+    # ---------- ชิ้นส่วนของหน้า bundle ----------
+    async def _b_tab(self, page, name):
+        try:
+            t = page.locator('button:has-text("%s"), [role="tab"]:has-text("%s")'
+                             % (name, name)).first
+            if await t.count() > 0:
+                await t.click(timeout=5000)
+                await page.wait_for_timeout(500)
+                return True
+        except Exception:
+            pass
+        return False
+
+    async def _b_add_item(self, page, it):
+        """แท็บ Item -> พิมพ์ Aztek Item Id -> กด + เพิ่ม"""
+        await self._b_tab(page, SEL_BUNDLE['tab_item'])
+        r = await page.evaluate(JS_BUNDLE_SEARCH, str(it['id']))
+        if r != 'ok':
+            self.log('   ! ไม่เจอช่องค้นหาในแท็บ Item', 'WARN')
+            return False
+        await page.wait_for_timeout(1400)
+        try:
+            add = page.locator('button:has-text("%s")' % SEL_BUNDLE['add_btn']).last
+            if await add.count() == 0:
+                return False
+            await add.click(timeout=6000)
+            await page.wait_for_timeout(900)
+            self.log('   · เพิ่มไอเทม %s (qty=%s tier=%s)' % (it['id'], it['qty'], it['tier']),
+                     'INFO')
+            return True
+        except Exception as ex:
+            self.log('   ! %s: %s' % (it['id'], str(ex)[:70]), 'WARN')
+            return False
+
+    async def _b_add_wallet(self, page, tab, option, qty):
+        """แท็บ Credit / Player Exp. -> เลือกจากดรอปดาวน์ -> ใส่จำนวน -> กด + เพิ่ม"""
+        if not await self._b_tab(page, tab):
+            self.log('   ! ไม่เจอแท็บ %s' % tab, 'WARN')
+            return False
+        try:
+            trig = page.locator('[role="combobox"], button:has-text("เลือก")').last
+            await trig.click(timeout=5000)
+            await page.wait_for_timeout(600)
+            if option:
+                box = page.locator('input[placeholder*="ค้นหา"]').last
+                if await box.count() > 0:
+                    await box.fill(option, timeout=4000)
+                    await page.wait_for_timeout(700)
+            opt = page.locator('[role="option"]').first
+            if await opt.count() == 0:
+                opt = page.locator('li, [data-value]').first
+            await opt.click(timeout=5000)
+            await page.wait_for_timeout(500)
+        except Exception as ex:
+            self.log('   ! เลือกใน %s ไม่ได้: %s' % (tab, str(ex)[:60]), 'WARN')
+            return False
+        await page.evaluate(JS_BUNDLE_WALLET_QTY, str(qty))
+        try:
+            add = page.locator('button:has-text("%s")' % SEL_BUNDLE['add_btn']).last
+            await add.click(timeout=6000)
+            await page.wait_for_timeout(900)
+            self.log('   · เพิ่ม %s จำนวน %s' % (tab, qty), 'INFO')
+            return True
+        except Exception:
+            return False
+
+    async def _b_fix_fame(self, page, idx):
+        """เปลี่ยนประเภทของ Fame Point เป็นเครดิตเรียลไทม์ (WALLET_REALTIME_CREDIT)"""
+        r = await page.evaluate(JS_BUNDLE_FAME_TYPE, [idx, FAME_CREDIT_TYPE])
+        if r == 'ok':
+            self.log('   · ตั้งประเภท Fame Point = %s' % FAME_CREDIT_LABEL, 'OK')
+            return True
+        # สำรอง: คลิกดรอปดาวน์ในการ์ดนั้นแล้วเลือกตัวเลือกที่มีคำว่า REALTIME
+        try:
+            trig = page.locator('[role="combobox"]').nth(idx - 1)
+            await trig.click(timeout=4000)
+            await page.wait_for_timeout(500)
+            opt = page.locator('[role="option"]:has-text("REALTIME")').first
+            if await opt.count() > 0:
+                await opt.click(timeout=4000)
+                self.log('   · ตั้งประเภท Fame Point = %s' % FAME_CREDIT_LABEL, 'OK')
+                return True
+        except Exception:
+            pass
+        self.log('   ⚠ เปลี่ยนประเภท Fame Point เป็นเครดิตเรียลไทม์ไม่สำเร็จ — '
+                 'ต้องแก้เองบนเว็บก่อนกดสร้าง', 'ERR')
+        return False
+
+    async def _b_set_row(self, page, idx, qty, tier):
+        """ตั้งจำนวน + Tier ของการ์ดใบที่ idx (นับจาก 1)"""
+        r = await page.evaluate(JS_BUNDLE_ROW_QTY, [idx, str(qty)])
+        if r != 'ok':
+            self.log('   ! ตั้งจำนวนการ์ดที่ %d ไม่ได้' % idx, 'WARN')
+        if not tier:
+            return
+        r2 = await page.evaluate(JS_BUNDLE_ROW_TIER, [idx, tier])
+        if r2 == 'ok':
+            return
+        try:
+            trig = page.locator('[role="combobox"]').nth(idx - 1)
+            await trig.click(timeout=3000)
+            await page.wait_for_timeout(400)
+            opt = page.locator('[role="option"]').filter(has_text=tier).first
+            if await opt.count() > 0:
+                await opt.click(timeout=3000)
+                return
+        except Exception:
+            pass
+        self.log('   ! ตั้ง Tier ของการ์ดที่ %d เป็น %s ไม่ได้' % (idx, tier), 'WARN')
+
+    async def _b_pick(self, page, label, value):
+        r = await page.evaluate(JS_PICK_TYPE, [value, label])
+        if r == 'ok':
+            self.log('   · %s = %s' % (label, value), 'INFO')
+            return True
+        try:
+            trig = page.locator('[role="combobox"]').first
+            await trig.click(timeout=4000)
+            await page.wait_for_timeout(400)
+            opt = page.locator('[role="option"]:has-text("%s")' % value).first
+            if await opt.count() > 0:
+                await opt.click(timeout=4000)
+                return True
+        except Exception:
+            pass
+        self.log('   ! ตั้ง %s = %s ไม่ได้' % (label, value), 'WARN')
         return False
 
     def _build_result(self):
