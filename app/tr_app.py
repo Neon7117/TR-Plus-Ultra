@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.7.2 : แก้ตั้ง Tier ในการ์ดไม่ได้ (ดรอปดาวน์เลื่อนผิดใบ)
+V0.7.3 : เลิกยึดตำแหน่ง/เวลาตายตัวในหน้าบันเดิล
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -86,6 +86,7 @@ TIERS = ['General', 'A', 'S', 'SS', 'SS+', 'SSS']
 DEFAULT_TIER = 'General'
 BUNDLE_TYPES = ['FIXED', 'CHOICE', 'RANDOM', 'GACHAPON', 'GACHAPON_LIMIT']
 DEFAULT_BUNDLE_TYPE = 'FIXED'
+BUNDLE_MAX_PAGES = 8      # ID สั้นๆ เจอผลหลายหน้า ไล่หาได้ถึงหน้านี้
 
 # famepoint ต้องเป็น "เครดิตเรียลไทม์" ไม่ใช่ "เครดิต" ธรรมดา (เว็บตั้งค่าเริ่มต้นเป็นแบบธรรมดา)
 FAME_CREDIT_TYPE = 'WALLET_REALTIME_CREDIT'
@@ -994,6 +995,179 @@ JS_BUNDLE_EXPAND = """
     if ((b.textContent || '').indexOf('ขยายทั้งหมด') >= 0) { b.click(); return 'ok'; }
   }
   return 'ไม่เจอปุ่มขยายทั้งหมด';
+}"""
+
+# --- ค้นหา/เลือกแถว: ไม่ยึดตำแหน่ง ไม่ยึดเวลา ---
+# เว็บโหลดผลช้าบ้างเร็วบ้าง และ ID สั้นๆ (เช่น 134) จะเจอผลเป็นร้อย กระจายหลายหน้า
+# เพราะงั้นต้อง "รอจนกว่าจะเจอแถวที่ ID ตรงจริงๆ" และเปิดหน้าถัดไปหาต่อได้
+JS_BUNDLE_ROW_STATE = """
+([id]) => {
+""" + _JS_BOX + """
+  function idAfter(t, key) {
+    const i = t.indexOf(key);
+    if (i < 0) return null;
+    let j = i + key.length, out = '';
+    while (j < t.length && t.charCodeAt(j) <= 32) j++;
+    while (j < t.length && t.charAt(j) >= '0' && t.charAt(j) <= '9') { out += t.charAt(j); j++; }
+    return out || null;
+  }
+  const box = addBox();
+  if (!box) return {state: 'nobox'};
+  const txt = box.textContent || '';
+  const loading = txt.indexOf('กำลังโหลด') >= 0;
+  let rows = 0, hit = false;
+  for (const el of box.querySelectorAll('div,li,tr')) {
+    const t = el.textContent || '';
+    if (t.indexOf('เพิ่ม') < 0) continue;
+    const got = idAfter(t, 'ID:');
+    if (got === null) continue;
+    rows++;
+    if (got === String(id)) hit = true;
+  }
+  return {state: loading ? 'loading' : 'ready', rows: rows, hit: hit};
+}"""
+
+# กดหน้าถัดไปของผลค้นหา (เฉพาะในกล่องเพิ่มของ)
+JS_BUNDLE_NEXT_PAGE = """
+() => {
+""" + _JS_BOX + """
+  const box = addBox();
+  if (!box) return 'nobox';
+  for (const b of box.querySelectorAll('button,[role="button"],a')) {
+    const t = (b.textContent || '').trim();
+    if (t !== 'ถัดไป' && t !== 'Next') continue;
+    if (b.disabled || b.getAttribute('aria-disabled') === 'true') return 'last';
+    if (!vis(b)) continue;
+    b.click();
+    return 'ok';
+  }
+  return 'nonext';
+}"""
+
+# --- การ์ดในรายการไอเท็ม: หาโดย "Item ID" ไม่ใช่ลำดับที่เท่าไหร่ ---
+# หน้าเว็บเปิด/ปิด/ย่อ/ขยายได้ ลำดับเลยเชื่อไม่ได้
+JS_BUNDLE_MARK_CARD = """
+([itemId, what, tiers]) => {
+  function vis(el){
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  function idAfter(t, key) {
+    const i = t.indexOf(key);
+    if (i < 0) return null;
+    let j = i + key.length, out = '';
+    while (j < t.length && t.charCodeAt(j) <= 32) j++;
+    while (j < t.length && t.charAt(j) >= '0' && t.charAt(j) <= '9') { out += t.charAt(j); j++; }
+    return out || null;
+  }
+  // การ์ด = กล่องเล็กที่สุดที่มีทั้ง "Item ID <เลขนี้>" และช่อง "จำนวน (Quantity)"
+  let card = null, bl = 1e9;
+  for (const el of document.querySelectorAll('div,section,li')) {
+    const t = el.textContent || '';
+    if (t.indexOf('จำนวน (Quantity)') < 0) continue;
+    if (idAfter(t, 'Item ID') !== String(itemId)) continue;
+    if (!vis(el)) continue;
+    if (t.length < bl) { bl = t.length; card = el; }
+  }
+  if (!card) return 'ไม่เจอการ์ดของไอเทม ' + itemId;
+  let ctl = null;
+  if (what === 'qty') {
+    // หาเฉพาะ "ข้างในการ์ดใบนี้" เท่านั้น ห้ามไล่ขึ้นไปเกินขอบการ์ด
+    // (เคยพลาด: ไล่ขึ้นไปจนออกนอกการ์ด แล้วไปคว้าช่องของการ์ดใบแรกแทน)
+    ctl = [...card.querySelectorAll('input')].filter(
+      e => e.type !== 'checkbox' && e.type !== 'file' && vis(e))[0];
+  } else {
+    ctl = card.querySelector('select');
+    if (!ctl) {
+      const names = (tiers || []).concat(['เลือก Tier']);
+      ctl = [...card.querySelectorAll('[role="combobox"],button')].filter(
+        e => vis(e) && names.indexOf((e.textContent || '').trim()) >= 0)[0];
+    }
+  }
+  if (!ctl) return 'ไม่เจอช่อง ' + what + ' ในการ์ดของไอเทม ' + itemId;
+  document.querySelectorAll('[data-trpu]').forEach(e => e.removeAttribute('data-trpu'));
+  ctl.setAttribute('data-trpu', what);
+  ctl.scrollIntoView({block: 'center'});
+  return 'ok|' + (ctl.value !== undefined && ctl.tagName === 'INPUT'
+                  ? ctl.value : (ctl.textContent || '').trim());
+}"""
+
+JS_BUNDLE_SET_MARKED = """
+([what, val]) => {
+  const el = document.querySelector('[data-trpu="' + what + '"]');
+  if (!el) return 'ไม่เจอช่องที่ทำเครื่องหมายไว้';
+  el.scrollIntoView({block: 'center'});
+  el.focus();
+  if (el.tagName === 'SELECT') {
+    const opts = [...el.options];
+    const j = opts.findIndex(o => o.text.trim() === String(val));
+    if (j < 0) return 'ไม่มีตัวเลือก ' + val;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, opts[j].value);
+  } else if (el.tagName === 'INPUT') {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, String(val));
+  } else {
+    return 'combobox';
+  }
+  el.dispatchEvent(new Event('input', {bubbles: true}));
+  el.dispatchEvent(new Event('change', {bubbles: true}));
+  return 'ok';
+}"""
+
+JS_BUNDLE_GET_MARKED = """
+([what]) => {
+  const el = document.querySelector('[data-trpu="' + what + '"]');
+  if (!el) return null;
+  if (el.tagName === 'SELECT' || el.tagName === 'INPUT') return el.value;
+  return (el.dataset.value || el.textContent || '').trim();
+}"""
+
+# --- ดรอปดาวน์ในกล่องเพิ่มของ (Credit / Player Exp) — ต้องอยู่ในกล่องเท่านั้น ---
+# ห้ามใช้ .last ทั้งหน้า เพราะจะไปโดน "ประเภท Bundle" ที่แผงขวา แล้วเปลี่ยนเป็น CHOICE
+JS_BUNDLE_MARK_ADDBOX = """
+([what]) => {
+""" + _JS_BOX + """
+  const box = addBox();
+  if (!box) return 'ไม่เจอกล่องเพิ่มของเข้า Bundle';
+  let ctl = null;
+  if (what === 'pick') {
+    ctl = [...box.querySelectorAll('[role="combobox"],select,button')].filter(e => {
+      if (!vis(e)) return false;
+      const t = (e.textContent || '').trim();
+      return t.indexOf('เลือก') === 0 || e.getAttribute('role') === 'combobox'
+             || e.tagName === 'SELECT';
+    })[0];
+  } else if (what === 'wqty') {
+    ctl = [...box.querySelectorAll('input')].filter(
+      e => vis(e) && e.type !== 'checkbox' && e.type !== 'file' &&
+           e.getBoundingClientRect().width < 200).pop();
+  } else if (what === 'wadd') {
+    ctl = [...box.querySelectorAll('button')].filter(
+      e => vis(e) && (e.textContent || '').indexOf('เพิ่ม') >= 0).pop();
+  }
+  if (!ctl) return 'ไม่เจอ ' + what + ' ในกล่องเพิ่มของ';
+  document.querySelectorAll('[data-trpu]').forEach(e => e.removeAttribute('data-trpu'));
+  ctl.setAttribute('data-trpu', what);
+  ctl.scrollIntoView({block: 'center'});
+  return 'ok|' + (ctl.textContent || ctl.value || '').trim().slice(0, 40);
+}"""
+
+# อ่าน "ประเภท Bundle" ไว้ตรวจว่าไม่โดนเปลี่ยนโดยไม่ตั้งใจ
+JS_BUNDLE_TYPE_GET = """
+() => {
+  const nodes = [...document.querySelectorAll('*')].filter(
+    e => e.children.length === 0 && (e.textContent || '').trim().indexOf('ประเภท Bundle') === 0);
+  for (const lb of nodes) {
+    let n = lb.parentElement;
+    for (let i = 0; i < 4 && n; i++) {
+      const c = n.querySelector('select,[role="combobox"],button');
+      if (c) return (c.value || c.textContent || '').trim();
+      n = n.parentElement;
+    }
+  }
+  return null;
 }"""
 
 # นับการ์ดในรายการไอเท็ม
@@ -3629,17 +3803,22 @@ class App:
 
         # [2] ไอเทม — เพิ่มให้ครบก่อน แล้วค่อยกางการ์ดทีเดียวเพื่อกรอกจำนวน/Tier
         added = 0
-        rows = []
+        done = []
+        missed = []
         for it in b['items']:
             if self.b_cancel:
                 break
             if await self._b_add_item(page, it):
                 added += 1
-                rows.append((added, it['qty'], it['tier']))
-        if rows:
+                done.append(it)
+            else:
+                missed.append(it['id'])
+        if done:
             await self._b_expand(page)
-            for idx, q, tr in rows:
-                await self._b_set_row(page, idx, q, tr)
+            for it in done:
+                await self._b_set_row(page, it['id'], it['qty'], it['tier'])
+        if missed:
+            self.log('   ⚠ ไอเทมที่เพิ่มไม่ได้: %s' % ', '.join(missed), 'ERR')
 
         # [3] famepoint / exp
         for rw in b.get('rewards', []):
@@ -3651,14 +3830,27 @@ class App:
                     added += 1
                     await self._b_expand(page)
                     # สำคัญ: ต้องเปลี่ยนเป็นเครดิตเรียลไทม์ ไม่งั้นผิด
-                    await self._b_fix_fame(page, added)
-                    await self._b_set_row(page, added, rw['qty'], DEFAULT_TIER)
+                    await self._b_fix_fame(page)
             else:
                 if await self._b_add_wallet(page, SEL_BUNDLE['tab_exp'], None, rw['qty']):
                     added += 1
 
         self.log('   เพิ่มเข้าบันเดิลแล้ว %d รายการ' % added,
                  'INFO' if added else 'WARN')
+
+        # ตรวจ "ประเภท Bundle" ว่ายังเป็นค่าที่ตั้งใจ (เคยโดนดรอปดาวน์อื่นเปลี่ยนเป็น CHOICE)
+        want_type = b.get('type') or DEFAULT_BUNDLE_TYPE
+        got_type = await page.evaluate(JS_BUNDLE_TYPE_GET)
+        if got_type and want_type not in str(got_type):
+            self.log('   ! ประเภท Bundle กลายเป็น "%s" (ควรเป็น %s) — แก้กลับให้'
+                     % (got_type, want_type), 'WARN')
+            await self._b_pick(page, SEL_BUNDLE['type'], want_type)
+            got_type = await page.evaluate(JS_BUNDLE_TYPE_GET)
+            if got_type and want_type not in str(got_type):
+                self.log('   ✗ ประเภท Bundle ยังเป็น "%s" — แก้เองบนเว็บก่อนกดสร้าง'
+                         % got_type, 'ERR')
+                if do:
+                    return False
 
         # ตรวจชื่อบันเดิลอีกรอบ — ถ้าโดนเขียนทับด้วยเลขไอเทม จะจับได้ตรงนี้
         got = await page.evaluate(JS_BUNDLE_NAME_GET)
@@ -3713,63 +3905,118 @@ class App:
         return False
 
     async def _b_add_item(self, page, it):
-        """แท็บ Item -> พิมพ์ Aztek Item Id ในช่องค้นหา -> กดปุ่มเพิ่มของ "แถวที่ ID ตรง"
+        """แท็บ Item -> พิมพ์ Aztek Item Id -> รอผลโหลด -> กดปุ่มเพิ่มของแถวที่ ID ตรง
 
-        ห้ามกดปุ่มเพิ่มมั่วๆ เด็ดขาด — ถ้าค้นหาไม่ติด ลิสต์จะโชว์ไอเทมทั้งเว็บ
-        (เป็นร้อยหน้า) กดไปจะได้ของผิดตัว
+        ไม่ใช้เวลาหน่วงตายตัว เพราะเว็บโหลดช้าบ้างเร็วบ้าง
+        และ ID สั้นๆ (เช่น 134) จะเจอผลเป็นร้อย กระจายหลายหน้า ต้องเปิดหน้าถัดไปหาต่อ
         """
         await self._b_tab(page, SEL_BUNDLE['tab_item'])
         r = await page.evaluate(JS_BUNDLE_SEARCH, str(it['id']))
         if r != 'ok':
             self.log('   ✗ ไม่เจอช่องค้นหา Item (%s) — ข้ามไอเทม %s' % (r, it['id']), 'ERR')
             return False
-        await page.wait_for_timeout(1600)
+
+        found = False
+        pages = 0
+        while pages < BUNDLE_MAX_PAGES and not self.b_cancel:
+            st = await self._b_wait_rows(page, it['id'])
+            if st.get('hit'):
+                found = True
+                break
+            if st.get('rows', 0) == 0:
+                break
+            nx = await page.evaluate(JS_BUNDLE_NEXT_PAGE)
+            if nx != 'ok':
+                break
+            pages += 1
+            await page.wait_for_timeout(400)
+        if not found:
+            self.log('   ✗ ค้นหา %s แล้วไม่เจอแถวที่ ID ตรง (ดู %d หน้า) — '
+                     'ไม่กดเพิ่ม กันได้ของผิด' % (it['id'], pages + 1), 'ERR')
+            return False
+
         r2 = await page.evaluate(JS_BUNDLE_PICK_ROW, [str(it['id'])])
         if not str(r2).startswith('ok'):
-            self.log('   ✗ ค้นหา %s แล้วไม่เจอแถวที่ ID ตรง (%s) — ไม่กดเพิ่ม กันได้ของผิด'
-                     % (it['id'], r2), 'ERR')
+            self.log('   ✗ กดเพิ่ม %s ไม่สำเร็จ (%s)' % (it['id'], r2), 'ERR')
             return False
-        await page.wait_for_timeout(900)
+        await page.wait_for_timeout(700)
         seen = str(r2).split('|', 1)[1] if '|' in str(r2) else ''
         self.log('   · เพิ่มไอเทม %s (qty=%s tier=%s)  [%s]'
                  % (it['id'], it['qty'], it['tier'], seen[:60]), 'INFO')
         return True
 
+    async def _b_wait_rows(self, page, item_id, timeout=15000):
+        """รอจนผลค้นหาโหลดเสร็จ — คืนสถานะล่าสุด"""
+        waited = 0
+        st = {}
+        while waited < timeout:
+            st = await page.evaluate(JS_BUNDLE_ROW_STATE, [str(item_id)])
+            if st.get('hit'):
+                return st
+            if st.get('state') == 'ready' and st.get('rows', 0) > 0:
+                return st
+            await page.wait_for_timeout(300)
+            waited += 300
+        return st
+
     async def _b_add_wallet(self, page, tab, option, qty):
-        """แท็บ Credit / Player Exp. -> เลือกจากดรอปดาวน์ -> ใส่จำนวน -> กด + เพิ่ม"""
+        """แท็บ Credit / Player Exp. -> เลือกจากดรอปดาวน์ -> ใส่จำนวน -> กด + เพิ่ม
+
+        ทุกอย่างจำกัดอยู่ใน "กล่องเพิ่มของเข้า Bundle" เท่านั้น
+        ห้ามเล็งทั้งหน้า ไม่งั้นจะไปโดน "ประเภท Bundle" ที่แผงขวา แล้วเปลี่ยนค่าเองโดยไม่ตั้งใจ
+        """
         if not await self._b_tab(page, tab):
             self.log('   ! ไม่เจอแท็บ %s' % tab, 'WARN')
             return False
+        mk = await page.evaluate(JS_BUNDLE_MARK_ADDBOX, ['pick'])
+        if not str(mk).startswith('ok'):
+            self.log('   ✗ %s: %s' % (tab, mk), 'ERR')
+            return False
         try:
-            trig = page.locator('[role="combobox"], button:has-text("เลือก")').last
-            await trig.click(timeout=5000)
+            await page.locator('[data-trpu="pick"]').first.click(timeout=5000)
             await page.wait_for_timeout(600)
             if option:
                 box = page.locator('input[placeholder*="ค้นหา"]').last
                 if await box.count() > 0:
                     await box.fill(option, timeout=4000)
-                    await page.wait_for_timeout(700)
-            opt = page.locator('[role="option"]').first
-            if await opt.count() == 0:
-                opt = page.locator('li, [data-value]').first
-            await opt.click(timeout=5000)
+                    await page.wait_for_timeout(800)
+            opts = page.locator('[role="option"]')
+            if await opts.count() == 0:
+                self.log('   ✗ %s: ดรอปดาวน์ไม่มีตัวเลือกให้เลือก' % tab, 'ERR')
+                await page.keyboard.press('Escape')
+                return False
+            await opts.first.click(timeout=5000)
             await page.wait_for_timeout(500)
         except Exception as ex:
-            self.log('   ! เลือกใน %s ไม่ได้: %s' % (tab, str(ex)[:60]), 'WARN')
-            return False
-        await page.evaluate(JS_BUNDLE_WALLET_QTY, str(qty))
-        try:
-            add = page.locator('button:has-text("%s")' % SEL_BUNDLE['add_btn']).last
-            await add.click(timeout=6000)
-            await page.wait_for_timeout(900)
-            self.log('   · เพิ่ม %s จำนวน %s' % (tab, qty), 'INFO')
-            return True
-        except Exception:
+            self.log('   ✗ เลือกใน %s ไม่ได้: %s' % (tab, str(ex)[:60]), 'ERR')
+            try:
+                await page.keyboard.press('Escape')
+            except Exception:
+                pass
             return False
 
-    async def _b_fix_fame(self, page, idx):
+        mk = await page.evaluate(JS_BUNDLE_MARK_ADDBOX, ['wqty'])
+        if str(mk).startswith('ok'):
+            await page.evaluate(JS_BUNDLE_SET_MARKED, ['wqty', str(qty)])
+        else:
+            self.log('   ! %s: %s' % (tab, mk), 'WARN')
+
+        mk = await page.evaluate(JS_BUNDLE_MARK_ADDBOX, ['wadd'])
+        if not str(mk).startswith('ok'):
+            self.log('   ✗ %s: ไม่เจอปุ่มเพิ่มในกล่อง' % tab, 'ERR')
+            return False
+        try:
+            await page.locator('[data-trpu="wadd"]').first.click(timeout=6000)
+            await page.wait_for_timeout(900)
+        except Exception as ex:
+            self.log('   ✗ กดเพิ่มใน %s ไม่ได้: %s' % (tab, str(ex)[:60]), 'ERR')
+            return False
+        self.log('   · เพิ่ม %s จำนวน %s' % (tab, qty), 'INFO')
+        return True
+
+    async def _b_fix_fame(self, page):
         """เปลี่ยนประเภทของ Fame Point เป็นเครดิตเรียลไทม์ (WALLET_REALTIME_CREDIT)"""
-        r = await page.evaluate(JS_BUNDLE_FAME_TYPE, [idx, FAME_CREDIT_TYPE])
+        r = await page.evaluate(JS_BUNDLE_FAME_TYPE, [1, FAME_CREDIT_TYPE])
         if r == 'ok':
             self.log('   · ตั้งประเภท Fame Point = %s' % FAME_CREDIT_LABEL, 'OK')
             return True
@@ -3807,74 +4054,72 @@ class App:
         except Exception:
             return False
 
-    async def _b_set_row(self, page, idx, qty, tier):
-        """ตั้งจำนวน + Tier ของการ์ดใบที่ idx (นับจาก 1)"""
-        r = await page.evaluate(JS_BUNDLE_ROW_QTY, [idx, str(qty)])
-        if r != 'ok':
-            self.log('   ! ตั้งจำนวนการ์ดที่ %d ไม่ได้ (%s)' % (idx, r), 'WARN')
-        if tier:
-            await self._b_tier(page, idx, tier)
+    async def _b_set_row(self, page, item_id, qty, tier):
+        """ตั้งจำนวน + Tier ของการ์ด "ของไอเทมนี้"
 
-    async def _b_tier(self, page, idx, tier):
-        """ตั้ง Tier ของการ์ดใบที่ idx
-
-        ชี้ไปที่การ์ดใบนั้นตรงๆ แล้วติดป้ายไว้ที่ตัวเลือก Tier ก่อนค่อยคลิก
-        ห้ามใช้วิธีนับ [role=combobox] ทั้งหน้า เพราะจะรวม "ประเภท Bundle"
-        ที่แผงขวาเข้าไปด้วย แล้วเลื่อนผิดใบทั้งแถว
+        หาโดยใช้ Item ID ที่อยู่ในการ์ด ไม่ใช่ลำดับที่เท่าไหร่
+        เพราะหน้าเว็บย่อ/ขยาย/สลับที่ได้ ลำดับเลยเชื่อไม่ได้
         """
+        mk = await page.evaluate(JS_BUNDLE_MARK_CARD, [str(item_id), 'qty', TIERS])
+        if str(mk).startswith('ok'):
+            if await page.evaluate(JS_BUNDLE_SET_MARKED, ['qty', str(qty)]) != 'ok':
+                self.log('   ! ตั้งจำนวนของไอเทม %s ไม่ได้' % item_id, 'WARN')
+        else:
+            self.log('   ! %s' % mk, 'WARN')
+        if tier:
+            await self._b_tier(page, item_id, tier)
+
+    async def _b_tier(self, page, item_id, tier):
+        """ตั้ง Tier ของการ์ดของไอเทมนี้ (หาโดย Item ID ไม่ใช่ลำดับ)"""
         try:
-            await page.keyboard.press('Escape')      # ปิดดรอปดาวน์ที่อาจค้างอยู่
+            await page.keyboard.press('Escape')
             await page.wait_for_timeout(150)
         except Exception:
             pass
-        mk = await page.evaluate(JS_BUNDLE_MARK_TIER, [idx, TIERS])
+        mk = await page.evaluate(JS_BUNDLE_MARK_CARD, [str(item_id), 'tier', TIERS])
         if not str(mk).startswith('ok'):
-            self.log('   ✗ ตั้ง Tier การ์ดที่ %d ไม่ได้: %s' % (idx, mk), 'ERR')
+            self.log('   ✗ ตั้ง Tier ของไอเทม %s ไม่ได้: %s' % (item_id, mk), 'ERR')
             return False
-
-        # ถ้าเป็น <select> ธรรมดาก็จบตรงนี้
-        if await page.evaluate(JS_BUNDLE_ROW_TIER, [idx, tier]) == 'ok':
+        if await page.evaluate(JS_BUNDLE_SET_MARKED, ['tier', tier]) == 'ok':
+            self.log('   · ไอเทม %s Tier = %s' % (item_id, tier), 'INFO')
             return True
-
         try:
             await page.locator('[data-trpu="tier"]').first.click(timeout=5000)
             await page.wait_for_timeout(500)
-            opt = page.get_by_role('option', name=tier, exact=True).first
-            if await opt.count() == 0:
-                # เทียบข้อความให้ตรงเป๊ะเอง — กัน "S" ไปโดน "SS" / "SS+" / "SSS"
-                opts = page.locator('[role="option"]')
-                n = await opts.count()
-                opt = None
-                for i in range(n):
-                    o = opts.nth(i)
-                    if (await o.inner_text()).strip() == tier:
-                        opt = o
-                        break
-                if opt is None:
-                    names = []
-                    for i in range(min(n, 8)):
-                        names.append((await opts.nth(i).inner_text()).strip())
-                    self.log('   ✗ การ์ดที่ %d: ไม่มีตัวเลือก Tier "%s" (มี: %s)'
-                             % (idx, tier, ', '.join(names) or '-'), 'ERR')
-                    await page.keyboard.press('Escape')
-                    return False
+            opt = await self._b_exact_option(page, tier)
+            if opt is None:
+                self.log('   ✗ ไอเทม %s: ไม่มีตัวเลือก Tier "%s"' % (item_id, tier), 'ERR')
+                await page.keyboard.press('Escape')
+                return False
             await opt.click(timeout=5000)
             await page.wait_for_timeout(400)
         except Exception as ex:
-            self.log('   ✗ ตั้ง Tier การ์ดที่ %d ไม่ได้: %s' % (idx, str(ex)[:70]), 'ERR')
+            self.log('   ✗ ตั้ง Tier ไอเทม %s ไม่ได้: %s' % (item_id, str(ex)[:70]), 'ERR')
             try:
                 await page.keyboard.press('Escape')
             except Exception:
                 pass
             return False
-
-        got = await page.evaluate(JS_BUNDLE_READ_MARK)
+        got = await page.evaluate(JS_BUNDLE_GET_MARKED, ['tier'])
         if (got or '').strip() != tier:
-            self.log('   ✗ การ์ดที่ %d ตั้ง Tier เป็น "%s" ไม่สำเร็จ (ตอนนี้เป็น "%s")'
-                     % (idx, tier, got or ''), 'ERR')
+            self.log('   ✗ ไอเทม %s ตั้ง Tier เป็น "%s" ไม่สำเร็จ (ตอนนี้ "%s")'
+                     % (item_id, tier, got or ''), 'ERR')
             return False
-        self.log('   · การ์ดที่ %d Tier = %s' % (idx, tier), 'INFO')
+        self.log('   · ไอเทม %s Tier = %s' % (item_id, tier), 'INFO')
         return True
+
+    async def _b_exact_option(self, page, text):
+        """หา option ที่ข้อความ "ตรงเป๊ะ" — กัน S ไปโดน SS / SS+ / SSS"""
+        opts = page.locator('[role="option"]')
+        n = await opts.count()
+        for i in range(n):
+            o = opts.nth(i)
+            try:
+                if (await o.inner_text()).strip() == text:
+                    return o
+            except Exception:
+                continue
+        return None
 
     async def _b_pick(self, page, label, value):
         r = await page.evaluate(JS_PICK_TYPE, [value, label])
