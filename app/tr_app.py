@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.6.3 : หน้าค้นหากางดูรายการที่จะค้นหาได้
+V0.6.4 : ผลค้นหาเรียงตามลำดับที่สั่ง + ตัดตัวที่ไม่ได้สั่งหาออก
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -1836,11 +1836,16 @@ class App:
         s4 = tk.Frame(p, bg=C['bg'])
         self.s_tail = s4
         s4.pack(fill='x', padx=14, pady=(14, 0))
+        self.v_exact = tk.BooleanVar(value=bool(self.prefs.get('exact', True)))
+        tk.Checkbutton(s4, text='เอาเฉพาะ ItemKind ที่ตรงเป๊ะ', variable=self.v_exact,
+                       bg=C['bg'], fg=C['fg'], selectcolor=C['input'], activebackground=C['bg'],
+                       activeforeground=C['fg'], font=('Segoe UI', 9), bd=0,
+                       highlightthickness=0).pack(side='left')
         self.v_headless = tk.BooleanVar(value=bool(self.prefs.get('headless', False)))
         tk.Checkbutton(s4, text='ซ่อนหน้าต่าง Chrome ตอนทำงาน', variable=self.v_headless,
                        bg=C['bg'], fg=C['dim'], selectcolor=C['input'], activebackground=C['bg'],
                        activeforeground=C['fg'], font=('Segoe UI', 9), bd=0,
-                       highlightthickness=0).pack(side='left')
+                       highlightthickness=0).pack(side='left', padx=(16, 0))
         self.btn_cancel = self._btn(s4, '■  ยกเลิก', self.do_cancel)
         self.btn_cancel.config(state='disabled', fg=C['err'])
         self.btn_cancel.pack(side='right', ipadx=14, ipady=4)
@@ -2353,16 +2358,26 @@ class App:
                         foreground=C['fg'], rowheight=26, borderwidth=0, font=('Segoe UI', 9))
         style.configure('TR.Treeview.Heading', background=C['input'], foreground=C['dim'],
                         font=('Segoe UI', 9, 'bold'), borderwidth=0)
-        cols = ('id', 'name', 'type', 'kind', 'notes')
+        cols = ('seq', 'id', 'name', 'type', 'kind', 'notes')
         self.tree = ttk.Treeview(wrap, columns=cols, show='headings', style='TR.Treeview')
-        for c, t, w in (('id', 'Aztek Item Id', 100), ('name', 'ชื่อ', 380),
-                        ('type', 'ประเภท', 90), ('kind', 'ItemKind', 100), ('notes', 'หมายเหตุ', 220)):
+        for c, t, w in (('seq', '#', 42), ('id', 'Aztek Item Id', 96), ('name', 'ชื่อ', 350),
+                        ('type', 'ประเภท', 85), ('kind', 'ItemKind', 95),
+                        ('notes', 'หมายเหตุ', 230)):
             self.tree.heading(c, text=t)
             self.tree.column(c, width=w, anchor='w')
+        # ซ้ำ = เหลือง (ลำดับเดียวเจอหลายตัว ต้องเลือกเอง) · ไม่เจอ = แดง
+        self.tree.tag_configure('dup', background='#3a3018', foreground='#e3b341')
+        self.tree.tag_configure('miss', background='#3a1f1e', foreground='#f0736a')
         sb = ttk.Scrollbar(wrap, orient='vertical', command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side='left', fill='both', expand=True)
         sb.pack(side='right', fill='y')
+        tk.Label(self.tab_result,
+                 text='คอลัมน์ # = ลำดับในรายการที่สั่งค้น เรียงตามนั้นให้เลย  ·  '
+                      'แถวเหลือง = ลำดับนั้นเว็บมีหลายตัว ต้องเลือกเอง  ·  '
+                      'แถวแดง = หาไม่เจอ',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w',
+                 justify='left').pack(fill='x', padx=14, pady=(0, 10))
 
     # ------------------------------------------------------------------
     #  แท็บตรวจระบบ
@@ -2609,17 +2624,66 @@ class App:
             self.lbl_stat.config(text=f'{done}/{total}  {note}' if total else note)
         self.root.after(0, _do)
 
-    def add_result(self, row, notes=''):
+    def add_result(self, row, notes='', seq=0, req=''):
         if row.get('id') and any(r['id'] == row['id'] for r in self.results):
             return
         row = dict(row)
         row['notes'] = notes
+        row['seq'] = seq                 # ลำดับในรายการที่สั่งค้น — ผูกผลลัพธ์กลับไปหาต้นทาง
+        row['req'] = req                 # ItemKind ที่สั่งให้หา
+        row['miss'] = False
+        row['dup'] = False
         self.results.append(row)
 
         def _do():
-            self.tree.insert('', 'end', values=(row['id'], row['name'], row['type'],
-                                                row['kind'], row['notes']))
+            self._ins_result(row)
             self.lbl_count.config(text=f'พบ {len(self.results)} รายการ')
+        self.root.after(0, _do)
+
+    def _ins_result(self, r):
+        tag = ('miss',) if r.get('miss') else (('dup',) if r.get('dup') else ())
+        self.tree.insert('', 'end', tags=tag,
+                         values=(r.get('seq') or '', r.get('id') or '—', r['name'],
+                                 r['type'], r['kind'], r['notes']))
+
+    def finalize_results(self, criteria):
+        """จัดผลลัพธ์ให้อ่านรู้เรื่อง — ทำหลังค้นเสร็จ
+        1. เรียงตามลำดับที่สั่งค้น (ไม่ใช่ตามลำดับที่เว็บคืนมา)
+        2. ลำดับไหนได้หลายตัว ทำเครื่องหมายว่าซ้ำ
+        3. ลำดับไหนไม่เจอ ใส่แถวบอกไว้เลย จะได้เห็นครบว่าอะไรเป็นอะไร
+        """
+        cnt = {}
+        for r in self.results:
+            cnt[r.get('seq')] = cnt.get(r.get('seq'), 0) + 1
+        for r in self.results:
+            r['dup'] = cnt.get(r.get('seq'), 0) > 1
+
+        why = {m['seq']: m['why'] for m in self.not_found if m.get('seq')}
+        got = {r.get('seq') for r in self.results}
+        for i, c in enumerate(criteria, 1):
+            if i in got:
+                continue
+            self.results.append({
+                'id': '', 'name': c.get('disp') or c.get('name') or '',
+                'type': '', 'kind': c.get('kind') or '',
+                'notes': '✗ ' + why.get(i, 'ไม่เจอ'),
+                'seq': i, 'req': c.get('kind') or '', 'miss': True, 'dup': False})
+
+        self.results.sort(key=lambda r: (r.get('seq') or 0, r.get('id') or ''))
+        n_ok = sum(1 for r in self.results if not r.get('miss'))
+        n_miss = sum(1 for r in self.results if r.get('miss'))
+        n_dup = sum(1 for r in self.results if r.get('dup'))
+
+        def _do():
+            self.tree.delete(*self.tree.get_children())
+            for r in self.results:
+                self._ins_result(r)
+            txt = f'สั่งค้น {len(criteria)} · เจอ {n_ok}'
+            if n_dup:
+                txt += f' · ซ้ำ {n_dup}'
+            if n_miss:
+                txt += f' · ไม่เจอ {n_miss}'
+            self.lbl_count.config(text=txt)
         self.root.after(0, _do)
 
     def clear_results(self):
@@ -2631,7 +2695,7 @@ class App:
     def copy_ids(self):
         if not self.results:
             return messagebox.showinfo('ผลลัพธ์', 'ยังไม่มีผลลัพธ์')
-        ids = ', '.join(r['id'] for r in self.results)
+        ids = ', '.join(r['id'] for r in self.results if r.get('id'))
         self.root.clipboard_clear()
         self.root.clipboard_append(ids)
         self.log(f'คัดลอก {len(self.results)} ID แล้ว', 'OK')
@@ -2645,8 +2709,10 @@ class App:
             initialfile=f'TR_Items_{datetime.now():%Y%m%d_%H%M}{ext}')
         if not path:
             return
-        header = ['Aztek Item Id', 'ชื่อ', 'ประเภท', 'ItemKind', 'หมายเหตุ']
-        rows = [[r['id'], r['name'], r['type'], r['kind'], r['notes']] for r in self.results]
+        header = ['#', 'Aztek Item Id', 'ชื่อ', 'ประเภท', 'ItemKind', 'สถานะ', 'หมายเหตุ']
+        rows = [[r.get('seq') or '', r.get('id') or '', r['name'], r['type'], r['kind'],
+                 ('ไม่เจอ' if r.get('miss') else ('ซ้ำ - เลือกเอง' if r.get('dup') else 'ok')),
+                 r['notes']] for r in self.results]
         if kind == 'xlsx' and XLSX_OK:
             wb = openpyxl.Workbook()
             ws = wb.active
@@ -2657,7 +2723,7 @@ class App:
                 c.fill = PatternFill('solid', fgColor='1F6FEB')
             for r in rows:
                 ws.append(r)
-            for i, w in enumerate([14, 46, 12, 12, 26], 1):
+            for i, w in enumerate([6, 14, 46, 12, 12, 14, 26], 1):
                 ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
             wb.save(path)
         else:
@@ -2789,6 +2855,7 @@ class App:
             'deep': self.v_deep.get(), 'dur': self.v_dur.get().strip(),
             'trade': self.v_trade.get(), 'qty': self.v_qty.get().strip(),
             'headless': self.v_headless.get(),
+            'exact': self.v_exact.get(),
             'c_type': self.cv_type.get().strip(),
             'c_suffix': self.cv_suffix.get().strip(),
             'c_price': self.cv_price.get().strip(),
@@ -2980,19 +3047,36 @@ class App:
                 self.log(f"  ใช้ฟิลเตอร์ DurationIndex={c['dur']} (ข้าม deep check)")
 
             rows = await self._read_all_pages(page)
+
+            # ช่องค้นหาของเว็บเป็นการค้นแบบ "มีคำนี้อยู่" เลยติดตัวที่ไม่ได้สั่งหามาด้วย
+            # ถ้าสั่งหาด้วย ItemKind ก็เอาเฉพาะแถวที่ ItemKind ตรงเป๊ะ
+            want_kind = str(c.get('kind') or '').strip()
+            if want_kind and self.v_exact.get():
+                before = len(rows)
+                rows = [r for r in rows if str(r.get('kind', '')).strip() == want_kind]
+                if before != len(rows):
+                    self.log(f'  ตัดตัวที่ ItemKind ไม่ตรง {want_kind} ออก: '
+                             f'{before} → {len(rows)}', 'INFO')
+
             if c.get('name'):
                 before = len(rows)
                 want = norm_name(c['name'])
                 rows = [r for r in rows if want in norm_name(r['name'])]
                 self.log(f"  กรองชื่อ {c['name']!r}: {before} → {len(rows)}")
             self.log(f'  พบ {len(rows)} รายการ', 'INFO' if rows else 'WARN')
+            if len(rows) > 1:
+                self.log('  ! เว็บมี %d ตัวที่ตรงเงื่อนไขนี้ (Aztek Id: %s) — '
+                         'จะขึ้นสีเหลืองไว้ให้เลือกเอง'
+                         % (len(rows), ', '.join(r['id'] for r in rows)), 'WARN')
             if not rows:
-                self.not_found.append((label, 'ไม่พบแถวที่ตรงเงื่อนไข'))
+                self.not_found.append({'seq': i + 1, 'label': label,
+                                       'why': 'ไม่พบแถวที่ตรงเงื่อนไข'})
                 continue
 
             if not (has_deep(c) and not use_filter):
                 for r in rows:
-                    self.add_result(r, f"{c['dur']} วัน" if use_filter else '')
+                    self.add_result(r, f"{c['dur']} วัน" if use_filter else '',
+                                    seq=i + 1, req=want_kind)
                 log_event('search_item', kind=c.get('kind'), name=c.get('disp') or c.get('name'),
                           found=len(rows), passed=len(rows), deep=False,
                           ids=[r['id'] for r in rows][:20])
@@ -3010,7 +3094,7 @@ class App:
                     d = await self._read_detail(page)
                     ok, why = match_deep(d, c)
                     if ok:
-                        self.add_result(r, why)
+                        self.add_result(r, why, seq=i + 1, req=want_kind)
                         passed += 1
                         self.log(f"  ✓ {r['id']}  {r['name']}  [{why}]", 'OK')
                     else:
@@ -3024,25 +3108,34 @@ class App:
                       want_dur=c.get('dur'), want_trade=c.get('trade'), want_qty=c.get('qty'),
                       ids=[r['id'] for r in self.results][-passed:][:20] if passed else [])
             if not passed and not self.cancel:
-                self.not_found.append((label, f'เจอ {len(rows)} แต่ไม่ผ่าน deep check'))
+                self.not_found.append({'seq': i + 1, 'label': label,
+                                       'why': f'เจอ {len(rows)} แต่ไม่ผ่าน deep check'})
             self.set_progress(i + 1, len(criteria), 'เสร็จ')
 
+        self.finalize_results(criteria)
         self.log('=' * 46, 'STEP')
         if self.cancel:
             self.log('ยกเลิกโดยผู้ใช้', 'WARN')
-        self.log(f'รวมทั้งหมด {len(self.results)} รายการ', 'OK' if self.results else 'WARN')
-        if self.results:
-            self.log('IDs: ' + ', '.join(r['id'] for r in self.results), 'OK')
-        for lb, why in self.not_found:
-            self.log(f'  ✗ {lb}  ({why})', 'WARN')
+        found = [r for r in self.results if not r.get('miss')]
+        dups = sorted({r['seq'] for r in self.results if r.get('dup')})
+        self.log('สั่งค้น %d · เจอ %d · ไม่เจอ %d'
+                 % (len(criteria), len(found), len(self.results) - len(found)),
+                 'OK' if found else 'WARN')
+        if found:
+            self.log('IDs: ' + ', '.join(r['id'] for r in found), 'OK')
+        if dups:
+            self.log('ลำดับที่เจอมากกว่า 1 ตัว (แถวเหลือง เลือกเอง): '
+                     + ', '.join('#%d' % d for d in dups), 'WARN')
+        for m in self.not_found:
+            self.log('  ✗ %s  (%s)' % (m['label'], m['why']), 'WARN')
         secs = 0
         try:
             secs = round((datetime.now() - self._run_started).total_seconds(), 1)
         except Exception:
             pass
-        log_event('search_done', criteria=len(criteria), found=len(self.results),
-                  not_found=len(self.not_found), seconds=secs, cancelled=bool(self.cancel),
-                  ids=[r['id'] for r in self.results][:200])
+        log_event('search_done', criteria=len(criteria), found=len(found),
+                  not_found=len(self.not_found), dups=len(dups), seconds=secs,
+                  cancelled=bool(self.cancel), ids=[r['id'] for r in found][:200])
 
     def run(self):
         self.root.mainloop()
