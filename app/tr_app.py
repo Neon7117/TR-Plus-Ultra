@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.7.4 : famepoint/exp เลือก Tier General ให้ด้วย
+V0.7.5 : แก้เมธอดขยายทั้งหมดหายไป (famepoint/exp ไม่ถูกเพิ่ม)
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -4071,6 +4071,20 @@ class App:
             return False
         self.log('   · เพิ่ม %s จำนวน %s' % (tab, qty), 'INFO')
         return True
+
+    async def _b_expand(self, page):
+        """กด "ขยายทั้งหมด" — การ์ดที่ย่ออยู่ไม่มีช่องจำนวน/Tier ให้กรอก"""
+        try:
+            r = await page.evaluate(JS_BUNDLE_EXPAND)
+            if r != 'ok':
+                btn = page.locator('button:has-text("ขยายทั้งหมด")').first
+                if await btn.count() > 0:
+                    await btn.click(timeout=4000)
+                    r = 'ok'
+            await page.wait_for_timeout(700)
+            return r == 'ok'
+        except Exception:
+            return False
 
     async def _b_named_pick(self, page, name, what, want, exact=True):
         """เลือกค่าในดรอปดาวน์ของการ์ดที่ชื่อ name (famepoint / exp)
