@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.7.6 : แก้ famepoint ไม่ได้เครดิตเรียลไทม์และไม่ได้ Tier
+V0.7.7 : แก้ Fame Point ตั้ง Tier ไม่ได้ (ดรอปดาวน์ตัวก่อนหน้ายังปิดไม่เสร็จ)
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -1158,6 +1158,16 @@ JS_BUNDLE_MARK_NAMED = """
 #  what : 'qty' | 'tier' | 'kind'
 #  act  : 'read' | 'set' | 'click'
 # ===========================================================================
+# เช็กว่าดรอปดาวน์ตัวก่อนหน้าปิดสนิทหรือยัง
+# เว็บพวกนี้ตอนเปิดดรอปดาวน์จะล็อกหน้าจอไว้ (pointer-events: none)
+# ถ้ารีบเปิดตัวถัดไปทันที มันจะไม่เปิดให้ — เจอกับการ์ด Fame Point ที่มีดรอปดาวน์ 2 อันติดกัน
+JS_BUNDLE_POPUP_OPEN = """
+() => {
+  const n = document.querySelectorAll('[role="option"],[role="listbox"]').length;
+  const locked = getComputedStyle(document.body).pointerEvents === 'none';
+  return {open: n > 0, locked: locked, options: n};
+}"""
+
 JS_BUNDLE_ACT = """
 ([how, key, what, act, value, tiers]) => {
   function vis(el){
@@ -1254,6 +1264,12 @@ JS_BUNDLE_ACT = """
     ctl.scrollIntoView({block: 'center'});
     ctl.click();
     return 'ok|' + cur();
+  }
+  if (act === 'point') {
+    // คืนพิกัดไว้กดด้วย "เมาส์จริง" — ดรอปดาวน์บางตัวเปิดเฉพาะตอนกดจริงเท่านั้น
+    ctl.scrollIntoView({block: 'center'});
+    const r = ctl.getBoundingClientRect();
+    return 'ok|' + Math.round(r.left + r.width / 2) + ',' + Math.round(r.top + r.height / 2);
   }
   return 'ไม่รู้จักคำสั่ง ' + act;
 }"""
@@ -4199,6 +4215,56 @@ class App:
         except Exception:
             return False
 
+    async def _b_settle(self, page, timeout=4000):
+        """รอให้ดรอปดาวน์ตัวก่อนหน้าปิดสนิทจริงๆ ก่อนเปิดตัวถัดไป
+
+        เว็บล็อกหน้าจอไว้ตอนดรอปดาวน์เปิด (pointer-events: none)
+        ถ้ารีบเปิดตัวถัดไป มันจะไม่เปิดให้ แล้วหาตัวเลือกไม่เจอสักอัน
+        """
+        waited = 0
+        while waited < timeout:
+            try:
+                st = await page.evaluate(JS_BUNDLE_POPUP_OPEN)
+            except Exception:
+                return
+            if not st.get('open') and not st.get('locked'):
+                await page.wait_for_timeout(250)     # เผื่อแอนิเมชันปิด
+                return
+            try:
+                await page.keyboard.press('Escape')
+            except Exception:
+                pass
+            await page.wait_for_timeout(200)
+            waited += 200
+
+    async def _b_open_dd(self, page, how, key, what):
+        """เปิดดรอปดาวน์ให้ได้จริง — ลองกดด้วย JS ก่อน ไม่ติดค่อยกดด้วยเมาส์จริง"""
+        for attempt in range(3):
+            await self._b_settle(page)
+            if attempt < 2:
+                r = await page.evaluate(JS_BUNDLE_ACT,
+                                        [how, str(key), what, 'click', '', TIERS])
+            else:
+                # กดด้วยเมาส์จริง — ดรอปดาวน์บางตัวเปิดเฉพาะตอนกดจริงเท่านั้น
+                r = await page.evaluate(JS_BUNDLE_ACT,
+                                        [how, str(key), what, 'point', '', TIERS])
+                if str(r).startswith('ok'):
+                    try:
+                        x, y = str(r).split('|', 1)[1].split(',')
+                        await page.mouse.click(float(x), float(y))
+                    except Exception:
+                        pass
+            if not str(r).startswith('ok'):
+                return r
+            for _ in range(12):
+                await page.wait_for_timeout(200)
+                try:
+                    if await page.locator('[role="option"]').count() > 0:
+                        return 'ok'
+                except Exception:
+                    pass
+        return 'เปิดดรอปดาวน์แล้วไม่มีตัวเลือกโผล่'
+
     async def _b_choose(self, page, how, key, what, want, exact=True, label=None):
         """ตั้งค่าดรอปดาวน์/ช่องในการ์ด แล้วอ่านกลับมาตรวจว่าเข้าจริง
 
@@ -4206,16 +4272,12 @@ class App:
         เพราะเว็บเป็น React — render ใหม่เมื่อไหร่ ตัวชี้เก่าใช้ไม่ได้ทันที
         """
         who = label or str(key)
-        try:
-            await page.keyboard.press('Escape')
-            await page.wait_for_timeout(150)
-        except Exception:
-            pass
 
         def _match(v):
             v = (v or '').strip()
             return (v == want) if exact else (want in v)
 
+        await self._b_settle(page)
         r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'read', '', TIERS])
         if not str(r).startswith('ok'):
             self.log('   ✗ %s (%s): %s' % (who, what, r), 'ERR')
@@ -4229,49 +4291,41 @@ class App:
             self.log('   · %s %s = %s' % (who, what, want), 'INFO')
             return True
 
-        # ดรอปดาวน์แบบกดเปิด — กดด้วย JS (ไม่ต้องพึ่งตัวชี้ที่อาจหายไป)
-        r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'click', '', TIERS])
-        if not str(r).startswith('ok'):
-            self.log('   ✗ %s (%s) เปิดดรอปดาวน์ไม่ได้: %s' % (who, what, r), 'ERR')
+        opened = await self._b_open_dd(page, how, key, what)
+        if opened != 'ok':
+            self.log('   ✗ %s (%s) เปิดดรอปดาวน์ไม่ได้: %s' % (who, what, opened), 'ERR')
             return False
 
         opt = None
         seen = []
-        for _ in range(25):                       # รอจนตัวเลือกโผล่ ไม่หน่วงตายตัว
-            await page.wait_for_timeout(200)
-            opts = page.locator('[role="option"]')
+        opts = page.locator('[role="option"]')
+        try:
+            n = await opts.count()
+        except Exception:
+            n = 0
+        for i in range(n):
             try:
-                n = await opts.count()
+                txt = (await opts.nth(i).inner_text()).strip()
             except Exception:
-                n = 0
-            if n == 0:
                 continue
-            seen = []
-            for i in range(n):
-                try:
-                    txt = (await opts.nth(i).inner_text()).strip()
-                except Exception:
-                    continue
-                seen.append(txt)
-                if _match(txt):
-                    opt = opts.nth(i)
-                    break
-            break
+            seen.append(txt)
+            if _match(txt):
+                opt = opts.nth(i)
+                break
         if opt is None:
             self.log('   ✗ %s (%s): ไม่มีตัวเลือก "%s" (เจอ: %s)'
                      % (who, what, want, ', '.join(seen[:6]) or 'ไม่มีเลย'), 'ERR')
-            try:
-                await page.keyboard.press('Escape')
-            except Exception:
-                pass
+            await self._b_settle(page)
             return False
         try:
             await opt.click(timeout=6000)
             await page.wait_for_timeout(400)
         except Exception as ex:
             self.log('   ✗ %s (%s) กดตัวเลือกไม่ได้: %s' % (who, what, str(ex)[:60]), 'ERR')
+            await self._b_settle(page)
             return False
 
+        await self._b_settle(page)
         r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'read', '', TIERS])
         got = str(r).split('|', 1)[1] if '|' in str(r) else ''
         if not _match(got):
