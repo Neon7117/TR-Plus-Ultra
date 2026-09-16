@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.7.0 : เพิ่มแท็บสร้าง Bundle (อ่านไฟล์ต้นฉบับ + famepoint เครดิตเรียลไทม์)
+V0.7.1 : แก้บั๊กหน้าบันเดิล (เลขไอเทมลงผิดช่อง + ได้ไอเทมผิดตัว)
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -866,21 +866,147 @@ JS_READ_FORM = """
 #  การ์ดแต่ละใบในรายการไอเท็มมีช่อง "จำนวน (Quantity)" กับดรอปดาวน์ Tier
 #  หาโดยไล่จากข้อความ แล้ววิ่งขึ้นไปหา container ของการ์ดใบนั้น
 # ---------------------------------------------------------------------------
-JS_BUNDLE_QTY_BOXES = """
-() => {
-  const out = [];
-  for (const el of document.querySelectorAll('*')) {
-    if (el.children.length) continue;
-    const t = (el.textContent || '').trim();
-    if (!t.startsWith('จำนวน (Quantity)')) continue;
-    let n = el.parentElement;
-    for (let i = 0; i < 5 && n; i++) {
-      const inp = n.querySelector('input:not([type="checkbox"]):not([type="file"])');
-      if (inp) { out.push(inp); break; }
-      n = n.parentElement;
+# --- ตัวช่วย: หา "กล่องเพิ่มของเข้า Bundle" ให้เจอก่อน แล้วค่อยหาช่องข้างใน ---
+#     สำคัญมาก: ถ้าไม่จำกัดขอบเขต จะไปเจอช่อง "ชื่อ Bundle" ที่แผงขวาแทน
+_JS_BOX = """
+  function addBox(){
+    // กล่องจริงต้องมีช่องกรอกอยู่ข้างใน ไม่ใช่แค่ป้ายข้อความที่เขียนว่า "เพิ่มของเข้า Bundle"
+    let best = null, bl = 1e9;
+    for (const el of document.querySelectorAll('div,section,form')) {
+      const t = el.textContent || '';
+      if (t.indexOf('เพิ่มของเข้า Bundle') < 0) continue;
+      if (!el.querySelector('input')) continue;
+      if (t.length < bl) { bl = t.length; best = el; }
     }
+    return best;
   }
-  return out;
+  function vis(el){
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  function setVal(el, v){
+    el.scrollIntoView({block:'center'});
+    el.focus();
+    const p = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(p, 'value').set.call(el, String(v));
+    el.dispatchEvent(new Event('input', {bubbles:true}));
+    el.dispatchEvent(new Event('change', {bubbles:true}));
+  }
+"""
+
+JS_BUNDLE_SEARCH = """
+(val) => {
+""" + _JS_BOX + """
+  let el = document.querySelector('input[placeholder*="ค้นหาชื่อ Item"]');
+  if (!el) {
+    const box = addBox();
+    if (!box) return 'ไม่เจอกล่องเพิ่มของเข้า Bundle';
+    el = box.querySelector('input[placeholder*="ค้นหา"]')
+      || [...box.querySelectorAll('input')].filter(
+           e => vis(e) && e.type !== 'checkbox' && e.type !== 'file' &&
+                e.getBoundingClientRect().width > 200)[0];
+  }
+  if (!el) return 'ไม่เจอช่องค้นหาในกล่อง';
+  setVal(el, val);
+  return 'ok';
+}"""
+
+# เลือกแถวผลค้นหาที่ "ID: <เลข>" ตรงเป๊ะ แล้วกดปุ่มเพิ่มของแถวนั้น
+# ห้ามกดปุ่มสุดท้ายมั่วๆ เพราะลิสต์ที่ยังไม่กรองมีเป็นร้อยหน้า
+JS_BUNDLE_PICK_ROW = """
+([id]) => {
+""" + _JS_BOX + """
+  // อ่านเลข ID จากข้อความของแถว โดยไม่ใช้ regex เลย
+  // (เคยพลาดเพราะ backslash ใน regex หายตอนส่งเข้าเบราว์เซอร์ จนไม่แมตช์อะไรเลย)
+  function idOf(t) {
+    const i = t.indexOf('ID:');
+    if (i < 0) return null;
+    let j = i + 3, out = '';
+    while (j < t.length && t.charCodeAt(j) <= 32) j++;
+    while (j < t.length && t.charAt(j) >= '0' && t.charAt(j) <= '9') { out += t.charAt(j); j++; }
+    return out || null;
+  }
+  const box = addBox();
+  if (!box) return 'ไม่เจอกล่องเพิ่มของเข้า Bundle';
+  const want = String(id);
+  let hit = null, hl = 1e9;
+  for (const el of box.querySelectorAll('div,li,tr')) {
+    const t = el.textContent || '';
+    if (t.indexOf('เพิ่ม') < 0) continue;
+    if (idOf(t) !== want) continue;
+    if (t.length < hl) { hl = t.length; hit = el; }
+  }
+  if (!hit) return 'ไม่เจอแถวที่ ID ตรง';
+  const btn = [...hit.querySelectorAll('button')].filter(
+    b => (b.textContent || '').indexOf('เพิ่ม') >= 0 && vis(b))[0];
+  if (!btn) return 'เจอแถวแล้วแต่ไม่เจอปุ่มเพิ่ม';
+  btn.scrollIntoView({block: 'center'});
+  btn.click();
+  let seen = (hit.textContent || '');
+  let clean = '';
+  for (let k = 0; k < seen.length && clean.length < 90; k++) {
+    const c = seen.charAt(k);
+    clean += (seen.charCodeAt(k) <= 32) ? ' ' : c;
+  }
+  return 'ok|' + clean;
+}"""
+
+JS_BUNDLE_NAME = """
+(val) => {
+  const el = document.querySelector('input[placeholder*="ชื่อ Bundle"]');
+  if (!el) return 'ไม่เจอช่องชื่อ Bundle';
+  el.scrollIntoView({block:'center'});
+  el.focus();
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+        .set.call(el, String(val));
+  el.dispatchEvent(new Event('input', {bubbles:true}));
+  el.dispatchEvent(new Event('change', {bubbles:true}));
+  return 'ok';
+}"""
+
+JS_BUNDLE_NAME_GET = """
+() => {
+  const el = document.querySelector('input[placeholder*="ชื่อ Bundle"]');
+  return el ? el.value : null;
+}"""
+
+JS_BUNDLE_WALLET_QTY = """
+(val) => {
+""" + _JS_BOX + """
+  const box = addBox();
+  if (!box) return 'ไม่เจอกล่องเพิ่มของเข้า Bundle';
+  const cands = [...box.querySelectorAll('input')].filter(
+    e => vis(e) && e.type !== 'checkbox' && e.type !== 'file' &&
+         e.getBoundingClientRect().width < 200);
+  const el = cands[cands.length - 1];
+  if (!el) return 'ไม่เจอช่องจำนวนในกล่อง';
+  setVal(el, val);
+  return 'ok';
+}"""
+
+# กด "ขยายทั้งหมด" — การ์ดที่ย่ออยู่จะไม่มีช่องจำนวน/Tier ให้กรอก
+JS_BUNDLE_EXPAND = """
+() => {
+  for (const b of document.querySelectorAll('button,[role="button"]')) {
+    if ((b.textContent || '').indexOf('ขยายทั้งหมด') >= 0) { b.click(); return 'ok'; }
+  }
+  return 'ไม่เจอปุ่มขยายทั้งหมด';
+}"""
+
+# นับการ์ดในรายการไอเท็ม
+JS_BUNDLE_COUNT = """
+() => {
+  const t = document.body.innerText || '';
+  const i = t.indexOf('รายการไอเท็ม');
+  if (i < 0) return -1;
+  const j = t.indexOf('(', i);
+  if (j < 0) return -1;
+  let k = j + 1, out = '';
+  while (k < t.length && t.charAt(k) >= '0' && t.charAt(k) <= '9') { out += t.charAt(k); k++; }
+  return out ? parseInt(out, 10) : -1;
 }"""
 
 JS_BUNDLE_ROW_QTY = """
@@ -893,7 +1019,13 @@ JS_BUNDLE_ROW_QTY = """
     let n = el.parentElement;
     for (let i = 0; i < 5 && n; i++) {
       const inp = n.querySelector('input:not([type="checkbox"]):not([type="file"])');
-      if (inp) { boxes.push(inp); break; }
+      if (inp) {
+        const st = getComputedStyle(inp);
+        const rc = inp.getBoundingClientRect();
+        if (st.display !== 'none' && st.visibility !== 'hidden' && rc.height > 0)
+          boxes.push(inp);
+        break;
+      }
       n = n.parentElement;
     }
   }
@@ -916,8 +1048,14 @@ JS_BUNDLE_ROW_TIER = """
     if ((el.textContent || '').trim() !== 'Tier') continue;
     let n = el.parentElement;
     for (let i = 0; i < 5 && n; i++) {
-      const s = n.querySelector('select');
-      if (s) { cards.push(s); break; }
+      const sl = n.querySelector('select');
+      if (sl) {
+        const st = getComputedStyle(sl);
+        const rc = sl.getBoundingClientRect();
+        if (st.display !== 'none' && st.visibility !== 'hidden' && rc.height > 0)
+          cards.push(sl);
+        break;
+      }
       n = n.parentElement;
     }
   }
@@ -933,45 +1071,7 @@ JS_BUNDLE_ROW_TIER = """
   return 'ok';
 }"""
 
-JS_BUNDLE_SEARCH = """
-(val) => {
-  // ช่องค้นหาไอเทมในกล่อง "เพิ่มของเข้า Bundle"
-  const cands = [...document.querySelectorAll('input')].filter(el => {
-    if (el.type === 'checkbox' || el.type === 'file') return false;
-    const s = getComputedStyle(el);
-    if (s.display === 'none' || s.visibility === 'hidden') return false;
-    const r = el.getBoundingClientRect();
-    return r.width > 150 && r.height > 0;
-  });
-  const el = cands[cands.length - 1];
-  if (!el) return 'ไม่เจอช่องค้นหา';
-  el.scrollIntoView({block: 'center'});
-  el.focus();
-  const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-  d.set.call(el, String(val));
-  el.dispatchEvent(new Event('input', {bubbles: true}));
-  el.dispatchEvent(new Event('change', {bubbles: true}));
-  return 'ok';
-}"""
 
-JS_BUNDLE_WALLET_QTY = """
-(val) => {
-  // ช่องจำนวนเล็กๆ ที่อยู่ข้างปุ่ม "+ เพิ่ม" ในกล่องเพิ่มของ
-  const cands = [...document.querySelectorAll('input')].filter(el => {
-    if (el.type === 'checkbox' || el.type === 'file') return false;
-    const s = getComputedStyle(el);
-    if (s.display === 'none' || s.visibility === 'hidden') return false;
-    const r = el.getBoundingClientRect();
-    return r.width > 0 && r.width < 150 && r.height > 0;
-  });
-  const el = cands[cands.length - 1];
-  if (!el) return 'ไม่เจอช่องจำนวน';
-  const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-  d.set.call(el, String(val));
-  el.dispatchEvent(new Event('input', {bubbles: true}));
-  el.dispatchEvent(new Event('change', {bubbles: true}));
-  return 'ok';
-}"""
 
 JS_BUNDLE_FAME_TYPE = """
 ([idx, want]) => {
@@ -991,11 +1091,6 @@ JS_BUNDLE_FAME_TYPE = """
   return 'combobox';
 }"""
 
-JS_BUNDLE_COUNT = """
-() => {
-  const m = (document.body.innerText || '').match(/รายการไอเท็ม\\s*\\((\\d+)\\)/);
-  return m ? parseInt(m[1], 10) : -1;
-}"""
 
 
 # ============================================================================
@@ -3455,22 +3550,25 @@ class App:
             return False
 
         # [1] ข้อมูลบันเดิล
-        r = await page.evaluate(JS_SET_BY_LABEL, [SEL_BUNDLE['name'], b['name']])
-        self.log('   · ชื่อ Bundle = %s%s' % (b['name'], '' if r == 'ok' else '  (ไม่เจอช่อง)'),
+        r = await page.evaluate(JS_BUNDLE_NAME, b['name'])
+        self.log('   · ชื่อ Bundle = %s%s' % (b['name'], '' if r == 'ok' else '  (%s)' % r),
                  'INFO' if r == 'ok' else 'WARN')
         if b.get('type') and b['type'] != DEFAULT_BUNDLE_TYPE:
             await self._b_pick(page, SEL_BUNDLE['type'], b['type'])
 
-        # [2] ไอเทม
+        # [2] ไอเทม — เพิ่มให้ครบก่อน แล้วค่อยกางการ์ดทีเดียวเพื่อกรอกจำนวน/Tier
         added = 0
+        rows = []
         for it in b['items']:
             if self.b_cancel:
                 break
             if await self._b_add_item(page, it):
                 added += 1
-                await self._b_set_row(page, added, it['qty'], it['tier'])
-            else:
-                self.log('   ! เพิ่มไอเทม %s ไม่สำเร็จ' % it['id'], 'WARN')
+                rows.append((added, it['qty'], it['tier']))
+        if rows:
+            await self._b_expand(page)
+            for idx, q, tr in rows:
+                await self._b_set_row(page, idx, q, tr)
 
         # [3] famepoint / exp
         for rw in b.get('rewards', []):
@@ -3480,6 +3578,7 @@ class App:
                 if await self._b_add_wallet(page, SEL_BUNDLE['tab_credit'],
                                             FAME_OPTION, rw['qty']):
                     added += 1
+                    await self._b_expand(page)
                     # สำคัญ: ต้องเปลี่ยนเป็นเครดิตเรียลไทม์ ไม่งั้นผิด
                     await self._b_fix_fame(page, added)
                     await self._b_set_row(page, added, rw['qty'], DEFAULT_TIER)
@@ -3489,6 +3588,18 @@ class App:
 
         self.log('   เพิ่มเข้าบันเดิลแล้ว %d รายการ' % added,
                  'INFO' if added else 'WARN')
+
+        # ตรวจชื่อบันเดิลอีกรอบ — ถ้าโดนเขียนทับด้วยเลขไอเทม จะจับได้ตรงนี้
+        got = await page.evaluate(JS_BUNDLE_NAME_GET)
+        if (got or '').strip() != b['name'].strip():
+            self.log('   ! ชื่อ Bundle ไม่ตรง (ในช่องเป็น "%s") — กรอกใหม่ให้' % (got or ''),
+                     'WARN')
+            await page.evaluate(JS_BUNDLE_NAME, b['name'])
+            got = await page.evaluate(JS_BUNDLE_NAME_GET)
+            if (got or '').strip() != b['name'].strip():
+                self.log('   ✗ แก้ชื่อ Bundle ไม่สำเร็จ (ยังเป็น "%s")' % (got or ''), 'ERR')
+                if do:
+                    return False
 
         if not do:
             self.log('   ✓ กรอกครบแล้ว (โหมดทดสอบ — ไม่กดสร้าง)', 'OK')
@@ -3531,25 +3642,27 @@ class App:
         return False
 
     async def _b_add_item(self, page, it):
-        """แท็บ Item -> พิมพ์ Aztek Item Id -> กด + เพิ่ม"""
+        """แท็บ Item -> พิมพ์ Aztek Item Id ในช่องค้นหา -> กดปุ่มเพิ่มของ "แถวที่ ID ตรง"
+
+        ห้ามกดปุ่มเพิ่มมั่วๆ เด็ดขาด — ถ้าค้นหาไม่ติด ลิสต์จะโชว์ไอเทมทั้งเว็บ
+        (เป็นร้อยหน้า) กดไปจะได้ของผิดตัว
+        """
         await self._b_tab(page, SEL_BUNDLE['tab_item'])
         r = await page.evaluate(JS_BUNDLE_SEARCH, str(it['id']))
         if r != 'ok':
-            self.log('   ! ไม่เจอช่องค้นหาในแท็บ Item', 'WARN')
+            self.log('   ✗ ไม่เจอช่องค้นหา Item (%s) — ข้ามไอเทม %s' % (r, it['id']), 'ERR')
             return False
-        await page.wait_for_timeout(1400)
-        try:
-            add = page.locator('button:has-text("%s")' % SEL_BUNDLE['add_btn']).last
-            if await add.count() == 0:
-                return False
-            await add.click(timeout=6000)
-            await page.wait_for_timeout(900)
-            self.log('   · เพิ่มไอเทม %s (qty=%s tier=%s)' % (it['id'], it['qty'], it['tier']),
-                     'INFO')
-            return True
-        except Exception as ex:
-            self.log('   ! %s: %s' % (it['id'], str(ex)[:70]), 'WARN')
+        await page.wait_for_timeout(1600)
+        r2 = await page.evaluate(JS_BUNDLE_PICK_ROW, [str(it['id'])])
+        if not str(r2).startswith('ok'):
+            self.log('   ✗ ค้นหา %s แล้วไม่เจอแถวที่ ID ตรง (%s) — ไม่กดเพิ่ม กันได้ของผิด'
+                     % (it['id'], r2), 'ERR')
             return False
+        await page.wait_for_timeout(900)
+        seen = str(r2).split('|', 1)[1] if '|' in str(r2) else ''
+        self.log('   · เพิ่มไอเทม %s (qty=%s tier=%s)  [%s]'
+                 % (it['id'], it['qty'], it['tier'], seen[:60]), 'INFO')
+        return True
 
     async def _b_add_wallet(self, page, tab, option, qty):
         """แท็บ Credit / Player Exp. -> เลือกจากดรอปดาวน์ -> ใส่จำนวน -> กด + เพิ่ม"""
@@ -3604,6 +3717,20 @@ class App:
         self.log('   ⚠ เปลี่ยนประเภท Fame Point เป็นเครดิตเรียลไทม์ไม่สำเร็จ — '
                  'ต้องแก้เองบนเว็บก่อนกดสร้าง', 'ERR')
         return False
+
+    async def _b_expand(self, page):
+        """กด "ขยายทั้งหมด" — การ์ดที่ย่ออยู่ไม่มีช่องจำนวน/Tier ให้กรอก"""
+        try:
+            r = await page.evaluate(JS_BUNDLE_EXPAND)
+            if r != 'ok':
+                btn = page.locator('button:has-text("ขยายทั้งหมด")').first
+                if await btn.count() > 0:
+                    await btn.click(timeout=4000)
+                    r = 'ok'
+            await page.wait_for_timeout(700)
+            return r == 'ok'
+        except Exception:
+            return False
 
     async def _b_set_row(self, page, idx, qty, tier):
         """ตั้งจำนวน + Tier ของการ์ดใบที่ idx (นับจาก 1)"""
