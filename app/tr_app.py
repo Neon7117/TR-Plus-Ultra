@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.6.4 : ผลค้นหาเรียงตามลำดับที่สั่ง + ตัดตัวที่ไม่ได้สั่งหาออก
+V0.6.5 : แก้ชีทติดมาเองตอนเปิดไฟล์ (ทำให้ไอเทมหายไปจากรายการ)
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -1227,11 +1227,14 @@ class ImportDialog:
             if n and first_hit is None:
                 first_hit = i
         hits = sum(1 for _, n in self.sheets if n)
-        self.info.config(text=f'ไฟล์นี้มี {len(self.sheets)} ชีท · พบตารางไอเทมใน {hits} ชีท')
+        self.info.config(text=f'ไฟล์นี้มี {len(self.sheets)} ชีท · พบตารางไอเทมใน {hits} ชีท'
+                              ' · เลือกชีทที่ต้องการทางซ้าย')
+        # ไม่เลือกชีทให้อัตโนมัติ — เพราะเลือกได้หลายชีท ถ้าเลือกไว้ให้ก่อน
+        # พอผู้ใช้เลื่อนไปคลิกชีทที่ต้องการ ชีทที่เลือกไว้ให้จะติดมาด้วยโดยไม่รู้ตัว
+        # (มันอยู่บนสุดของลิสต์ เลื่อนลงไปแล้วมองไม่เห็น)
         if first_hit is not None:
-            self.lb.selection_set(first_hit)
             self.lb.see(first_hit)
-            self._on_sheet()
+        self._on_sheet()
 
     # ---------- เลือกชีท (เลือกได้หลายชีทพร้อมกัน) ----------
     def _selected(self):
@@ -1258,8 +1261,12 @@ class ImportDialog:
         names = self._selected()
         self.sheet_names = names
         self.sheet_name = names[0] if names else ''
-        self.sel_lbl.config(text=(f'เลือกไว้ {len(names)} ชีท' if names else 'ยังไม่ได้เลือกชีท'),
-                            fg=C['fg'] if names else C['dim'])
+        # โชว์ "ชื่อชีท" ที่เลือกไว้ด้วย ไม่ใช่แค่จำนวน — จะได้เห็นทันทีถ้ามีชีทติดมาเกิน
+        if not names:
+            self.sel_lbl.config(text='ยังไม่ได้เลือกชีท', fg=C['dim'])
+        else:
+            show = ', '.join(names[:4]) + (' …อีก %d' % (len(names) - 4) if len(names) > 4 else '')
+            self.sel_lbl.config(text='เลือกไว้ %d ชีท: %s' % (len(names), show), fg=C['fg'])
         if self._pending is not None:
             try:
                 self.top.after_cancel(self._pending)
