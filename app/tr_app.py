@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.6.2 : เตือนแถวแปลกปลอม (เตือนอย่างเดียว ไม่ตัดทิ้ง) ตัดสินใจเองเป็นเคสๆ
+V0.6.3 : หน้าค้นหากางดูรายการที่จะค้นหาได้
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -1656,6 +1656,7 @@ class App:
         self.results = []
         self.not_found = []
         self.imported = []
+        self.imp_src = ''
         self.running = False
         self.cancel = False
 
@@ -1761,6 +1762,49 @@ class App:
         self.btn_multi.grid(row=0, column=3, padx=(8, 0), ipadx=14, ipady=3)
         self.btn_multi.config(state='disabled')
 
+        # ---- ปุ่มกาง/พับ รายการที่จะค้นหา ----
+        self.imp_open = False
+        self.btn_imp = self._btn(s2, '▸  ดูรายการที่จะค้นหา', self.toggle_imp)
+        self.btn_imp.grid(row=1, column=0, columnspan=2, sticky='w', pady=(10, 0),
+                          ipadx=8, ipady=3)
+        self.btn_imp.config(state='disabled')
+        self.lbl_imp = tk.Label(s2, text='', bg=C['bg'], fg=C['warn'], font=('Segoe UI', 9),
+                                anchor='w')
+        self.lbl_imp.grid(row=1, column=2, columnspan=2, sticky='w', padx=12, pady=(10, 0))
+
+        # ---- แผงรายการ (ซ่อนไว้ก่อน กางเมื่อกดปุ่ม) ----
+        self.imp_box = tk.LabelFrame(p, text='  รายการที่จะค้นหา  ', bg=C['bg'], fg=C['dim'],
+                                     font=('Segoe UI', 9, 'bold'), bd=1, relief='solid')
+        ib = tk.Frame(self.imp_box, bg=C['bg'])
+        ib.pack(fill='both', expand=True, padx=12, pady=10)
+        ibar = tk.Frame(ib, bg=C['bg'])
+        ibar.pack(fill='x')
+        self._btn(ibar, '🗑  เอาออกจากรายการ', self.imp_del).pack(side='left', ipadx=8, ipady=3)
+        self._btn(ibar, '📋  คัดลอกเลขทั้งหมด', self.imp_copy).pack(side='left', padx=8,
+                                                                    ipadx=8, ipady=3)
+        self.imp_cnt = tk.Label(ibar, text='', bg=C['bg'], fg=C['dim'], font=FM)
+        self.imp_cnt.pack(side='right')
+
+        itw = tk.Frame(ib, bg=C['bg'])
+        itw.pack(fill='both', expand=True, pady=(8, 0))
+        icols = ('n', 'w', 'kind', 'name', 'dur', 'trade', 'qty')
+        self.imp_tree = ttk.Treeview(itw, columns=icols, show='headings',
+                                     style='TR.Treeview', height=6, selectmode='extended')
+        for c, t, w in (('n', '#', 40), ('w', '', 26), ('kind', 'ItemKind', 95),
+                        ('name', 'ชื่อไอเทม', 360), ('dur', 'ระยะเวลา', 90),
+                        ('trade', 'แลกเปลี่ยน', 95), ('qty', 'จำนวน', 70)):
+            self.imp_tree.heading(c, text=t)
+            self.imp_tree.column(c, width=w, anchor='w')
+        self.imp_tree.tag_configure('warn', background='#3a3018', foreground='#e3b341')
+        isb = ttk.Scrollbar(itw, orient='vertical', command=self.imp_tree.yview)
+        self.imp_tree.configure(yscrollcommand=isb.set)
+        self.imp_tree.pack(side='left', fill='both', expand=True)
+        isb.pack(side='right', fill='y')
+        self.imp_why = tk.Label(ib, text='', bg=C['bg'], fg=C['warn'], font=('Segoe UI', 9),
+                                anchor='w', justify='left', wraplength=940)
+        self.imp_why.pack(fill='x', pady=(6, 0))
+        self.imp_tree.bind('<<TreeviewSelect>>', lambda e: self._imp_why())
+
         s3 = self._card(p, 'Deep Check  (เข้าไปดูค่าจริงในหน้ารายละเอียด)')
         self.v_deep = tk.BooleanVar(value=bool(self.prefs.get('deep', False)))
         tk.Checkbutton(s3, text='เปิด Deep Check', variable=self.v_deep, bg=C['bg'], fg=C['fg'],
@@ -1790,6 +1834,7 @@ class App:
                  ).grid(row=3, column=0, columnspan=4, sticky='w', pady=(8, 0))
 
         s4 = tk.Frame(p, bg=C['bg'])
+        self.s_tail = s4
         s4.pack(fill='x', padx=14, pady=(14, 0))
         self.v_headless = tk.BooleanVar(value=bool(self.prefs.get('headless', False)))
         tk.Checkbutton(s4, text='ซ่อนหน้าต่าง Chrome ตอนทำงาน', variable=self.v_headless,
@@ -2635,6 +2680,74 @@ class App:
         except Exception as ex:
             messagebox.showerror('Template', str(ex))
 
+    # ---------- รายการที่จะค้นหา ----------
+    def toggle_imp(self):
+        self.imp_open = not self.imp_open
+        if self.imp_open:
+            # กางแล้วต้องเห็นจริง — ถ้าหน้าต่างเตี้ยไป ขยายให้เอง
+            try:
+                self.root.update_idletasks()
+                want = min(950, self.root.winfo_screenheight() - 80)
+                if self.root.winfo_height() < want:
+                    self.root.geometry('%dx%d' % (max(1080, self.root.winfo_width()), want))
+            except Exception:
+                pass
+            self.imp_box.pack(fill='both', expand=True, padx=14, pady=(12, 0),
+                              before=self.s_tail)
+            self.btn_imp.config(text='▾  ซ่อนรายการที่จะค้นหา')
+        else:
+            self.imp_box.pack_forget()
+            self.btn_imp.config(text='▸  ดูรายการที่จะค้นหา')
+
+    def _imp_why(self):
+        s = self.imp_tree.selection()
+        if not s:
+            return
+        i = self.imp_tree.index(s[0])
+        w = self.imported[i].get('warn') if 0 <= i < len(self.imported) else None
+        self.imp_why.config(text=('⚠  แถว #%d : %s' % (i + 1, ' · '.join(w))) if w else '')
+
+    def refresh_imp(self):
+        """วาดรายการที่จะค้นหาใหม่ — เรียกทุกครั้งที่ self.imported เปลี่ยน"""
+        nwarn = mark_suspects(self.imported)
+        self.imp_tree.delete(*self.imp_tree.get_children())
+        for i, r in enumerate(self.imported, 1):
+            dur = r.get('dur', '')
+            dur = 'ถาวร' if dur == '' else ('— ไม่กรอง —' if dur == 'any' else str(dur) + ' วัน')
+            trade = {'yes': 'ได้', 'no': 'ไม่ได้', 'any': '— ไม่กรอง —'}.get(
+                r.get('trade', 'any'), r.get('trade', ''))
+            name = r.get('disp') or r.get('name') or ''
+            self.imp_tree.insert('', 'end', tags=('warn',) if r.get('warn') else (),
+                                 values=(i, '⚠' if r.get('warn') else '',
+                                         r.get('kind', ''), name, dur, trade,
+                                         r.get('qty') or '—'))
+        n = len(self.imported)
+        self.imp_cnt.config(text=f'{n} รายการ' + (f'  ·  น่าสงสัย {nwarn}' if nwarn else ''))
+        self.btn_imp.config(state='normal' if n else 'disabled')
+        self.btn_multi.config(state='normal' if n else 'disabled')
+        self.lbl_imp.config(text=(f'⚠  มี {nwarn} รายการหน้าตาไม่เหมือนไอเทมทั่วไป — กางดูได้'
+                                  if nwarn else ''))
+        self.imp_why.config(text='')
+
+    def imp_del(self):
+        sel = sorted((self.imp_tree.index(s) for s in self.imp_tree.selection()), reverse=True)
+        if not sel:
+            return messagebox.showinfo('รายการ', 'เลือกแถวที่จะเอาออกก่อนนะ')
+        for i in sel:
+            if 0 <= i < len(self.imported):
+                del self.imported[i]
+        self.refresh_imp()
+        self.lbl_file.config(text=f'{self.imp_src} — {len(self.imported)} รายการ')
+        self.log(f'เอาออกจากรายการ {len(sel)} ตัว (เหลือ {len(self.imported)})', 'INFO')
+
+    def imp_copy(self):
+        if not self.imported:
+            return
+        ids = ', '.join(str(r.get('kind', '')) for r in self.imported if r.get('kind'))
+        self.root.clipboard_clear()
+        self.root.clipboard_append(ids)
+        self.log(f'คัดลอก {len(self.imported)} เลขไอเทมแล้ว', 'OK')
+
     def pick_file(self):
         path = filedialog.askopenfilename(filetypes=[('Excel / CSV', '*.xlsx *.xlsm *.csv')])
         if not path:
@@ -2650,14 +2763,20 @@ class App:
                 if dlg.result is None:
                     return
                 rows = dlg.result
-                where = 'ทุกชีท' if getattr(dlg, 'v_all', None) and dlg.v_all.get() else dlg.sheet_name
+                names = getattr(dlg, 'sheet_names', None) or (
+                    [dlg.sheet_name] if dlg.sheet_name else [])
+                if len(names) > 3:
+                    where = '%d ชีท' % len(names)
+                else:
+                    where = ', '.join(names) or '-'
                 src = f'{os.path.basename(path)}  ›  {where}'
             if not rows:
                 messagebox.showwarning('นำเข้า', 'ไม่พบรายการที่ใช้ได้ในไฟล์นี้')
                 return
             self.imported = rows
+            self.imp_src = src
             self.lbl_file.config(text=f'{src} — {len(rows)} รายการ')
-            self.btn_multi.config(state='normal')
+            self.refresh_imp()
             self.log(f'นำเข้าจาก {src}: {len(rows)} รายการ', 'OK')
             log_event('import', file=os.path.basename(path), source=src, rows=len(rows))
         except Exception as ex:
