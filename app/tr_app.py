@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.7.1 : แก้บั๊กหน้าบันเดิล (เลขไอเทมลงผิดช่อง + ได้ไอเทมผิดตัว)
+V0.7.2 : แก้ตั้ง Tier ในการ์ดไม่ได้ (ดรอปดาวน์เลื่อนผิดใบ)
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -1039,39 +1039,110 @@ JS_BUNDLE_ROW_QTY = """
   return 'ok';
 }"""
 
-JS_BUNDLE_ROW_TIER = """
-([idx, tier]) => {
-  // <select> ธรรมดา ตั้งค่าได้เลย · ถ้าเป็น combobox ของ React ให้ฝั่ง python คลิกเอง
+# หา "การ์ดใบที่ N" แล้วติดป้าย data-trpu ไว้ที่ตัวเลือก Tier ของใบนั้น
+# ห้ามนับ [role=combobox] ทั้งหน้า เพราะจะรวม "ประเภท Bundle" ที่แผงขวาเข้าไปด้วย
+# แล้วเลื่อนผิดใบทั้งแถว (เคยพลาดมาแล้ว)
+JS_BUNDLE_MARK_TIER = """
+([idx, tiers]) => {
+  function vis(el){
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  // การ์ด = กล่องที่มีทั้งช่อง "จำนวน (Quantity)" และคำว่า "Tier"
   const cards = [];
   for (const el of document.querySelectorAll('*')) {
     if (el.children.length) continue;
-    if ((el.textContent || '').trim() !== 'Tier') continue;
+    if ((el.textContent || '').trim().indexOf('จำนวน (Quantity)') !== 0) continue;
     let n = el.parentElement;
-    for (let i = 0; i < 5 && n; i++) {
-      const sl = n.querySelector('select');
-      if (sl) {
-        const st = getComputedStyle(sl);
-        const rc = sl.getBoundingClientRect();
-        if (st.display !== 'none' && st.visibility !== 'hidden' && rc.height > 0)
-          cards.push(sl);
+    for (let i = 0; i < 6 && n; i++) {
+      if ((n.textContent || '').indexOf('Tier') >= 0 && n.querySelector('input') && vis(n)) {
+        if (cards.indexOf(n) < 0) cards.push(n);
         break;
       }
       n = n.parentElement;
     }
   }
-  const s = cards[idx - 1];
-  if (!s) return 'combobox';
-  const opts = [...s.options];
-  const j = opts.findIndex(o => o.text.trim().toLowerCase() === String(tier).toLowerCase());
-  if (j < 0) return 'ไม่มีตัวเลือก ' + tier;
-  const d = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
-  d.set.call(s, opts[j].value);
-  s.dispatchEvent(new Event('input', {bubbles: true}));
-  s.dispatchEvent(new Event('change', {bubbles: true}));
-  return 'ok';
+  const card = cards[idx - 1];
+  if (!card) return 'ไม่เจอการ์ดใบที่ ' + idx + ' (เจอ ' + cards.length + ' ใบ)';
+
+  // ในการ์ดใบนั้น หาตัวเลือก Tier
+  let ctl = card.querySelector('select');
+  if (!ctl) {
+    const names = (tiers || []).concat(['เลือก Tier']);
+    const cands = [...card.querySelectorAll('[role="combobox"],button')].filter(e => {
+      if (!vis(e)) return false;
+      const t = (e.textContent || '').trim();
+      return names.indexOf(t) >= 0;
+    });
+    ctl = cands[0];
+  }
+  if (!ctl) return 'ไม่เจอตัวเลือก Tier ในการ์ดใบที่ ' + idx;
+  document.querySelectorAll('[data-trpu]').forEach(e => e.removeAttribute('data-trpu'));
+  ctl.setAttribute('data-trpu', 'tier');
+  ctl.scrollIntoView({block: 'center'});
+  return 'ok|' + (ctl.textContent || '').trim();
 }"""
 
+# อ่านค่า Tier ปัจจุบันของการ์ดที่ติดป้ายไว้ — ใช้ตรวจว่าตั้งสำเร็จจริงไหม
+JS_BUNDLE_READ_MARK = """
+() => {
+  const el = document.querySelector('[data-trpu="tier"]');
+  if (!el) return null;
+  if (el.tagName === 'SELECT') return el.value;
+  return (el.dataset.value || el.textContent || '').trim();
+}"""
 
+# หาการ์ดของ Fame Point แล้วติดป้ายไว้ที่ดรอปดาวน์ "ประเภท" ของการ์ดนั้น
+JS_BUNDLE_MARK_KIND = """
+([name]) => {
+  function vis(el){
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  let card = null, bl = 1e9;
+  for (const el of document.querySelectorAll('div,section')) {
+    const t = el.textContent || '';
+    if (t.indexOf(name) < 0) continue;
+    if (t.indexOf('ประเภท') < 0) continue;
+    if (!vis(el)) continue;
+    if (t.length < bl) { bl = t.length; card = el; }
+  }
+  if (!card) return 'ไม่เจอการ์ด ' + name;
+  let ctl = card.querySelector('select');
+  if (!ctl) {
+    ctl = [...card.querySelectorAll('[role="combobox"],button')].filter(
+      e => vis(e) && (e.textContent || '').indexOf('WALLET') >= 0)[0];
+  }
+  if (!ctl) {
+    ctl = [...card.querySelectorAll('[role="combobox"]')].filter(vis)[0];
+  }
+  if (!ctl) return 'ไม่เจอดรอปดาวน์ประเภทในการ์ด ' + name;
+  document.querySelectorAll('[data-trpu]').forEach(e => e.removeAttribute('data-trpu'));
+  ctl.setAttribute('data-trpu', 'kind');
+  ctl.scrollIntoView({block: 'center'});
+  return 'ok|' + (ctl.textContent || '').trim();
+}"""
+
+JS_BUNDLE_ROW_TIER = """
+([idx, tier]) => {
+  // เฉพาะกรณีที่เว็บใช้ <select> ธรรมดา (เผื่อวันหลังเปลี่ยน) — ไม่ใช่ก็ให้ฝั่ง python คลิกเอง
+  const el = document.querySelector('[data-trpu="tier"]');
+  if (!el || el.tagName !== 'SELECT') return 'combobox';
+  const opts = [...el.options];
+  const j = opts.findIndex(o => o.text.trim() === String(tier));
+  if (j < 0) return 'ไม่มีตัวเลือก ' + tier;
+  const d = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+  d.set.call(el, opts[j].value);
+  el.dispatchEvent(new Event('input', {bubbles: true}));
+  el.dispatchEvent(new Event('change', {bubbles: true}));
+  return 'ok';
+}"""
 
 JS_BUNDLE_FAME_TYPE = """
 ([idx, want]) => {
@@ -3702,18 +3773,22 @@ class App:
         if r == 'ok':
             self.log('   · ตั้งประเภท Fame Point = %s' % FAME_CREDIT_LABEL, 'OK')
             return True
-        # สำรอง: คลิกดรอปดาวน์ในการ์ดนั้นแล้วเลือกตัวเลือกที่มีคำว่า REALTIME
+        # สำรอง: หาดรอปดาวน์ "ประเภท" ในการ์ด Fame Point แล้วเลือกตัวที่มีคำว่า REALTIME
         try:
-            trig = page.locator('[role="combobox"]').nth(idx - 1)
-            await trig.click(timeout=4000)
-            await page.wait_for_timeout(500)
-            opt = page.locator('[role="option"]:has-text("REALTIME")').first
-            if await opt.count() > 0:
-                await opt.click(timeout=4000)
-                self.log('   · ตั้งประเภท Fame Point = %s' % FAME_CREDIT_LABEL, 'OK')
-                return True
-        except Exception:
-            pass
+            mk = await page.evaluate(JS_BUNDLE_MARK_KIND, [FAME_NAME])
+            if str(mk).startswith('ok'):
+                await page.locator('[data-trpu="kind"]').first.click(timeout=4000)
+                await page.wait_for_timeout(500)
+                opt = page.locator('[role="option"]').filter(has_text='REALTIME').first
+                if await opt.count() > 0:
+                    await opt.click(timeout=4000)
+                    await page.wait_for_timeout(300)
+                    self.log('   · ตั้งประเภท Fame Point = %s' % FAME_CREDIT_LABEL, 'OK')
+                    return True
+            else:
+                self.log('   ! หาการ์ด Fame Point ไม่เจอ: %s' % mk, 'WARN')
+        except Exception as ex:
+            self.log('   ! %s' % str(ex)[:70], 'WARN')
         self.log('   ⚠ เปลี่ยนประเภท Fame Point เป็นเครดิตเรียลไทม์ไม่สำเร็จ — '
                  'ต้องแก้เองบนเว็บก่อนกดสร้าง', 'ERR')
         return False
@@ -3736,23 +3811,70 @@ class App:
         """ตั้งจำนวน + Tier ของการ์ดใบที่ idx (นับจาก 1)"""
         r = await page.evaluate(JS_BUNDLE_ROW_QTY, [idx, str(qty)])
         if r != 'ok':
-            self.log('   ! ตั้งจำนวนการ์ดที่ %d ไม่ได้' % idx, 'WARN')
-        if not tier:
-            return
-        r2 = await page.evaluate(JS_BUNDLE_ROW_TIER, [idx, tier])
-        if r2 == 'ok':
-            return
+            self.log('   ! ตั้งจำนวนการ์ดที่ %d ไม่ได้ (%s)' % (idx, r), 'WARN')
+        if tier:
+            await self._b_tier(page, idx, tier)
+
+    async def _b_tier(self, page, idx, tier):
+        """ตั้ง Tier ของการ์ดใบที่ idx
+
+        ชี้ไปที่การ์ดใบนั้นตรงๆ แล้วติดป้ายไว้ที่ตัวเลือก Tier ก่อนค่อยคลิก
+        ห้ามใช้วิธีนับ [role=combobox] ทั้งหน้า เพราะจะรวม "ประเภท Bundle"
+        ที่แผงขวาเข้าไปด้วย แล้วเลื่อนผิดใบทั้งแถว
+        """
         try:
-            trig = page.locator('[role="combobox"]').nth(idx - 1)
-            await trig.click(timeout=3000)
-            await page.wait_for_timeout(400)
-            opt = page.locator('[role="option"]').filter(has_text=tier).first
-            if await opt.count() > 0:
-                await opt.click(timeout=3000)
-                return
+            await page.keyboard.press('Escape')      # ปิดดรอปดาวน์ที่อาจค้างอยู่
+            await page.wait_for_timeout(150)
         except Exception:
             pass
-        self.log('   ! ตั้ง Tier ของการ์ดที่ %d เป็น %s ไม่ได้' % (idx, tier), 'WARN')
+        mk = await page.evaluate(JS_BUNDLE_MARK_TIER, [idx, TIERS])
+        if not str(mk).startswith('ok'):
+            self.log('   ✗ ตั้ง Tier การ์ดที่ %d ไม่ได้: %s' % (idx, mk), 'ERR')
+            return False
+
+        # ถ้าเป็น <select> ธรรมดาก็จบตรงนี้
+        if await page.evaluate(JS_BUNDLE_ROW_TIER, [idx, tier]) == 'ok':
+            return True
+
+        try:
+            await page.locator('[data-trpu="tier"]').first.click(timeout=5000)
+            await page.wait_for_timeout(500)
+            opt = page.get_by_role('option', name=tier, exact=True).first
+            if await opt.count() == 0:
+                # เทียบข้อความให้ตรงเป๊ะเอง — กัน "S" ไปโดน "SS" / "SS+" / "SSS"
+                opts = page.locator('[role="option"]')
+                n = await opts.count()
+                opt = None
+                for i in range(n):
+                    o = opts.nth(i)
+                    if (await o.inner_text()).strip() == tier:
+                        opt = o
+                        break
+                if opt is None:
+                    names = []
+                    for i in range(min(n, 8)):
+                        names.append((await opts.nth(i).inner_text()).strip())
+                    self.log('   ✗ การ์ดที่ %d: ไม่มีตัวเลือก Tier "%s" (มี: %s)'
+                             % (idx, tier, ', '.join(names) or '-'), 'ERR')
+                    await page.keyboard.press('Escape')
+                    return False
+            await opt.click(timeout=5000)
+            await page.wait_for_timeout(400)
+        except Exception as ex:
+            self.log('   ✗ ตั้ง Tier การ์ดที่ %d ไม่ได้: %s' % (idx, str(ex)[:70]), 'ERR')
+            try:
+                await page.keyboard.press('Escape')
+            except Exception:
+                pass
+            return False
+
+        got = await page.evaluate(JS_BUNDLE_READ_MARK)
+        if (got or '').strip() != tier:
+            self.log('   ✗ การ์ดที่ %d ตั้ง Tier เป็น "%s" ไม่สำเร็จ (ตอนนี้เป็น "%s")'
+                     % (idx, tier, got or ''), 'ERR')
+            return False
+        self.log('   · การ์ดที่ %d Tier = %s' % (idx, tier), 'INFO')
+        return True
 
     async def _b_pick(self, page, label, value):
         r = await page.evaluate(JS_PICK_TYPE, [value, label])
