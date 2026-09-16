@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.6.0 : เพิ่มแท็บ "สร้าง Item" — โยนไฟล์ต้นฉบับเข้าไปแล้วสร้างได้เลย
+V0.6.2 : เตือนแถวแปลกปลอม (เตือนอย่างเดียว ไม่ตัดทิ้ง) ตัดสินใจเองเป็นเคสๆ
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -852,6 +852,51 @@ def read_sheet_rows(wb, sheet):
             for r in wb[sheet].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True)]
 
 
+MAX_SANE_NAME = 70          # ชื่อไอเทมยาวเกินนี้ ปกติจะเป็นข้อความโน้ตในชีท ไม่ใช่ชื่อไอเทม
+#   วัดจากไฟล์จริงแล้ว ชื่อที่ยาวที่สุด (ประกอบคำต่อท้าย+วัน แล้ว) = 52 ตัวอักษร
+#   ตั้ง 70 เผื่อไว้ ของจริงจะไม่โดนเตือน แต่ประโยคโน้ตในชีทจะโดน
+
+
+def kind_mode_len(rows):
+    """ความยาวเลข ItemKind ที่พบบ่อยที่สุดในชุดนี้ — ใช้เป็นไม้บรรทัดของชุดนั้นเอง
+    ไม่ได้ตั้งกฎตายตัวว่าต้องกี่หลัก เพราะแต่ละไฟล์อาจไม่เหมือนกัน"""
+    counts = {}
+    for r in rows:
+        k = str(r.get('kind') or '')
+        if k:
+            counts[len(k)] = counts.get(len(k), 0) + 1
+    if not counts:
+        return 0
+    return max(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+
+
+def suspect_reasons(r, mode_len=0):
+    """บอกว่าแถวนี้ดู "แปลกปลอม" ตรงไหน — บอกเฉยๆ ไม่ตัดทิ้ง
+    ชีทบางใบเขียนโน้ตปนมาในคอลัมน์ตาราง เลยโผล่มาเป็นไอเทมได้
+    แต่บางทีก็เป็นของจริง เลยให้คนตัดสินเองเป็นเคสๆ ไป"""
+    out = []
+    k = str(r.get('kind') or '')
+    if mode_len and k and len(k) <= mode_len - 2:
+        out.append('เลข ItemKind สั้นกว่าตัวอื่นในชุดนี้มาก (%d หลัก · ส่วนใหญ่ %d หลัก)'
+                   % (len(k), mode_len))
+    nm = str(r.get('raw') or r.get('name') or r.get('disp') or '')
+    if len(nm) > MAX_SANE_NAME:
+        out.append('ชื่อยาวผิดปกติ (%d ตัวอักษร) อาจเป็นข้อความโน้ตในชีท' % len(nm))
+    return out
+
+
+def mark_suspects(rows):
+    """ติดป้าย warn ให้ทุกแถว แล้วคืนจำนวนแถวที่น่าสงสัย (ไม่ลบแถวไหนทิ้งเลย)"""
+    m = kind_mode_len(rows)
+    n = 0
+    for r in rows:
+        w = suspect_reasons(r, m)
+        r['warn'] = w
+        if w:
+            n += 1
+    return n
+
+
 def split_name_qty(raw_name):
     """แยก "ชื่อ" กับ "จำนวนชิ้น" ออกจากกัน — กฎเดียวกับเครื่องมือเดิมเป๊ะ
 
@@ -1014,8 +1059,10 @@ class ImportDialog:
         self.path = path
         self.result = None
         self.sheet_name = ''
+        self.sheet_names = []
         self.sheets = []
         self.rows = []
+        self._pending = None
 
         self.top = tk.Toplevel(parent)
         self.top.title('นำเข้าจาก Excel')
@@ -1057,22 +1104,32 @@ class ImportDialog:
                  font=('Segoe UI', 9, 'bold')).pack(anchor='w')
         lbwrap = tk.Frame(left, bg=C['bg'])
         lbwrap.pack(fill='both', expand=True, pady=(5, 0))
+        # selectmode='multiple' = คลิกทีละชีทเพื่อเลือก/ยกเลิก เลือกหลายชีทได้โดยไม่ต้องกด Ctrl
         self.lb = tk.Listbox(lbwrap, bg=C['input'], fg=C['fg'], bd=0,
                              highlightthickness=1, highlightbackground=C['line'],
                              selectbackground=C['accent'], selectforeground='white',
-                             font=('Segoe UI', 9), activestyle='none')
+                             font=('Segoe UI', 9), activestyle='none',
+                             selectmode='multiple')
         sb = ttk.Scrollbar(lbwrap, orient='vertical', command=self.lb.yview)
         self.lb.configure(yscrollcommand=sb.set)
         self.lb.pack(side='left', fill='both', expand=True)
         sb.pack(side='right', fill='y')
         self.lb.bind('<<ListboxSelect>>', lambda e: self._on_sheet())
 
-        self.v_all = tk.BooleanVar(value=False)
-        tk.Checkbutton(left, text='อ่านทุกชีทในไฟล์ (ตัด ID ซ้ำให้)', variable=self.v_all,
-                       bg=C['bg'], fg=C['dim'], selectcolor=C['input'],
-                       activebackground=C['bg'], activeforeground=C['fg'],
-                       font=('Segoe UI', 9), bd=0, highlightthickness=0,
-                       command=self._on_mode).pack(anchor='w', pady=(8, 0))
+        self.sel_lbl = tk.Label(left, text='', bg=C['bg'], fg=C['fg'],
+                                font=('Segoe UI', 9, 'bold'), anchor='w')
+        self.sel_lbl.pack(fill='x', pady=(8, 2))
+        btnf = tk.Frame(left, bg=C['bg'])
+        btnf.pack(fill='x')
+        for txt, cmd in (('เลือกชีทที่มีตารางทั้งหมด', self._pick_all),
+                         ('ล้างที่เลือก', self._pick_none)):
+            tk.Button(btnf, text=txt, bg=C['input'], fg=C['fg'], bd=0,
+                      font=('Segoe UI', 9), cursor='hand2', activebackground=C['line'],
+                      command=cmd).pack(side='left', padx=(0, 6), ipadx=6, ipady=3)
+        tk.Label(left, text='คลิกชีทเพื่อเลือก คลิกซ้ำเพื่อเอาออก — เลือกได้หลายชีทพร้อมกัน '
+                            'ID ที่ซ้ำกันข้ามชีทจะถูกตัดให้เหลือตัวเดียว',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w',
+                 justify='left', wraplength=265).pack(fill='x', pady=(8, 0))
 
         # ---- ขวา ----
         right = tk.Frame(body, bg=C['bg'])
@@ -1088,17 +1145,24 @@ class ImportDialog:
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), wraplength=690,
                  justify='left').pack(anchor='w', pady=(6, 0))
 
+        self.warn_lbl = tk.Label(right, text='', bg=C['bg'], fg=C['warn'],
+                                 font=('Segoe UI', 9), anchor='w', justify='left',
+                                 wraplength=690)
+        self.warn_lbl.pack(fill='x', pady=(6, 0))
+
         tk.Label(right, text='ข้อมูลที่จะนำเข้า', bg=C['bg'], fg=C['dim'],
                  font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(12, 4))
         pv = tk.Frame(right, bg=C['bg'])
         pv.pack(fill='both', expand=True)
-        cols = ('kind', 'name', 'dur', 'trade', 'qty')
+        cols = ('w', 'kind', 'name', 'dur', 'trade', 'qty')
         self.tree = ttk.Treeview(pv, columns=cols, show='headings', style='TR.Treeview', height=13)
-        for c, t, w in (('kind', 'ItemKind', 95), ('name', 'ชื่อไอเทม', 330),
-                        ('dur', 'ระยะเวลา', 95), ('trade', 'แลกเปลี่ยน', 95),
-                        ('qty', 'จำนวน', 75)):
+        for c, t, w in (('w', '', 26), ('kind', 'ItemKind', 90), ('name', 'ชื่อไอเทม', 300),
+                        ('dur', 'ระยะเวลา', 90), ('trade', 'แลกเปลี่ยน', 90),
+                        ('qty', 'จำนวน', 70)):
             self.tree.heading(c, text=t)
             self.tree.column(c, width=w, anchor='w')
+        self.tree.tag_configure('warn', background='#3a3018', foreground='#e3b341')
+        self.tree.bind('<<TreeviewSelect>>', lambda e: self._why())
         tsb = ttk.Scrollbar(pv, orient='vertical', command=self.tree.yview)
         self.tree.configure(yscrollcommand=tsb.set)
         self.tree.pack(side='left', fill='both', expand=True)
@@ -1169,53 +1233,78 @@ class ImportDialog:
             self.lb.see(first_hit)
             self._on_sheet()
 
-    # ---------- เลือกชีท / สลับโหมด ----------
-    def _key(self):
-        return '\x00ALL' if self.v_all.get() else self.sheet_name
+    # ---------- เลือกชีท (เลือกได้หลายชีทพร้อมกัน) ----------
+    def _selected(self):
+        """ชื่อชีทที่ถูกเลือกอยู่ เรียงตามลำดับในไฟล์"""
+        return [self.sheets[i][0] for i in self.lb.curselection()
+                if 0 <= i < len(self.sheets)]
 
-    def _on_mode(self):
-        self.lb.config(state='disabled' if self.v_all.get() else 'normal')
-        self._request()
+    def _key(self):
+        return '\x00'.join(self._selected())
+
+    def _pick_all(self):
+        self.lb.selection_clear(0, tk.END)
+        for i, (_, n) in enumerate(self.sheets):
+            if n:
+                self.lb.selection_set(i)
+        self._on_sheet()
+
+    def _pick_none(self):
+        self.lb.selection_clear(0, tk.END)
+        self._on_sheet()
 
     def _on_sheet(self):
-        sel = self.lb.curselection()
-        if not sel or not self.sheets:
-            return
-        self.sheet_name = self.sheets[sel[0]][0]
-        if not self.v_all.get():
-            self._request()
+        """คลิกรัวๆ หลายชีทติดกัน ไม่ต้องอ่านไฟล์ทุกคลิก — รอให้หยุดคลิกก่อน"""
+        names = self._selected()
+        self.sheet_names = names
+        self.sheet_name = names[0] if names else ''
+        self.sel_lbl.config(text=(f'เลือกไว้ {len(names)} ชีท' if names else 'ยังไม่ได้เลือกชีท'),
+                            fg=C['fg'] if names else C['dim'])
+        if self._pending is not None:
+            try:
+                self.top.after_cancel(self._pending)
+            except Exception:
+                pass
+        self._pending = self.top.after(300, self._request)
 
     def _request(self):
+        self._pending = None
         key = self._key()
         if not key:
+            self._clear()
+            self.info.config(text='เลือกชีทอย่างน้อยหนึ่งชีท')
             return
         if key in self.cache:
             rows, note = self.cache[key]
             self._show(rows, note)
             return
         self._clear()
-        self.info.config(text='กำลังอ่านทุกชีท…' if self.v_all.get()
-                         else f'กำลังอ่านชีท “{self.sheet_name}” …')
+        names = self._selected()
+        self.info.config(text=(f'กำลังอ่าน {len(names)} ชีท…' if len(names) > 1
+                               else f'กำลังอ่านชีท “{names[0]}” …'))
         if key in self.inflight:
             return
         self.inflight.add(key)
-        threading.Thread(target=self._rows_worker, args=(key, self.sheet_name,),
-                         daemon=True).start()
+        threading.Thread(target=self._rows_worker, args=(key, names), daemon=True).start()
 
-    def _rows_worker(self, key, sheet):
+    def _rows_worker(self, key, names):
         rows, note = [], ''
         try:
             with self.lock:
-                if key == '\x00ALL':
-                    seen = set()
-                    for name, n in self.sheets:
-                        if not n:
-                            continue
-                        rows.extend(parse_master_rows(read_sheet_rows(self.wb, name), seen))
-                    note = f'อ่านทุกชีท ({sum(1 for _, n in self.sheets if n)} ชีทที่มีตาราง)'
+                seen = set()          # ตัด ItemKind ซ้ำข้ามชีทให้เหลือตัวเดียว
+                hit = []
+                for k, name in enumerate(names, 1):
+                    if len(names) > 1:
+                        self.q.put(('info', 'กำลังอ่าน %d/%d ชีท…  %s  (ได้แล้ว %d รายการ)'
+                                    % (k, len(names), name, len(rows))))
+                    got = parse_master_rows(read_sheet_rows(self.wb, name), seen)
+                    if got:
+                        hit.append('%s (%d)' % (name, len(got)))
+                    rows.extend(got)
+                if len(names) == 1:
+                    note = 'ชีท “%s”' % names[0]
                 else:
-                    rows = parse_master_rows(read_sheet_rows(self.wb, sheet))
-                    note = f'ชีท “{sheet}”'
+                    note = 'รวม %d ชีท: %s' % (len(names), ', '.join(hit) or '-')
         except Exception as ex:
             self.q.put(('info', 'อ่านไม่ได้: ' + str(ex)))
         self.q.put(('rows', key, rows, note))
@@ -1227,17 +1316,41 @@ class ImportDialog:
         self.count_lbl.config(text='')
         self.ok_btn.config(state='disabled', bg=C['input'], fg=C['dim'])
 
+    def _why(self):
+        """คลิกแถวเหลือง แล้วบอกว่าเตือนเพราะอะไร"""
+        s = self.tree.selection()
+        if not s:
+            return
+        i = self.tree.index(s[0])
+        if 0 <= i < len(self.rows):
+            w = self.rows[i].get('warn') or []
+            if w:
+                self.warn_lbl.config(text='⚠  ' + ' · '.join(w), fg=C['warn'])
+            else:
+                self.warn_lbl.config(text='', fg=C['dim'])
+
     def _show(self, rows, note):
         self.rows = rows
+        nwarn = mark_suspects(rows)
         self.tree.delete(*self.tree.get_children())
         for r in rows[:400]:
             dur = 'ถาวร' if r['dur'] == '' else (r['dur'] + ' วัน')
             trade = {'yes': 'ได้', 'no': 'ไม่ได้', 'any': '— ไม่กรอง —'}.get(r['trade'], r['trade'])
-            self.tree.insert('', 'end', values=(r['kind'], r['disp'], dur, trade, r['qty'] or '—'))
+            self.tree.insert('', 'end', tags=('warn',) if r.get('warn') else (),
+                             values=('⚠' if r.get('warn') else '', r['kind'], r['disp'],
+                                     dur, trade, r['qty'] or '—'))
         has_move = any(r.get('has_move') for r in rows)
         extra = '' if has_move else '   (ชีทนี้ไม่มีคอลัมน์ Itemmove → ไม่กรองแลกเปลี่ยน)'
         self.info.config(text=f'{note} · พบ {len(rows)} รายการ{extra}')
+        if nwarn:
+            self.warn_lbl.config(
+                text=f'⚠  มี {nwarn} แถวที่หน้าตาไม่เหมือนไอเทมทั่วไป (แถวสีเหลือง) — '
+                     'ยังนำเข้าให้ครบ คลิกที่แถวเพื่อดูว่าเตือนเพราะอะไร',
+                fg=C['warn'])
+        else:
+            self.warn_lbl.config(text='', fg=C['dim'])
         self.count_lbl.config(text=f'จะนำเข้า {len(rows)} รายการ'
+                              + (f'  (น่าสงสัย {nwarn})' if nwarn else '')
                               + ('   (แสดงตัวอย่าง 400 แถวแรก)' if len(rows) > 400 else ''))
         self.ok_btn.config(state='normal' if rows else 'disabled',
                            bg=C['accent'] if rows else C['input'],
@@ -1395,6 +1508,21 @@ def run_logic_tests():
     r.append(_t(e1['name'] == 'ค้อน',
                 'สร้างไอเทม: ชื่อไม่มี "ชิ้น" -> ไม่เติมคำต่อท้าย/วัน', e1['name'],
                 'กฎเดิมเติมเฉพาะชื่อที่มี "ชิ้น"'))
+
+    # ---- ระบบเตือนของแปลกปลอม (เตือนอย่างเดียว ห้ามตัดแถวทิ้ง) ----
+    junk = [{'kind': '128107', 'raw': 'ก'}, {'kind': '128108', 'raw': 'ข'},
+            {'kind': '128109', 'raw': 'ค'}, {'kind': '2', 'raw': 'แก้ UID เรียบร้อย'}]
+    nw = mark_suspects(junk)
+    r.append(_t(nw == 1 and len(junk) == 4,
+                'เตือนแถวแปลกปลอมได้ โดยไม่ตัดแถวทิ้ง',
+                'เตือน %d แถว · เหลือ %d แถว' % (nw, len(junk))))
+    longest = 'แพ็กเบ็ดตกปลาเทลส์รันเนอร์ 2 ชั่วโมง (Gift) (30 วัน)'
+    r.append(_t(suspect_reasons({'kind': '128909', 'raw': longest}, 6) == [],
+                'ชื่อไอเทมจริงที่ยาวที่สุด ไม่ถูกเตือนผิด',
+                '%d ตัวอักษร (เพดาน %d)' % (len(longest), MAX_SANE_NAME)))
+    junk[3]['kind'] = '128110'
+    r.append(_t(mark_suspects(junk) == 0,
+                'แก้ ItemKind แล้วคำเตือนหายเอง'))
 
     # ---- สภาพแวดล้อม ----
     r.append(_t(XLSX_OK, 'อ่านไฟล์ Excel ได้ (openpyxl)', 'ok' if XLSX_OK else 'ไม่มี openpyxl'))
@@ -1728,20 +1856,26 @@ class App:
 
         tw = tk.Frame(s2, bg=C['bg'])
         tw.pack(fill='both', expand=True, pady=(10, 0))
-        cols = ('n', 'kind', 'name', 'type', 'price', 'dur', 'qty', 'trade')
+        cols = ('n', 'w', 'kind', 'name', 'type', 'price', 'dur', 'qty', 'trade')
         self.c_tree = ttk.Treeview(tw, columns=cols, show='headings',
-                                   style='TR.Treeview', height=11)
-        for c, t, w in (('n', '#', 40), ('kind', 'ItemKind', 90),
-                        ('name', 'ชื่อที่จะกรอกลงเว็บ', 330), ('type', 'ประเภท', 90),
-                        ('price', 'Price', 65), ('dur', 'ระยะเวลา', 80),
-                        ('qty', 'จำนวน', 60), ('trade', 'แลกเปลี่ยน', 85)):
+                                   style='TR.Treeview', height=8)
+        for c, t, w in (('n', '#', 38), ('w', '', 26), ('kind', 'ItemKind', 88),
+                        ('name', 'ชื่อที่จะกรอกลงเว็บ', 310), ('type', 'ประเภท', 85),
+                        ('price', 'Price', 60), ('dur', 'ระยะเวลา', 78),
+                        ('qty', 'จำนวน', 58), ('trade', 'แลกเปลี่ยน', 82)):
             self.c_tree.heading(c, text=t)
             self.c_tree.column(c, width=w, anchor='w')
+        self.c_tree.tag_configure('warn', background='#3a3018', foreground='#e3b341')
         csb = ttk.Scrollbar(tw, orient='vertical', command=self.c_tree.yview)
         self.c_tree.configure(yscrollcommand=csb.set)
         self.c_tree.pack(side='left', fill='both', expand=True)
         csb.pack(side='right', fill='y')
         self.c_tree.bind('<Double-1>', lambda e: self.c_edit())
+        self.c_tree.bind('<<TreeviewSelect>>', lambda e: self._c_why())
+
+        self.c_warn = tk.Label(s2, text='', bg=C['bg'], fg=C['warn'], font=('Segoe UI', 9),
+                               anchor='w', justify='left', wraplength=940)
+        self.c_warn.pack(fill='x', pady=(8, 0))
 
         # ---------- ลงมือ ----------
         s3 = self._card(p, 'ลงมือสร้าง')
@@ -1780,14 +1914,29 @@ class App:
         else:
             self.c_mode.config(text='โหมดทดสอบ — กรอกฟอร์มให้ดูเฉยๆ ไม่กดสร้าง', fg=C['ok'])
 
+    def _c_why(self):
+        """คลิกแถวเหลืองในคิว แล้วบอกว่าเตือนเพราะอะไร"""
+        i = self._c_sel()
+        if i is None or not (0 <= i < len(self.cq)):
+            return
+        w = self.cq[i].get('warn') or []
+        self.c_warn.config(text=('⚠  แถว #%d : %s' % (i + 1, ' · '.join(w))) if w else '',
+                           fg=C['warn'])
+
     def _c_refresh(self):
+        # คิดใหม่ทุกครั้ง — แก้ ItemKind หรือชื่อแล้วคำเตือนจะหายไปเอง
+        nwarn = mark_suspects(self.cq)
         self.c_tree.delete(*self.c_tree.get_children())
         for i, d in enumerate(self.cq, 1):
-            self.c_tree.insert('', 'end', values=(
-                i, d['kind'], d['name'], d['type'], d['price'] or '—',
-                (d['dur'] + ' วัน') if d['dur'] else 'ถาวร',
+            self.c_tree.insert('', 'end', tags=('warn',) if d.get('warn') else (), values=(
+                i, '⚠' if d.get('warn') else '', d['kind'], d['name'], d['type'],
+                d['price'] or '—', (d['dur'] + ' วัน') if d['dur'] else 'ถาวร',
                 d['qty'] or '—', 'ได้' if d['trade'] else 'ไม่ได้'))
         self.c_count.config(text=('คิวว่าง' if not self.cq else f'ในคิว {len(self.cq)} ไอเทม'))
+        self.c_warn.config(
+            text=(f'⚠  มี {nwarn} แถวหน้าตาไม่เหมือนไอเทมทั่วไป (สีเหลือง) — '
+                  'คลิกที่แถวเพื่อดูเหตุผล · ดับเบิลคลิกเพื่อแก้ · ไม่เอาก็ลบออกจากคิวได้'
+                  if nwarn else ''), fg=C['warn'])
 
     def _c_sel(self):
         s = self.c_tree.selection()
@@ -1948,11 +2097,15 @@ class App:
         if not self.cq:
             return messagebox.showwarning('คิวว่าง', 'ยังไม่มีไอเทมในคิว — นำเข้าไฟล์ต้นฉบับก่อน')
         do = self.cv_do.get()
-        if do and not messagebox.askyesno(
-                'ยืนยัน',
-                f'จะสร้างไอเทมจริงบนเว็บ {len(self.cq)} รายการ\n'
-                'ตรวจชื่อ/ItemKind ในคิวเรียบร้อยแล้วใช่ไหม?'):
-            return
+        nwarn = sum(1 for d in self.cq if d.get('warn'))
+        if do:
+            msg = f'จะสร้างไอเทมจริงบนเว็บ {len(self.cq)} รายการ\n'
+            if nwarn:
+                msg += (f'\n⚠  ในคิวมี {nwarn} แถวที่หน้าตาไม่เหมือนไอเทมทั่วไป (แถวสีเหลือง)\n'
+                        '    ถ้ายังไม่ได้ดู แนะนำให้กดยกเลิกแล้วไล่ดูก่อน\n')
+            msg += '\nตรวจชื่อ/ItemKind ในคิวเรียบร้อยแล้วใช่ไหม?'
+            if not messagebox.askyesno('ยืนยัน', msg):
+                return
         self.save_now()
         self.c_running = True
         self.c_cancel = False
