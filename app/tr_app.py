@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.2 : แจ้งบั๊กแบบง่าย — กดปุ่มแล้วเปิดชีทให้เลย ไปกรอกในชีทเอง
+V0.8.3 : แก้ fame/exp หยิบเลขผิดช่อง และไอเทมซ้ำหลายใบไม่ได้ Tier
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -1174,7 +1174,7 @@ JS_BUNDLE_POPUP_OPEN = """
 }"""
 
 JS_BUNDLE_ACT = """
-([how, key, what, act, value, tiers]) => {
+([how, key, what, act, value, tiers, nth]) => {
   function vis(el){
     if (!el) return false;
     const s = getComputedStyle(el);
@@ -1193,7 +1193,12 @@ JS_BUNDLE_ACT = """
   // ---- 1. หา "การ์ด" ----
   const need = (what === 'kind') ? 'ประเภท'
              : (what === 'tier') ? 'Tier' : 'จำนวน (Quantity)';
-  let card = null, bl = 1e9;
+  //
+  //  ไอเทมตัวเดียวกันใส่ซ้ำได้หลายใบในบันเดิลเดียว (เช่น โบนัสแคช 100 ใส่ 9 ใบ)
+  //  ถ้าเจอ "ใบแรก" แล้วจบ จะไปตั้งค่าใบเดิมซ้ำๆ ใบที่ 6 เป็นต้นไปเลยไม่ได้ Tier
+  //  -> ต้องบอกได้ว่าเอา "ใบที่เท่าไหร่" ของไอเทมนั้น
+  //
+  const cands = [];
   for (const el of document.querySelectorAll('div,section,li')) {
     const t = el.textContent || '';
     if (t.indexOf(need) < 0) continue;
@@ -1204,9 +1209,15 @@ JS_BUNDLE_ACT = """
       if (t.indexOf(String(key)) < 0) continue;
     }
     if (!vis(el)) continue;
-    if (t.length < bl) { bl = t.length; card = el; }
+    cands.push(el);
   }
-  if (!card) return 'ไม่เจอการ์ด ' + key;
+  // เก็บเฉพาะใบในสุด (ตัดกล่องที่ครอบใบอื่นอยู่ทิ้ง) -> ได้ใบละ 1 ตัว เรียงตามหน้าจอ
+  const cards = cands.filter(a => !cands.some(b => b !== a && a.contains(b)));
+  const want = Math.max(1, parseInt(nth || 1, 10));
+  const card = cards[want - 1];
+  if (!card) return cards.length
+    ? ('ไอเทม ' + key + ' มีแค่ ' + cards.length + ' ใบ แต่ขอใบที่ ' + want)
+    : ('ไม่เจอการ์ด ' + key);
 
   // ---- 2. หา "ช่อง" ในการ์ดใบนั้น ----
   //
@@ -1843,28 +1854,43 @@ def src_int(v):
 def bundle_rewards(rows, hr):
     """จับกล่อง 'ได้รับ famepoint กับ exp' ที่อยู่เหนือหัวตาราง
     famepoint -> Credit (ต้องตั้งเป็นเครดิตเรียลไทม์)  ·  exp -> Player Experience
-    ค่าจำนวน: หาจากเซลล์ทางขวา ถ้าไม่มีก็ดูเซลล์ด้านล่างคอลัมน์เดียวกัน"""
+
+    ตัวเลขต้องเป็น "เซลล์ที่อยู่ใต้ป้ายนั้นตรงๆ" เท่านั้น
+    ห้ามกวาดหาเลขไปทางขวาเรื่อยๆ เพราะข้างๆ กล่องมักมีคนพิมพ์เลขอื่นไว้
+    (เช่น "โบนัสแคช 10%  900") ซึ่งไม่เกี่ยวกับ fame/exp เลย — เคยหยิบผิดมาแล้ว
+    """
     region = rows[max(0, hr - 8):hr]
     out = []
     seen = set()
+
+    def num_of(v):
+        s = re.sub(r'[, ]', '', ('' if v is None else str(v)).strip())
+        return re.sub(r'\.0+$', '', s) if re.fullmatch(r'\d+(\.\d+)?', s) else None
+
     for ri, row in enumerate(region):
         cs = [('' if c is None else str(c)).strip() for c in (row or [])]
         for j, c in enumerate(cs):
             cl = c.lower()
             if 'fame' not in cl:
                 continue
+            # ไม่ใช่ป้าย แต่เป็นโน้ตบอกวิธีตั้งค่า เช่น "Famepoint เซ็ตเป็น Wallet_realtime_credit"
+            if 'wallet' in cl or 'เซ็ต' in c:
+                continue
+            # ใต้ป้ายเท่านั้น (เผื่อป้ายสูง 2 แถว ก็ไล่ลงไปได้ 2 แถว)
             val = None
-            for k in range(j + 1, len(cs)):
-                num = re.sub(r'[, ]', '', cs[k])
-                if re.fullmatch(r'\d+(\.\d+)?', num):
-                    val = re.sub(r'\.0+$', '', num)
+            for d in (1, 2):
+                if ri + d >= len(region):
                     break
-            if val is None and ri + 1 < len(region):
-                below = region[ri + 1] or []
-                bc = ('' if j >= len(below) or below[j] is None else str(below[j])).strip()
-                num = re.sub(r'[, ]', '', bc)
-                if re.fullmatch(r'\d+(\.\d+)?', num):
-                    val = re.sub(r'\.0+$', '', num)
+                below = region[ri + d] or []
+                val = num_of(below[j] if j < len(below) else None)
+                if val:
+                    break
+            # ไม่มีข้างล่างจริงๆ ค่อยดูช่องที่ "ติดกันทางขวา" และต้องติดกันเท่านั้น
+            if val is None:
+                for k in (j + 1, j + 2):
+                    if k < len(cs) and cs[k]:
+                        val = num_of(cs[k])
+                        break
             if not val:
                 continue
             if 'credit' not in seen:
@@ -4093,8 +4119,10 @@ class App:
                 missed.append(it['id'])
         if done:
             await self._b_expand(page)
+            nth = {}      # ไอเทมซ้ำ = คนละใบ ต้องตั้งค่าให้ครบทุกใบ
             for it in done:
-                await self._b_set_row(page, it['id'], it['qty'], it['tier'])
+                nth[it['id']] = nth.get(it['id'], 0) + 1
+                await self._b_set_row(page, it['id'], it['qty'], it['tier'], nth[it['id']])
         if missed:
             self.log('   ⚠ ไอเทมที่เพิ่มไม่ได้: %s' % ', '.join(missed), 'ERR')
 
@@ -4336,14 +4364,14 @@ class App:
             await page.wait_for_timeout(200)
             waited += 200
 
-    async def _b_open_dd(self, page, how, key, what):
+    async def _b_open_dd(self, page, how, key, what, nth=1):
         """เปิดดรอปดาวน์ให้ได้จริง — ลองกดด้วย JS ก่อน ไม่ติดค่อยกดด้วยเมาส์จริง"""
         for attempt in range(3):
             await self._b_settle(page)
             if attempt == 0:
                 # กดด้วยเมาส์จริงก่อน — เหมือนคนกดที่สุด
                 r = await page.evaluate(JS_BUNDLE_ACT,
-                                        [how, str(key), what, 'point', '', TIERS])
+                                        [how, str(key), what, 'point', '', TIERS, nth])
                 if str(r).startswith('ok'):
                     try:
                         x, y = str(r).split('|', 1)[1].split(',')
@@ -4353,10 +4381,10 @@ class App:
             elif attempt == 1:
                 # ยิงเหตุการณ์กดเมาส์ครบชุด — ดรอปดาวน์พวกนี้เปิดตอน "กดลง"
                 r = await page.evaluate(JS_BUNDLE_ACT,
-                                        [how, str(key), what, 'press', '', TIERS])
+                                        [how, str(key), what, 'press', '', TIERS, nth])
             else:
                 r = await page.evaluate(JS_BUNDLE_ACT,
-                                        [how, str(key), what, 'click', '', TIERS])
+                                        [how, str(key), what, 'click', '', TIERS, nth])
             if not str(r).startswith('ok'):
                 return r
             for _ in range(12):
@@ -4368,7 +4396,7 @@ class App:
                     pass
         return 'เปิดดรอปดาวน์แล้วไม่มีตัวเลือกโผล่'
 
-    async def _b_choose(self, page, how, key, what, want, exact=True, label=None):
+    async def _b_choose(self, page, how, key, what, want, exact=True, label=None, nth=1):
         """ตั้งค่าดรอปดาวน์/ช่องในการ์ด แล้วอ่านกลับมาตรวจว่าเข้าจริง
 
         ทุกขั้นตอนหาช่องใหม่ทุกครั้ง ไม่เก็บตัวชี้ไว้ข้ามคำสั่ง
@@ -4381,7 +4409,7 @@ class App:
             return (v == want) if exact else (want in v)
 
         await self._b_settle(page)
-        r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'read', '', TIERS])
+        r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'read', '', TIERS, nth])
         if not str(r).startswith('ok'):
             self.log('   ✗ %s (%s): %s' % (who, what, r), 'ERR')
             return False
@@ -4389,7 +4417,7 @@ class App:
             return True
 
         # <select> ธรรมดา ตั้งได้เลย
-        r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'set', want, TIERS])
+        r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'set', want, TIERS, nth])
         if r == 'ok':
             self.log('   · %s %s = %s' % (who, what, want), 'INFO')
             return True
@@ -4397,12 +4425,12 @@ class App:
 
         # ช่องแบบ <select> ห้ามกดเปิด — ตัวเลือกของมันเป็นหน้าต่างของเบราว์เซอร์
         # ไม่ได้อยู่ในหน้าเว็บ กดแล้วจะค้างและหาตัวเลือกไม่เจอสักอัน
-        tag = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'tag', '', TIERS])
+        tag = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'tag', '', TIERS, nth])
         if str(tag).endswith('SELECT') and why != 'combobox':
             self.log('   ✗ %s (%s): %s' % (who, what, why), 'ERR')
             return False
 
-        opened = await self._b_open_dd(page, how, key, what)
+        opened = await self._b_open_dd(page, how, key, what, nth)
         if opened != 'ok':
             self.log('   ✗ %s (%s) เปิดดรอปดาวน์ไม่ได้: %s (ตอนตั้งค่าตรงๆ: %s)'
                      % (who, what, opened, why), 'ERR')
@@ -4438,7 +4466,7 @@ class App:
             return False
 
         await self._b_settle(page)
-        r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'read', '', TIERS])
+        r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'read', '', TIERS, nth])
         got = str(r).split('|', 1)[1] if '|' in str(r) else ''
         if not _match(got):
             self.log('   ✗ %s %s ตั้งเป็น "%s" ไม่สำเร็จ (ตอนนี้ "%s")'
@@ -4466,15 +4494,19 @@ class App:
             ok = False
         return ok
 
-    async def _b_set_row(self, page, item_id, qty, tier):
-        """ตั้งจำนวน + Tier ของการ์ด "ของไอเทมนี้" (หาโดย Item ID ไม่ใช่ลำดับ)"""
+    async def _b_set_row(self, page, item_id, qty, tier, nth=1):
+        """ตั้งจำนวน + Tier ของการ์ด "ของไอเทมนี้ ใบที่ nth"
+
+        ไอเทมตัวเดียวกันใส่ซ้ำหลายใบได้ ถ้าไม่บอกว่าใบที่เท่าไหร่
+        มันจะไปตั้งใบแรกซ้ำๆ แล้วใบหลังๆ ไม่ได้ Tier (เว็บจะกดสร้างไม่ผ่าน)
+        """
+        who = 'ไอเทม %s' % item_id + (' (ใบที่ %d)' % nth if nth > 1 else '')
         r = await page.evaluate(JS_BUNDLE_ACT,
-                                ['id', str(item_id), 'qty', 'set', str(qty), TIERS])
+                                ['id', str(item_id), 'qty', 'set', str(qty), TIERS, nth])
         if r != 'ok':
-            self.log('   ! ตั้งจำนวนของไอเทม %s ไม่ได้ (%s)' % (item_id, r), 'WARN')
+            self.log('   ! ตั้งจำนวนของ%s ไม่ได้ (%s)' % (who, r), 'WARN')
         if tier:
-            await self._b_choose(page, 'id', item_id, 'tier', tier,
-                                 label='ไอเทม %s' % item_id)
+            await self._b_choose(page, 'id', item_id, 'tier', tier, label=who, nth=nth)
 
     async def _b_pick(self, page, label, value):
         r = await page.evaluate(JS_PICK_TYPE, [value, label])
