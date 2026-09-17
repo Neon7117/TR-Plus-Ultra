@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.6 : ย้ายผลลัพธ์ไปอยู่ในแท็บของแต่ละฟังก์ชัน ไม่กองรวมกัน
+V0.8.7 : ตารางยืดตามหน้าต่าง + แก้เลขลำดับในตาราง Bundle ซ้ำกันหมด
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -3317,13 +3317,13 @@ class App:
         self._build_log()
         self._build_check()
 
-    def _card(self, parent, title):
+    def _card(self, parent, title, grow=False):
         outer = tk.LabelFrame(parent, text='  ' + title + '  ', bg=C['bg'], fg=C['dim'],
                               font=('Segoe UI', 9, 'bold'), bd=1,
                               relief='solid', highlightbackground=C['line'])
-        outer.pack(fill='x', padx=14, pady=(8, 0))
+        outer.pack(fill='both' if grow else 'x', expand=grow, padx=14, pady=(8, 0))
         inner = tk.Frame(outer, bg=C['bg'])
-        inner.pack(fill='x', padx=12, pady=8)
+        inner.pack(fill='both' if grow else 'x', expand=grow, padx=12, pady=8)
         return inner
 
     def _entry(self, parent, width=22):
@@ -4019,12 +4019,12 @@ class App:
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(
             fill='x', pady=(8, 0))
 
-        s2 = self._card(p, 'บันเดิลที่จะสร้าง')
+        s2 = self._card(p, 'บันเดิลที่จะสร้าง', grow=True)
         tw = tk.Frame(s2, bg=C['bg'])
         tw.pack(fill='both', expand=True)
         cols = ('use', 'qty', 'tier', 'info')
         self.b_tree = ttk.Treeview(tw, columns=cols, show='tree headings',
-                                   style='TR.Treeview', height=5)
+                                   style='TR.Treeview', height=4)
         self.b_tree.heading('#0', text='บันเดิล / ไอเทมข้างใน')
         self.b_tree.column('#0', width=420, anchor='w')
         for c, t, w in (('use', 'ใช้', 44), ('qty', 'จำนวน', 70),
@@ -4068,10 +4068,10 @@ class App:
 
         # ---- เลข Bundle ที่สร้างสำเร็จ อยู่ในแท็บเดียวกับที่สั่งสร้าง ----
         self.made = []
-        mw = tk.Frame(p, bg=C['bg'])
-        mw.pack(side='bottom', fill='x', padx=14, pady=(0, 12))
         mb = tk.Frame(p, bg=C['bg'])
-        mb.pack(side='bottom', fill='x', padx=14, pady=(8, 3))
+        mb.pack(fill='x', padx=14, pady=(10, 4))
+        mw = tk.Frame(p, bg=C['bg'])
+        mw.pack(fill='both', expand=True, padx=14, pady=(0, 12))
         tk.Label(mb, text='Bundle ที่สร้างแล้ว', bg=C['bg'], fg=C['dim'],
                  font=('Segoe UI', 9, 'bold')).pack(side='left')
         self.lbl_made = tk.Label(mb, text='ยังไม่ได้สร้าง', bg=C['bg'], fg=C['dim'],
@@ -4080,7 +4080,7 @@ class App:
         self._btn(mb, '📋  คัดลอกเลข Bundle', self.copy_made).pack(
             side='right', ipadx=8, ipady=2)
         mc = ('no', 'bid', 'bname', 'cnt', 'at')
-        self.tree_made = ttk.Treeview(mw, columns=mc, show='headings', height=3,
+        self.tree_made = ttk.Treeview(mw, columns=mc, show='headings', height=4,
                                       style='TR.Treeview')
         for c, t, w in (('no', '#', 42), ('bid', 'Bundle ID', 100),
                         ('bname', 'ชื่อ Bundle', 430), ('cnt', 'ไอเทม', 60),
@@ -4089,7 +4089,7 @@ class App:
             self.tree_made.column(c, width=w, anchor='w')
         msb = ttk.Scrollbar(mw, orient='vertical', command=self.tree_made.yview)
         self.tree_made.configure(yscrollcommand=msb.set)
-        self.tree_made.pack(side='left', fill='x', expand=True)
+        self.tree_made.pack(side='left', fill='both', expand=True)
         msb.pack(side='right', fill='y')
 
         self._b_do_changed()
@@ -5213,10 +5213,11 @@ class App:
         row = {'name': name, 'id': bid or '-', 'items': n_items,
                'at': datetime.now().strftime('%H:%M:%S')}
         self.made.append(row)
+        row['no'] = len(self.made)
 
         def _do():
             self.tree_made.insert('', 'end', values=(
-                len(self.made), row['id'], row['name'], row['items'], row['at']))
+                row['no'], row['id'], row['name'], row['items'], row['at']))
             self.tree_made.yview_moveto(1)
             got = sum(1 for m in self.made if m['id'] != '-')
             self.lbl_made.config(
