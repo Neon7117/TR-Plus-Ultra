@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.5 : กดยืนยันในป๊อปอัปให้ + เอาเลข Bundle มาโชว์ · จัดแท็บใหม่ · ใส่ไอคอน
+V0.8.6 : ย้ายผลลัพธ์ไปอยู่ในแท็บของแต่ละฟังก์ชัน ไม่กองรวมกัน
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -3302,21 +3302,18 @@ class App:
         self.tab_search = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_create = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_bundle = tk.Frame(self.nb.body, bg=C['bg'])
-        self.tab_result = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_log = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_check = tk.Frame(self.nb.body, bg=C['bg'])
         # ซ้าย = แท็บที่ใช้ทำงาน · ขวา = แท็บไว้ดูข้อมูล จะได้ไม่ปนกัน
         self.nb.add(self.tab_search, '🔍  ค้นหา')
         self.nb.add(self.tab_create, '➕  สร้าง Item')
         self.nb.add(self.tab_bundle, '📦  สร้าง Bundle')
-        self.nb.add(self.tab_result, '📋  ผลลัพธ์')
         self.nb.add(self.tab_check, '🩺  ตรวจระบบ', side='right')
         self.nb.add(self.tab_log, '📜  Log', side='right')
 
         self._build_search()
         self._build_create()
         self._build_bundle()
-        self._build_result()
         self._build_log()
         self._build_check()
 
@@ -3324,9 +3321,9 @@ class App:
         outer = tk.LabelFrame(parent, text='  ' + title + '  ', bg=C['bg'], fg=C['dim'],
                               font=('Segoe UI', 9, 'bold'), bd=1,
                               relief='solid', highlightbackground=C['line'])
-        outer.pack(fill='x', padx=14, pady=(12, 0))
+        outer.pack(fill='x', padx=14, pady=(8, 0))
         inner = tk.Frame(outer, bg=C['bg'])
-        inner.pack(fill='x', padx=12, pady=10)
+        inner.pack(fill='x', padx=12, pady=8)
         return inner
 
     def _entry(self, parent, width=22):
@@ -3436,8 +3433,8 @@ class App:
         self.v_qty.insert(0, self.prefs.get('qty', ''))
         self.v_qty.grid(row=2, column=2, sticky='w', padx=(12, 0), ipady=4)
 
-        tk.Label(s3, text='ระยะเวลา: any = ไม่กรอง · เว้นว่าง = เฉพาะไอเทมถาวร (ระยะเวลา = 0) · ตัวเลข = จำนวนวันนั้น\n'
-                          'ถ้ากรองแค่ระยะเวลาเป็นตัวเลข โปรแกรมจะใช้ฟิลเตอร์บนหน้า list แทน เร็วกว่ามาก',
+        tk.Label(s3, text='ระยะเวลา: any = ไม่กรอง · เว้นว่าง = เฉพาะไอเทมถาวร · ตัวเลข = จำนวนวันนั้น '
+                          '(กรองด้วยตัวเลขอย่างเดียวจะใช้ฟิลเตอร์บนหน้า list ให้ เร็วกว่ามาก)',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), justify='left'
                  ).grid(row=3, column=0, columnspan=4, sticky='w', pady=(8, 0))
 
@@ -3464,6 +3461,51 @@ class App:
         self.progress.pack(fill='x')
         self.lbl_stat = tk.Label(s5, text='', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w')
         self.lbl_stat.pack(fill='x', pady=(5, 0))
+
+        # ---- ผลการค้นหา อยู่ในแท็บเดียวกับที่สั่งค้น จะได้ไม่ต้องสลับไปมา ----
+        self._build_found(p)
+
+    def _build_found(self, p):
+        bar = tk.Frame(p, bg=C['bg'])
+        bar.pack(fill='x', padx=14, pady=(14, 6))
+        tk.Label(bar, text='ผลการค้นหา', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9, 'bold')).pack(side='left')
+        self.lbl_count = tk.Label(bar, text='พบ 0 รายการ', bg=C['bg'], fg=C['dim'], font=FM)
+        self.lbl_count.pack(side='left', padx=10)
+        self._btn(bar, '🗑  ล้าง', self.clear_results).pack(side='right', ipadx=8, ipady=2)
+        self._btn(bar, '⬇  CSV', lambda: self.export('csv')).pack(
+            side='right', padx=6, ipadx=8, ipady=2)
+        self._btn(bar, '⬇  Excel', lambda: self.export('xlsx')).pack(
+            side='right', ipadx=8, ipady=2)
+        self._btn(bar, '📋  คัดลอก ID ทั้งหมด', self.copy_ids).pack(
+            side='right', padx=6, ipadx=8, ipady=2)
+
+        wrap = tk.Frame(p, bg=C['bg'])
+        wrap.pack(fill='both', expand=True, padx=14, pady=(0, 6))
+        style = ttk.Style()
+        style.configure('TR.Treeview', background=C['card'], fieldbackground=C['card'],
+                        foreground=C['fg'], rowheight=26, borderwidth=0, font=('Segoe UI', 9))
+        style.configure('TR.Treeview.Heading', background=C['input'], foreground=C['dim'],
+                        font=('Segoe UI', 9, 'bold'), borderwidth=0)
+        cols = ('seq', 'id', 'name', 'type', 'kind', 'notes')
+        self.tree = ttk.Treeview(wrap, columns=cols, show='headings', height=9,
+                                 style='TR.Treeview')
+        for c, t, w in (('seq', '#', 42), ('id', 'Aztek Item Id', 96), ('name', 'ชื่อ', 330),
+                        ('type', 'ประเภท', 80), ('kind', 'ItemKind', 90),
+                        ('notes', 'หมายเหตุ', 210)):
+            self.tree.heading(c, text=t)
+            self.tree.column(c, width=w, anchor='w')
+        # ซ้ำ = เหลือง (ลำดับเดียวเจอหลายตัว ต้องเลือกเอง) · ไม่เจอ = แดง
+        self.tree.tag_configure('dup', background='#3a3018', foreground='#e3b341')
+        self.tree.tag_configure('miss', background='#3a1f1e', foreground='#f0736a')
+        sb = ttk.Scrollbar(wrap, orient='vertical', command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
+        self.tree.pack(side='left', fill='both', expand=True)
+        sb.pack(side='right', fill='y')
+        tk.Label(p, text='# = ลำดับในรายการที่สั่งค้น  ·  แถวเหลือง = เว็บมีหลายตัว ต้องเลือกเอง'
+                         '  ·  แถวแดง = หาไม่เจอ',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(
+            fill='x', padx=14, pady=(0, 10))
 
     # ========================================================================
     #  แท็บ "สร้าง Item"
@@ -3790,7 +3832,7 @@ class App:
                 self.c_btn_run.config(state='normal')
                 self.c_btn_stop.config(state='disabled')
                 if self.results:
-                    self.nb.select(self.tab_result)
+                    self.nb.select(self.tab_search)
             self.root.after(0, _rst)
 
     async def _c_work(self, rows, do):
@@ -3982,7 +4024,7 @@ class App:
         tw.pack(fill='both', expand=True)
         cols = ('use', 'qty', 'tier', 'info')
         self.b_tree = ttk.Treeview(tw, columns=cols, show='tree headings',
-                                   style='TR.Treeview', height=9)
+                                   style='TR.Treeview', height=5)
         self.b_tree.heading('#0', text='บันเดิล / ไอเทมข้างใน')
         self.b_tree.column('#0', width=420, anchor='w')
         for c, t, w in (('use', 'ใช้', 44), ('qty', 'จำนวน', 70),
@@ -4023,6 +4065,32 @@ class App:
         self.b_btn_stop = self._btn(run, '■  ยกเลิก', self.b_stop)
         self.b_btn_stop.config(state='disabled')
         self.b_btn_stop.pack(side='left', padx=(8, 0), ipadx=12, ipady=5)
+
+        # ---- เลข Bundle ที่สร้างสำเร็จ อยู่ในแท็บเดียวกับที่สั่งสร้าง ----
+        self.made = []
+        mw = tk.Frame(p, bg=C['bg'])
+        mw.pack(side='bottom', fill='x', padx=14, pady=(0, 12))
+        mb = tk.Frame(p, bg=C['bg'])
+        mb.pack(side='bottom', fill='x', padx=14, pady=(8, 3))
+        tk.Label(mb, text='Bundle ที่สร้างแล้ว', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9, 'bold')).pack(side='left')
+        self.lbl_made = tk.Label(mb, text='ยังไม่ได้สร้าง', bg=C['bg'], fg=C['dim'],
+                                 font=('Segoe UI', 9))
+        self.lbl_made.pack(side='left', padx=10)
+        self._btn(mb, '📋  คัดลอกเลข Bundle', self.copy_made).pack(
+            side='right', ipadx=8, ipady=2)
+        mc = ('no', 'bid', 'bname', 'cnt', 'at')
+        self.tree_made = ttk.Treeview(mw, columns=mc, show='headings', height=3,
+                                      style='TR.Treeview')
+        for c, t, w in (('no', '#', 42), ('bid', 'Bundle ID', 100),
+                        ('bname', 'ชื่อ Bundle', 430), ('cnt', 'ไอเทม', 60),
+                        ('at', 'เวลา', 80)):
+            self.tree_made.heading(c, text=t)
+            self.tree_made.column(c, width=w, anchor='w')
+        msb = ttk.Scrollbar(mw, orient='vertical', command=self.tree_made.yview)
+        self.tree_made.configure(yscrollcommand=msb.set)
+        self.tree_made.pack(side='left', fill='x', expand=True)
+        msb.pack(side='right', fill='y')
 
         self._b_do_changed()
         self._b_refresh()
@@ -4867,70 +4935,6 @@ class App:
         self.log('   ! ตั้ง %s = %s ไม่ได้' % (label, value), 'WARN')
         return False
 
-    def _build_result(self):
-        bar = tk.Frame(self.tab_result, bg=C['bg'])
-        bar.pack(fill='x', padx=14, pady=12)
-        self._btn(bar, '📋  คัดลอก ID ทั้งหมด', self.copy_ids).pack(side='left', ipadx=10, ipady=4)
-        self._btn(bar, '⬇  Export Excel', lambda: self.export('xlsx')).pack(side='left', padx=8, ipadx=10, ipady=4)
-        self._btn(bar, '⬇  Export CSV', lambda: self.export('csv')).pack(side='left', ipadx=10, ipady=4)
-        self._btn(bar, '🗑  ล้าง', self.clear_results).pack(side='right', ipadx=10, ipady=4)
-        self.lbl_count = tk.Label(bar, text='พบ 0 รายการ', bg=C['bg'], fg=C['dim'], font=FB)
-        self.lbl_count.pack(side='right', padx=14)
-
-        wrap = tk.Frame(self.tab_result, bg=C['bg'])
-        wrap.pack(fill='both', expand=True, padx=14, pady=(0, 14))
-        style = ttk.Style()
-        style.configure('TR.Treeview', background=C['card'], fieldbackground=C['card'],
-                        foreground=C['fg'], rowheight=26, borderwidth=0, font=('Segoe UI', 9))
-        style.configure('TR.Treeview.Heading', background=C['input'], foreground=C['dim'],
-                        font=('Segoe UI', 9, 'bold'), borderwidth=0)
-        cols = ('seq', 'id', 'name', 'type', 'kind', 'notes')
-        self.tree = ttk.Treeview(wrap, columns=cols, show='headings', style='TR.Treeview')
-        for c, t, w in (('seq', '#', 42), ('id', 'Aztek Item Id', 96), ('name', 'ชื่อ', 350),
-                        ('type', 'ประเภท', 85), ('kind', 'ItemKind', 95),
-                        ('notes', 'หมายเหตุ', 230)):
-            self.tree.heading(c, text=t)
-            self.tree.column(c, width=w, anchor='w')
-        # ซ้ำ = เหลือง (ลำดับเดียวเจอหลายตัว ต้องเลือกเอง) · ไม่เจอ = แดง
-        self.tree.tag_configure('dup', background='#3a3018', foreground='#e3b341')
-        self.tree.tag_configure('miss', background='#3a1f1e', foreground='#f0736a')
-        sb = ttk.Scrollbar(wrap, orient='vertical', command=self.tree.yview)
-        self.tree.configure(yscrollcommand=sb.set)
-        self.tree.pack(side='left', fill='both', expand=True)
-        sb.pack(side='right', fill='y')
-        # ---- Bundle ที่สร้างแล้ว (เลขที่เว็บออกให้) ----
-        self.made = []
-        mb = tk.Frame(self.tab_result, bg=C['bg'])
-        mb.pack(fill='x', padx=14, pady=(0, 4))
-        tk.Label(mb, text='Bundle ที่สร้างแล้ว', bg=C['bg'], fg=C['dim'],
-                 font=('Segoe UI', 9, 'bold')).pack(side='left')
-        self.lbl_made = tk.Label(mb, text='ยังไม่ได้สร้าง', bg=C['bg'], fg=C['dim'],
-                                 font=('Segoe UI', 9))
-        self.lbl_made.pack(side='left', padx=10)
-        self._btn(mb, '📋  คัดลอกเลข Bundle', self.copy_made).pack(
-            side='right', ipadx=8, ipady=2)
-        mw = tk.Frame(self.tab_result, bg=C['bg'])
-        mw.pack(fill='x', padx=14, pady=(0, 8))
-        mc = ('no', 'bid', 'bname', 'cnt', 'at')
-        self.tree_made = ttk.Treeview(mw, columns=mc, show='headings', height=5,
-                                      style='TR.Treeview')
-        for c, t, w in (('no', '#', 42), ('bid', 'Bundle ID', 110),
-                        ('bname', 'ชื่อ Bundle', 430), ('cnt', 'ไอเทม', 60),
-                        ('at', 'เวลา', 90)):
-            self.tree_made.heading(c, text=t)
-            self.tree_made.column(c, width=w, anchor='w')
-        sb2 = ttk.Scrollbar(mw, orient='vertical', command=self.tree_made.yview)
-        self.tree_made.configure(yscrollcommand=sb2.set)
-        self.tree_made.pack(side='left', fill='x', expand=True)
-        sb2.pack(side='right', fill='y')
-
-        tk.Label(self.tab_result,
-                 text='คอลัมน์ # = ลำดับในรายการที่สั่งค้น เรียงตามนั้นให้เลย  ·  '
-                      'แถวเหลือง = ลำดับนั้นเว็บมีหลายตัว ต้องเลือกเอง  ·  '
-                      'แถวแดง = หาไม่เจอ',
-                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w',
-                 justify='left').pack(fill='x', padx=14, pady=(0, 10))
-
     # ------------------------------------------------------------------
     #  แท็บตรวจระบบ
     # ------------------------------------------------------------------
@@ -5539,7 +5543,7 @@ class App:
                 self.btn_multi.config(state='normal' if self.imported else 'disabled')
                 self.btn_cancel.config(state='disabled')
                 if self.results:
-                    self.nb.select(self.tab_result)
+                    self.nb.select(self.tab_search)
             self.root.after(0, _rst)
 
     # ---------- automation ----------
