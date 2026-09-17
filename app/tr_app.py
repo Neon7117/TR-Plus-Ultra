@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.4 : แก้ไอเทมเลขสั้น (เช่น 51) ที่อยู่หน้าท้ายๆ แล้วหาไม่เจอ
+V0.8.5 : กดยืนยันในป๊อปอัปให้ + เอาเลข Bundle มาโชว์ · จัดแท็บใหม่ · ใส่ไอคอน
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -111,6 +111,9 @@ SEL_BUNDLE = {
     'kind_label':  'ประเภท',
     'submit':      'สร้าง Bundle',
 }
+# ป๊อปอัปยืนยันหลังกดสร้าง — คำที่ถือว่า "ยืนยัน" กับคำที่ห้ามกด
+BUNDLE_YES = ['ยืนยัน', 'ตกลง', 'ยืนยันการสร้าง', 'Confirm', 'OK', 'Yes', 'ใช่']
+BUNDLE_NO = ['ยกเลิก', 'ปิด', 'Cancel', 'Close', 'ไม่', 'No']
 # ลำดับคอลัมน์ในตาราง: Aztek Item Id | ชื่อ | ประเภท | ItemKind | Actions
 COL = {'id': 0, 'name': 1, 'type': 2, 'kind': 3}
 
@@ -167,6 +170,113 @@ FB = ('Segoe UI', 10, 'bold')
 # ============================================================================
 #  [2] helper
 # ============================================================================
+# ---- ไอคอนโปรแกรม ----
+# ฝังไว้ในไฟล์นี้เลย จะได้ติดไปกับการอัปเดตจาก GitHub ไม่ต้องแจกไฟล์รูปเพิ่ม
+# (ไอคอนของตัว .exe เป็นคนละส่วน อยู่ในขั้นตอน build)
+APP_ICON_B64 = (
+    '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'
+)
+
+
+def set_app_icon(win):
+    """ติดไอคอนให้หน้าต่าง — ทำไม่ได้ก็ไม่เป็นไร โปรแกรมต้องไม่พังเพราะเรื่องนี้"""
+    try:
+        img = tk.PhotoImage(data=APP_ICON_B64)
+        win.iconphoto(True, img)
+        win._trpu_icon = img          # กัน Python เก็บกวาดรูปทิ้ง ไอคอนจะได้ไม่หาย
+        return True
+    except Exception:
+        return False
+
+
 def find_chrome_exe():
     cands = [
         os.path.join(os.environ.get('PROGRAMFILES', ''), 'Google/Chrome/Application/chrome.exe'),
@@ -206,6 +316,27 @@ def save_prefs(d):
             json.dump(d, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+
+def _dig_id(obj, depth=0):
+    """ขุดหา "เลข Bundle" จากคำตอบของเว็บ — คีย์ชื่ออะไรก็ได้ ขอให้สื่อว่าเป็น id"""
+    if obj is None or depth > 6:
+        return ''
+    if isinstance(obj, dict):
+        for k in ('bundleId', 'bundle_id', 'id', 'seq', 'no'):
+            v = obj.get(k)
+            if isinstance(v, (int, str)) and str(v).strip().isdigit():
+                return str(v).strip()
+        for v in obj.values():
+            got = _dig_id(v, depth + 1)
+            if got:
+                return got
+    elif isinstance(obj, list):
+        for v in obj:
+            got = _dig_id(v, depth + 1)
+            if got:
+                return got
+    return ''
 
 
 def norm_name(s):
@@ -1031,6 +1162,57 @@ JS_BUNDLE_ROW_STATE = """
     if (got === String(id)) hit = true;
   }
   return {state: loading ? 'loading' : 'ready', rows: rows, hit: hit};
+}"""
+
+# ป๊อปอัป "ยืนยันการสร้าง" ที่เด้งหลังกดปุ่มสร้าง — ต้องกดยืนยันให้ด้วย
+# ห้ามกดโดนปุ่มยกเลิกเด็ดขาด เลยเทียบชื่อปุ่มแบบตรงๆ ไม่เดา
+JS_BUNDLE_CONFIRM = """
+([words, nos]) => {
+  function vis(el){
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  // กล่องที่เด้งทับหน้าจอ (dialog / alertdialog / modal)
+  const boxes = [...document.querySelectorAll(
+    '[role="dialog"],[role="alertdialog"],dialog,[data-state="open"]')].filter(vis);
+  if (!boxes.length) return 'ไม่มีป๊อปอัป';
+  const box = boxes[boxes.length - 1];
+  const btns = [...box.querySelectorAll('button,[role="button"],a')].filter(vis);
+  const seen = [];
+  for (const b of btns) {
+    const t = (b.textContent || '').trim();
+    seen.push(t);
+    if (nos.indexOf(t) >= 0) continue;          // ยกเลิก/ปิด — ห้ามกด
+    if (words.indexOf(t) >= 0) { b.click(); return 'ok|' + t; }
+  }
+  return 'มีป๊อปอัปแต่ไม่เจอปุ่มยืนยัน (มี: ' + seen.join(', ') + ')';
+}"""
+
+# หาเลข Bundle ที่เพิ่งสร้าง — จาก URL ก่อน ไม่มีค่อยหาในหน้า
+JS_BUNDLE_MADE_ID = """
+() => {
+  function digitsAfter(t, key) {
+    const i = t.indexOf(key);
+    if (i < 0) return null;
+    let j = i + key.length, out = '';
+    while (j < t.length && (t.charAt(j) === ' ' || t.charAt(j) === ':' ||
+                            t.charAt(j) === '#' || t.charAt(j) === '=')) j++;
+    while (j < t.length && t.charAt(j) >= '0' && t.charAt(j) <= '9') { out += t.charAt(j); j++; }
+    return out || null;
+  }
+  const u = location.pathname;
+  const parts = u.split('/').filter(x => x);
+  const last = parts[parts.length - 1] || '';
+  let onlyNum = last.length > 0;
+  for (let i = 0; i < last.length; i++)
+    if (last.charAt(i) < '0' || last.charAt(i) > '9') onlyNum = false;
+  if (onlyNum && u.indexOf('bundle') >= 0) return last;
+  const t = document.body ? (document.body.innerText || '') : '';
+  return digitsAfter(t, 'Bundle ID') || digitsAfter(t, 'bundleId') ||
+         digitsAfter(t, 'รหัส Bundle') || '';
 }"""
 
 # อ่าน "หน้า X / Y" ของผลค้นหา — จะได้รู้ว่ามีกี่หน้า และอยู่หน้าไหนแล้ว
@@ -2992,12 +3174,73 @@ async def run_web_tests(page, log=None):
 # ============================================================================
 #  [6] หน้าต่างโปรแกรม
 # ============================================================================
+class SideTabs:
+    """แถบแท็บทำเอง — กลุ่ม "ใช้งาน" อยู่ซ้าย กลุ่ม "ดูข้อมูล" ไปชิดขวา
+
+    ttk.Notebook ดันแท็บไปชิดขวาไม่ได้ เลยทำแถบเอง
+    จะได้ไม่ปนกันระหว่างแท็บที่ใช้ทำงาน กับแท็บที่ไว้ดูข้อมูล
+    ใช้แทน Notebook ได้เลย — มี add / select / tab / index เหมือนกัน
+    """
+
+    def __init__(self, parent):
+        self.bar = tk.Frame(parent, bg=C['bg'])
+        self.bar.pack(fill='x', padx=10, pady=(8, 0))
+        self._l = tk.Frame(self.bar, bg=C['bg'])
+        self._l.pack(side='left')
+        self._r = tk.Frame(self.bar, bg=C['bg'])
+        self._r.pack(side='right')
+        self.body = tk.Frame(parent, bg=C['bg'], highlightthickness=1,
+                             highlightbackground=C['line'])
+        self.body.pack(fill='both', expand=True, padx=10, pady=(0, 10))
+        self._tabs = []
+        self._cur = None
+
+    def add(self, frame, text, side='left'):
+        b = tk.Button(self._l if side == 'left' else self._r, text=text, bd=0,
+                      cursor='hand2', font=FM, bg=C['card'], fg=C['dim'],
+                      activebackground=C['line'], activeforeground=C['fg'],
+                      padx=16, pady=7,
+                      command=lambda f=frame: self.select(f))
+        b.pack(side='left', padx=(0, 2))
+        self._tabs.append({'frame': frame, 'text': text, 'btn': b})
+        if self._cur is None:
+            self.select(frame)
+        return b
+
+    def select(self, frame=None):
+        if frame is None:
+            return self._cur
+        for t in self._tabs:
+            on = t['frame'] is frame
+            t['btn'].config(bg=C['bg'] if on else C['card'],
+                            fg=C['fg'] if on else C['dim'],
+                            font=FB if on else FM)
+            if on:
+                t['frame'].pack(fill='both', expand=True)
+            else:
+                t['frame'].pack_forget()
+        self._cur = frame
+        return frame
+
+    def tab(self, key, option='text'):
+        if isinstance(key, int):
+            return self._tabs[key]['text'] if 0 <= key < len(self._tabs) else ''
+        for t in self._tabs:
+            if t['frame'] is key:
+                return t['text']
+        return ''
+
+    def index(self, _what='end'):
+        return len(self._tabs)
+
+
 class App:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title(f'TR Plus Ultra  —  v{APP_VERSION}')
         self.root.configure(bg=C['bg'])
         self.root.geometry('1080x720')
+        set_app_icon(self.root)
         self.prefs = load_prefs()
 
         self.results = []
@@ -3037,11 +3280,6 @@ class App:
             style.theme_use('clam')
         except Exception:
             pass
-        style.configure('TNotebook', background=C['bg'], borderwidth=0)
-        style.configure('TNotebook.Tab', background=C['card'], foreground=C['dim'],
-                        padding=(18, 8), font=FM, borderwidth=0)
-        style.map('TNotebook.Tab', background=[('selected', C['bg'])],
-                  foreground=[('selected', C['fg'])])
         style.configure('TCombobox', fieldbackground=C['input'], background=C['input'],
                         foreground=C['fg'], arrowcolor=C['dim'], bordercolor=C['line'],
                         lightcolor=C['line'], darkcolor=C['line'], borderwidth=1)
@@ -3060,23 +3298,20 @@ class App:
             except Exception:
                 pass
 
-        self.nb = ttk.Notebook(self.root)
-        self.nb.pack(fill='both', expand=True, padx=10, pady=(8, 10))
-
-        self.tab_search = tk.Frame(self.nb, bg=C['bg'])
-        self.tab_create = tk.Frame(self.nb, bg=C['bg'])
-        self.tab_bundle = tk.Frame(self.nb, bg=C['bg'])
-        self.tab_result = tk.Frame(self.nb, bg=C['bg'])
-        self.tab_log = tk.Frame(self.nb, bg=C['bg'])
-        self.tab_check = tk.Frame(self.nb, bg=C['bg'])
-        self.tab_bug = tk.Frame(self.nb, bg=C['bg'])
-        self.nb.add(self.tab_search, text='🔍  ค้นหา')
-        self.nb.add(self.tab_create, text='➕  สร้าง Item')
-        self.nb.add(self.tab_bundle, text='📦  สร้าง Bundle')
-        self.nb.add(self.tab_result, text='📋  ผลลัพธ์')
-        self.nb.add(self.tab_log, text='📜  Log')
-        self.nb.add(self.tab_check, text='🩺  ตรวจระบบ')
-        self.nb.add(self.tab_bug, text='🐞  แจ้งบั๊ก')
+        self.nb = SideTabs(self.root)
+        self.tab_search = tk.Frame(self.nb.body, bg=C['bg'])
+        self.tab_create = tk.Frame(self.nb.body, bg=C['bg'])
+        self.tab_bundle = tk.Frame(self.nb.body, bg=C['bg'])
+        self.tab_result = tk.Frame(self.nb.body, bg=C['bg'])
+        self.tab_log = tk.Frame(self.nb.body, bg=C['bg'])
+        self.tab_check = tk.Frame(self.nb.body, bg=C['bg'])
+        # ซ้าย = แท็บที่ใช้ทำงาน · ขวา = แท็บไว้ดูข้อมูล จะได้ไม่ปนกัน
+        self.nb.add(self.tab_search, '🔍  ค้นหา')
+        self.nb.add(self.tab_create, '➕  สร้าง Item')
+        self.nb.add(self.tab_bundle, '📦  สร้าง Bundle')
+        self.nb.add(self.tab_result, '📋  ผลลัพธ์')
+        self.nb.add(self.tab_check, '🩺  ตรวจระบบ', side='right')
+        self.nb.add(self.tab_log, '📜  Log', side='right')
 
         self._build_search()
         self._build_create()
@@ -3084,7 +3319,6 @@ class App:
         self._build_result()
         self._build_log()
         self._build_check()
-        self._build_bug()
 
     def _card(self, parent, title):
         outer = tk.LabelFrame(parent, text='  ' + title + '  ', bg=C['bg'], fg=C['dim'],
@@ -4212,21 +4446,69 @@ class App:
         if await btn.count() == 0:
             self.log('   ✗ ไม่เจอปุ่ม “%s”' % SEL_BUNDLE['submit'], 'ERR')
             return False
-        code = 0
+
+        # ดักคำตอบของเว็บไว้ตั้งแต่ก่อนกด — เลข Bundle อยู่ในคำตอบนั้น
+        hits = []
+
+        async def _grab(resp):
+            try:
+                if resp.request.method in ('POST', 'PUT', 'PATCH') \
+                        and 'bundle' in resp.url.lower():
+                    hits.append(resp)
+            except Exception:
+                pass
+        page.on('response', _grab)
         try:
-            async with page.expect_response(
-                    lambda rr: rr.request.method in ('POST', 'PUT', 'PATCH')
-                    and 'bundle' in rr.url.lower(), timeout=25000) as ri:
-                await btn.click(timeout=10000)
-            code = (await ri.value).status
-        except Exception:
-            code = 0
-        await page.wait_for_timeout(1500)
-        good = (code == 0) or (200 <= code < 300)
-        self.log('   ' + ('✓ สร้างบันเดิลแล้ว' if good else '✗ เว็บตอบ HTTP %d' % code),
-                 'OK' if good else 'ERR')
+            await btn.click(timeout=10000)
+            await page.wait_for_timeout(900)
+
+            # เว็บเด้งป๊อปอัป "ยืนยันการสร้าง" ต่อ — ไม่กดยืนยัน = ไม่ได้สร้างจริง
+            r = await page.evaluate(JS_BUNDLE_CONFIRM, [BUNDLE_YES, BUNDLE_NO])
+            if str(r).startswith('ok'):
+                self.log('   · กดยืนยันในป๊อปอัปแล้ว (%s)'
+                         % str(r).split('|', 1)[1], 'INFO')
+            elif r != 'ไม่มีป๊อปอัป':
+                self.log('   ! %s' % r, 'WARN')
+
+            waited = 0
+            while waited < 25000 and not hits:
+                await page.wait_for_timeout(300)
+                waited += 300
+            await page.wait_for_timeout(1200)
+        finally:
+            try:
+                page.remove_listener('response', _grab)
+            except Exception:
+                pass
+
+        code = 0
+        bid = ''
+        for resp in hits:
+            try:
+                code = resp.status
+                body = await resp.json()
+            except Exception:
+                body = None
+            bid = bid or _dig_id(body)
+        if not bid:
+            try:
+                bid = str(await page.evaluate(JS_BUNDLE_MADE_ID) or '').strip()
+            except Exception:
+                bid = ''
+
+        good = 200 <= code < 300
+        if good:
+            self.log('   ✓ สร้างบันเดิลแล้ว%s'
+                     % ('  ·  Bundle ID = %s' % bid if bid else
+                        '  (เว็บไม่ได้ส่งเลข Bundle กลับมา)'), 'OK')
+            self.add_made_bundle(b['name'], bid, len(b['items']))
+        elif code:
+            self.log('   ✗ เว็บตอบ HTTP %d — ยังไม่ได้สร้าง' % code, 'ERR')
+        else:
+            self.log('   ✗ กดสร้างแล้วเว็บไม่ตอบอะไรกลับมาเลย — ถือว่ายังไม่ได้สร้าง '
+                     '(เช็กบนเว็บอีกทีก่อนสร้างซ้ำ)', 'ERR')
         log_event('bundle_create', name=b['name'], items=len(b['items']),
-                  ok=bool(good), http=code)
+                  ok=bool(good), http=code, bundle_id=bid)
         return good
 
     # ---------- ชิ้นส่วนของหน้า bundle ----------
@@ -4616,6 +4898,32 @@ class App:
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side='left', fill='both', expand=True)
         sb.pack(side='right', fill='y')
+        # ---- Bundle ที่สร้างแล้ว (เลขที่เว็บออกให้) ----
+        self.made = []
+        mb = tk.Frame(self.tab_result, bg=C['bg'])
+        mb.pack(fill='x', padx=14, pady=(0, 4))
+        tk.Label(mb, text='Bundle ที่สร้างแล้ว', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9, 'bold')).pack(side='left')
+        self.lbl_made = tk.Label(mb, text='ยังไม่ได้สร้าง', bg=C['bg'], fg=C['dim'],
+                                 font=('Segoe UI', 9))
+        self.lbl_made.pack(side='left', padx=10)
+        self._btn(mb, '📋  คัดลอกเลข Bundle', self.copy_made).pack(
+            side='right', ipadx=8, ipady=2)
+        mw = tk.Frame(self.tab_result, bg=C['bg'])
+        mw.pack(fill='x', padx=14, pady=(0, 8))
+        mc = ('no', 'bid', 'bname', 'cnt', 'at')
+        self.tree_made = ttk.Treeview(mw, columns=mc, show='headings', height=5,
+                                      style='TR.Treeview')
+        for c, t, w in (('no', '#', 42), ('bid', 'Bundle ID', 110),
+                        ('bname', 'ชื่อ Bundle', 430), ('cnt', 'ไอเทม', 60),
+                        ('at', 'เวลา', 90)):
+            self.tree_made.heading(c, text=t)
+            self.tree_made.column(c, width=w, anchor='w')
+        sb2 = ttk.Scrollbar(mw, orient='vertical', command=self.tree_made.yview)
+        self.tree_made.configure(yscrollcommand=sb2.set)
+        self.tree_made.pack(side='left', fill='x', expand=True)
+        sb2.pack(side='right', fill='y')
+
         tk.Label(self.tab_result,
                  text='คอลัมน์ # = ลำดับในรายการที่สั่งค้น เรียงตามนั้นให้เลย  ·  '
                       'แถวเหลือง = ลำดับนั้นเว็บมีหลายตัว ต้องเลือกเอง  ·  '
@@ -4847,68 +5155,15 @@ class App:
                  'WARN' if bad else 'OK')
 
     # ---------- แจ้งบั๊ก ----------
-    def _build_bug(self):
-        p = self.tab_bug
-
-        s0 = self._card(p, 'เจอปัญหาตรงไหน บอกได้เลย')
-        tk.Label(s0, text='กดปุ่มข้างล่าง จะเปิดชีทแจ้งบั๊กของทีมขึ้นมาให้ '
-                          'แล้วพิมพ์ในชีทได้เลย',
-                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9)).grid(
-                     row=0, column=0, columnspan=3, sticky='w')
-        self._btn(s0, '🐞  เปิดหน้าแจ้งบั๊ก', self.bug_open_sheet, primary=True).grid(
-            row=1, column=0, sticky='w', pady=(10, 0), ipadx=24, ipady=6)
-        self._btn(s0, '🔗  คัดลอกลิงก์ชีท', self.bug_copy_link).grid(
-            row=1, column=1, sticky='w', padx=10, pady=(10, 0), ipadx=10, ipady=4)
-
-        s1 = self._card(p, 'ในชีทให้กรอกอะไรบ้าง')
-        for i, t in enumerate([
-                'Priority           ด่วนแค่ไหน',
-                'Issue Description  เจออะไร · ตอนไหน · กดอะไรถึงเจอ (ยิ่งละเอียด ยิ่งตามแก้ได้เร็ว)',
-                'Suggestion         อยากให้แก้ยังไง (ไม่บังคับ)',
-                'รูป 1 / 2 / 3       แคปหน้าจอ -> ก๊อป -> คลิกช่อง -> กด ... > บนรูป > เลือกใส่รูปใน Cell',
-                'Comment            ใส่ข้อมูลเครื่องที่ก๊อปจากปุ่มข้างล่างได้เลย',
-                'Status             เว้นไว้ ให้คนดูแลเครื่องมือเป็นคนกำหนด']):
-            tk.Label(s1, text='·  ' + t, bg=C['bg'], fg=C['fg'], font=('Consolas', 9),
-                     anchor='w', justify='left').grid(row=i, column=0, sticky='w')
-
-        s2 = self._card(p, 'ข้อมูลเครื่อง (เอาไปวางในช่อง Comment จะตามเรื่องได้ง่ายขึ้น)')
-        self.bug_info = tk.Label(s2, text=self._bug_line(), bg=C['bg'], fg=C['dim'],
-                                 font=('Consolas', 9), anchor='w', justify='left')
-        self.bug_info.grid(row=0, column=0, sticky='w')
-        self._btn(s2, '📋  คัดลอก', self.bug_copy_info).grid(
-            row=0, column=1, padx=(14, 0), ipadx=10, ipady=3)
-        self.bug_stat = tk.Label(s2, text='', bg=C['bg'], fg=C['ok'],
-                                 font=('Segoe UI', 9), anchor='w')
-        self.bug_stat.grid(row=1, column=0, columnspan=2, sticky='w', pady=(8, 0))
-
-    def _bug_line(self):
-        return 'ผู้แจ้ง: %s · เครื่อง: %s · เวลา: %s · เวอร์ชัน: %s' % (
-            TR_USER, TR_MACHINE, datetime.now().strftime('%Y-%m-%d %H:%M'), APP_VERSION)
-
-    def _bug_copy(self, text, msg):
-        try:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(text)
-            self.root.update_idletasks()
-            self.bug_stat.config(text='✓  ' + msg, fg=C['ok'])
-        except Exception as ex:
-            self.bug_stat.config(text='✗  คัดลอกไม่ได้: %s' % str(ex)[:60], fg=C['err'])
-
-    def bug_copy_info(self):
-        self.bug_info.config(text=self._bug_line())
-        self._bug_copy(self._bug_line(), 'คัดลอกข้อมูลเครื่องแล้ว เอาไปวางในช่อง Comment ได้เลย')
-
-    def bug_copy_link(self):
-        self._bug_copy(BUG_SHEET_URL, 'คัดลอกลิงก์ชีทแล้ว')
-
     def bug_open_sheet(self):
+        """เปิดชีทแจ้งบั๊กของทีม — ไปพิมพ์ในชีทได้เลย"""
         try:
             import webbrowser
             webbrowser.open(BUG_SHEET_URL)
-            self.bug_stat.config(text='✓  เปิดชีทในเบราว์เซอร์ให้แล้ว', fg=C['ok'])
-            self.log('เปิดหน้าแจ้งบั๊ก', 'INFO')
+            self.log('เปิดหน้าแจ้งบั๊ก — %s · %s · v%s'
+                     % (TR_USER, TR_MACHINE, APP_VERSION), 'OK')
         except Exception as ex:
-            self.bug_stat.config(text='✗  เปิดไม่ได้: %s' % str(ex)[:60], fg=C['err'])
+            self.log('เปิดหน้าแจ้งบั๊กไม่ได้: %s' % str(ex)[:80], 'ERR')
             messagebox.showerror('เปิดไม่ได้', str(ex))
 
     def _build_log(self):
@@ -4948,6 +5203,33 @@ class App:
             self._ins_result(row)
             self.lbl_count.config(text=f'พบ {len(self.results)} รายการ')
         self.root.after(0, _do)
+
+    def add_made_bundle(self, name, bid, n_items):
+        """จดไว้ว่าสร้างบันเดิลอะไรไปแล้ว ได้เลขอะไร — โชว์ในแท็บผลลัพธ์"""
+        row = {'name': name, 'id': bid or '-', 'items': n_items,
+               'at': datetime.now().strftime('%H:%M:%S')}
+        self.made.append(row)
+
+        def _do():
+            self.tree_made.insert('', 'end', values=(
+                len(self.made), row['id'], row['name'], row['items'], row['at']))
+            self.tree_made.yview_moveto(1)
+            got = sum(1 for m in self.made if m['id'] != '-')
+            self.lbl_made.config(
+                text='สร้างแล้ว %d บันเดิล%s' % (
+                    len(self.made),
+                    '' if got == len(self.made) else ' (ได้เลข %d)' % got),
+                fg=C['ok'])
+        self.root.after(0, _do)
+
+    def copy_made(self):
+        if not self.made:
+            messagebox.showinfo('ยังไม่มี', 'ยังไม่ได้สร้างบันเดิลในรอบนี้')
+            return
+        txt = '\n'.join('%s\t%s' % (m['id'], m['name']) for m in self.made)
+        self.root.clipboard_clear()
+        self.root.clipboard_append(txt)
+        self.log('คัดลอกเลข Bundle %d รายการแล้ว' % len(self.made), 'OK')
 
     def _ins_result(self, r):
         tag = ('miss',) if r.get('miss') else (('dup',) if r.get('dup') else ())
