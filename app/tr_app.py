@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.7.8 : แก้ Fame Point ตั้ง Tier ไม่ได้ — โปรแกรมคว้าช่อง "ประเภท" มาแทนช่อง Tier
+V0.8.2 : แจ้งบั๊กแบบง่าย — กดปุ่มแล้วเปิดชีทให้เลย ไปกรอกในชีทเอง
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -149,6 +149,11 @@ CENTRAL_LOG_DIR = ''
 
 TR_USER = os.environ.get('USERNAME') or os.environ.get('USER') or 'unknown'
 TR_MACHINE = os.environ.get('COMPUTERNAME') or 'unknown'
+
+# ---- แจ้งบั๊ก ----
+# กดปุ่มแล้วเปิดชีทกลางให้เลย ไปกรอกในชีทเอง
+BUG_SHEET_URL = ('https://docs.google.com/spreadsheets/d/'
+                 '1X2wLu4CQCMVkX9ewOcimtqudjbaSRB6cVOTN12AKHkw/edit?usp=sharing')
 
 C = {
     'bg': '#11161f', 'card': '#151c28', 'line': '#263041', 'input': '#0c1119',
@@ -2972,6 +2977,10 @@ class App:
         tk.Button(top, text='🔓  เปิดหน้า Login', bg=C['input'], fg=C['fg'], bd=0,
                   font=FM, cursor='hand2', activebackground=C['line'],
                   command=self.open_login).pack(side='right', padx=16, ipadx=12, ipady=5)
+        # อยู่แท็บไหนก็แจ้งบั๊กได้ ไม่ต้องเดินไปหาแท็บ
+        tk.Button(top, text='🐞  แจ้งบั๊ก', bg=C['input'], fg=C['fg'], bd=0,
+                  font=FM, cursor='hand2', activebackground=C['line'],
+                  command=self.bug_open_sheet).pack(side='right', ipadx=10, ipady=5)
 
         style = ttk.Style()
         try:
@@ -2983,6 +2992,23 @@ class App:
                         padding=(18, 8), font=FM, borderwidth=0)
         style.map('TNotebook.Tab', background=[('selected', C['bg'])],
                   foreground=[('selected', C['fg'])])
+        style.configure('TCombobox', fieldbackground=C['input'], background=C['input'],
+                        foreground=C['fg'], arrowcolor=C['dim'], bordercolor=C['line'],
+                        lightcolor=C['line'], darkcolor=C['line'], borderwidth=1)
+        style.map('TCombobox',
+                  fieldbackground=[('readonly', C['input'])],
+                  background=[('readonly', C['input'])],
+                  foreground=[('readonly', C['fg'])],
+                  selectbackground=[('readonly', C['input'])],
+                  selectforeground=[('readonly', C['fg'])])
+        for k, v in (('*TCombobox*Listbox.background', C['input']),
+                     ('*TCombobox*Listbox.foreground', C['fg']),
+                     ('*TCombobox*Listbox.selectBackground', C['accent']),
+                     ('*TCombobox*Listbox.selectForeground', 'white')):
+            try:
+                self.root.option_add(k, v)
+            except Exception:
+                pass
 
         self.nb = ttk.Notebook(self.root)
         self.nb.pack(fill='both', expand=True, padx=10, pady=(8, 10))
@@ -2993,12 +3019,14 @@ class App:
         self.tab_result = tk.Frame(self.nb, bg=C['bg'])
         self.tab_log = tk.Frame(self.nb, bg=C['bg'])
         self.tab_check = tk.Frame(self.nb, bg=C['bg'])
+        self.tab_bug = tk.Frame(self.nb, bg=C['bg'])
         self.nb.add(self.tab_search, text='🔍  ค้นหา')
         self.nb.add(self.tab_create, text='➕  สร้าง Item')
         self.nb.add(self.tab_bundle, text='📦  สร้าง Bundle')
         self.nb.add(self.tab_result, text='📋  ผลลัพธ์')
         self.nb.add(self.tab_log, text='📜  Log')
         self.nb.add(self.tab_check, text='🩺  ตรวจระบบ')
+        self.nb.add(self.tab_bug, text='🐞  แจ้งบั๊ก')
 
         self._build_search()
         self._build_create()
@@ -3006,6 +3034,7 @@ class App:
         self._build_result()
         self._build_log()
         self._build_check()
+        self._build_bug()
 
     def _card(self, parent, title):
         outer = tk.LabelFrame(parent, text='  ' + title + '  ', bg=C['bg'], fg=C['dim'],
@@ -4725,6 +4754,71 @@ class App:
                   failed_items=[x['name'] for x in res if not x['ok']][:20])
         self.log(f'ตรวจเว็บเสร็จ — พัง {bad} จุด' if bad else 'ตรวจเว็บเสร็จ — ปกติดีทุกจุด',
                  'WARN' if bad else 'OK')
+
+    # ---------- แจ้งบั๊ก ----------
+    def _build_bug(self):
+        p = self.tab_bug
+
+        s0 = self._card(p, 'เจอปัญหาตรงไหน บอกได้เลย')
+        tk.Label(s0, text='กดปุ่มข้างล่าง จะเปิดชีทแจ้งบั๊กของทีมขึ้นมาให้ '
+                          'แล้วพิมพ์ในชีทได้เลย',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9)).grid(
+                     row=0, column=0, columnspan=3, sticky='w')
+        self._btn(s0, '🐞  เปิดหน้าแจ้งบั๊ก', self.bug_open_sheet, primary=True).grid(
+            row=1, column=0, sticky='w', pady=(10, 0), ipadx=24, ipady=6)
+        self._btn(s0, '🔗  คัดลอกลิงก์ชีท', self.bug_copy_link).grid(
+            row=1, column=1, sticky='w', padx=10, pady=(10, 0), ipadx=10, ipady=4)
+
+        s1 = self._card(p, 'ในชีทให้กรอกอะไรบ้าง')
+        for i, t in enumerate([
+                'Priority           ด่วนแค่ไหน',
+                'Issue Description  เจออะไร · ตอนไหน · กดอะไรถึงเจอ (ยิ่งละเอียด ยิ่งตามแก้ได้เร็ว)',
+                'Suggestion         อยากให้แก้ยังไง (ไม่บังคับ)',
+                'รูป 1 / 2 / 3       แคปหน้าจอ -> ก๊อป -> คลิกช่อง -> กด ... > บนรูป > เลือกใส่รูปใน Cell',
+                'Comment            ใส่ข้อมูลเครื่องที่ก๊อปจากปุ่มข้างล่างได้เลย',
+                'Status             เว้นไว้ ให้คนดูแลเครื่องมือเป็นคนกำหนด']):
+            tk.Label(s1, text='·  ' + t, bg=C['bg'], fg=C['fg'], font=('Consolas', 9),
+                     anchor='w', justify='left').grid(row=i, column=0, sticky='w')
+
+        s2 = self._card(p, 'ข้อมูลเครื่อง (เอาไปวางในช่อง Comment จะตามเรื่องได้ง่ายขึ้น)')
+        self.bug_info = tk.Label(s2, text=self._bug_line(), bg=C['bg'], fg=C['dim'],
+                                 font=('Consolas', 9), anchor='w', justify='left')
+        self.bug_info.grid(row=0, column=0, sticky='w')
+        self._btn(s2, '📋  คัดลอก', self.bug_copy_info).grid(
+            row=0, column=1, padx=(14, 0), ipadx=10, ipady=3)
+        self.bug_stat = tk.Label(s2, text='', bg=C['bg'], fg=C['ok'],
+                                 font=('Segoe UI', 9), anchor='w')
+        self.bug_stat.grid(row=1, column=0, columnspan=2, sticky='w', pady=(8, 0))
+
+    def _bug_line(self):
+        return 'ผู้แจ้ง: %s · เครื่อง: %s · เวลา: %s · เวอร์ชัน: %s' % (
+            TR_USER, TR_MACHINE, datetime.now().strftime('%Y-%m-%d %H:%M'), APP_VERSION)
+
+    def _bug_copy(self, text, msg):
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.root.update_idletasks()
+            self.bug_stat.config(text='✓  ' + msg, fg=C['ok'])
+        except Exception as ex:
+            self.bug_stat.config(text='✗  คัดลอกไม่ได้: %s' % str(ex)[:60], fg=C['err'])
+
+    def bug_copy_info(self):
+        self.bug_info.config(text=self._bug_line())
+        self._bug_copy(self._bug_line(), 'คัดลอกข้อมูลเครื่องแล้ว เอาไปวางในช่อง Comment ได้เลย')
+
+    def bug_copy_link(self):
+        self._bug_copy(BUG_SHEET_URL, 'คัดลอกลิงก์ชีทแล้ว')
+
+    def bug_open_sheet(self):
+        try:
+            import webbrowser
+            webbrowser.open(BUG_SHEET_URL)
+            self.bug_stat.config(text='✓  เปิดชีทในเบราว์เซอร์ให้แล้ว', fg=C['ok'])
+            self.log('เปิดหน้าแจ้งบั๊ก', 'INFO')
+        except Exception as ex:
+            self.bug_stat.config(text='✗  เปิดไม่ได้: %s' % str(ex)[:60], fg=C['err'])
+            messagebox.showerror('เปิดไม่ได้', str(ex))
 
     def _build_log(self):
         self.log_box = scrolledtext.ScrolledText(
