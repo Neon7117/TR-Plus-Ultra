@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.3 : แก้ fame/exp หยิบเลขผิดช่อง และไอเทมซ้ำหลายใบไม่ได้ Tier
+V0.8.4 : แก้ไอเทมเลขสั้น (เช่น 51) ที่อยู่หน้าท้ายๆ แล้วหาไม่เจอ
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -86,7 +86,7 @@ TIERS = ['General', 'A', 'S', 'SS', 'SS+', 'SSS']
 DEFAULT_TIER = 'General'
 BUNDLE_TYPES = ['FIXED', 'CHOICE', 'RANDOM', 'GACHAPON', 'GACHAPON_LIMIT']
 DEFAULT_BUNDLE_TYPE = 'FIXED'
-BUNDLE_MAX_PAGES = 8      # ID สั้นๆ เจอผลหลายหน้า ไล่หาได้ถึงหน้านี้
+BUNDLE_MAX_PAGES = 40      # ID สั้นๆ เจอผลหลายหน้า ไล่หาได้ถึงหน้านี้
 
 # famepoint ต้องเป็น "เครดิตเรียลไทม์" ไม่ใช่ "เครดิต" ธรรมดา (เว็บตั้งค่าเริ่มต้นเป็นแบบธรรมดา)
 FAME_CREDIT_TYPE = 'WALLET_REALTIME_CREDIT'
@@ -1031,6 +1031,26 @@ JS_BUNDLE_ROW_STATE = """
     if (got === String(id)) hit = true;
   }
   return {state: loading ? 'loading' : 'ready', rows: rows, hit: hit};
+}"""
+
+# อ่าน "หน้า X / Y" ของผลค้นหา — จะได้รู้ว่ามีกี่หน้า และอยู่หน้าไหนแล้ว
+JS_BUNDLE_PAGES = """
+() => {
+""" + _JS_BOX + """
+  const box = addBox();
+  if (!box) return {page: 0, total: 0};
+  const t = box.textContent || '';
+  const i = t.indexOf('หน้า');
+  if (i < 0) return {page: 0, total: 0};
+  const nums = [];
+  let cur = '';
+  for (let j = i; j < t.length && nums.length < 2; j++) {
+    const c = t.charAt(j);
+    if (c >= '0' && c <= '9') cur += c;
+    else if (cur) { nums.push(parseInt(cur, 10)); cur = ''; }
+  }
+  if (cur && nums.length < 2) nums.push(parseInt(cur, 10));
+  return {page: nums[0] || 0, total: nums[1] || 0};
 }"""
 
 # กดหน้าถัดไปของผลค้นหา (เฉพาะในกล่องเพิ่มของ)
@@ -2018,7 +2038,11 @@ def parse_bundle_sheet(rows, sheet_name):
                 elif rv and rv != '-':
                     warns.append('%s "%s" แถว %d: Rank "%s" ไม่รู้จัก -> %s'
                                  % (sheet_name, name, r + 1, rv, DEFAULT_TIER))
-            items.append({'id': iid, 'qty': qty, 'tier': tier, 'disp': disp})
+            ikind = ''
+            if kindc is not None and kindc < len(row):
+                ikind = src_int(row[kindc]) or ''
+            items.append({'id': iid, 'qty': qty, 'tier': tier, 'disp': disp,
+                          'kind': ikind})
         if items:
             bundles.append({'name': name, 'type': DEFAULT_BUNDLE_TYPE, 'deliver': True,
                             'items': items, 'rewards': bundle_rewards(rows, hr),
@@ -4218,35 +4242,70 @@ class App:
             pass
         return False
 
-    async def _b_add_item(self, page, it):
-        """แท็บ Item -> พิมพ์ Aztek Item Id -> รอผลโหลด -> กดปุ่มเพิ่มของแถวที่ ID ตรง
+    async def _b_seek(self, page, term, want_id):
+        """ค้นด้วยคำหนึ่งคำ แล้วไล่ดูทีละหน้าจนเจอแถวที่ ID ตรงเป๊ะ
 
-        ไม่ใช้เวลาหน่วงตายตัว เพราะเว็บโหลดช้าบ้างเร็วบ้าง
-        และ ID สั้นๆ (เช่น 134) จะเจอผลเป็นร้อย กระจายหลายหน้า ต้องเปิดหน้าถัดไปหาต่อ
+        สำคัญ: ต้อง "ดูหน้าที่ยืนอยู่ก่อน แล้วค่อยกดหน้าถัดไป"
+        ของเดิมนับหน้าผิด เลยกดไปหน้าสุดท้ายแล้วจบ โดยยังไม่ได้ดูหน้านั้นเลย
+        (ไอเทมเลข 2 หลักอย่าง 51 อยู่หน้าสุดท้ายพอดี เลยหาไม่เจอ)
+        """
+        r = await page.evaluate(JS_BUNDLE_SEARCH, str(term))
+        if r != 'ok':
+            return None, {'err': r}
+        checked, total = 0, 0
+        while checked < BUNDLE_MAX_PAGES and not self.b_cancel:
+            st = await self._b_wait_rows(page, want_id)
+            checked += 1
+            if not total:
+                try:
+                    total = int((await page.evaluate(JS_BUNDLE_PAGES)).get('total') or 0)
+                except Exception:
+                    total = 0
+            if st.get('hit'):
+                return True, {'page': checked, 'total': total}
+            if st.get('rows', 0) == 0:
+                return False, {'page': checked, 'total': total, 'empty': True}
+            if total and checked >= total:
+                return False, {'page': checked, 'total': total}
+            if await page.evaluate(JS_BUNDLE_NEXT_PAGE) != 'ok':
+                return False, {'page': checked, 'total': total}
+            await page.wait_for_timeout(400)
+        return False, {'page': checked, 'total': total, 'over': True}
+
+    async def _b_add_item(self, page, it):
+        """แท็บ Item -> ค้นหา -> กดปุ่มเพิ่มของแถวที่ ID ตรงเป๊ะเท่านั้น
+
+        ค้นด้วย ItemKind ก่อนถ้ามี เพราะเจาะจงกว่า ผลน้อยกว่ามาก
+        ไม่เจอค่อยค้นด้วย Aztek Item Id แล้วไล่หน้าไปเรื่อยๆ
+        (เลขสั้นๆ อย่าง 51 / 134 ผลจะเยอะและกระจายหลายหน้า)
         """
         await self._b_tab(page, SEL_BUNDLE['tab_item'])
-        r = await page.evaluate(JS_BUNDLE_SEARCH, str(it['id']))
-        if r != 'ok':
-            self.log('   ✗ ไม่เจอช่องค้นหา Item (%s) — ข้ามไอเทม %s' % (r, it['id']), 'ERR')
-            return False
+        terms = []
+        if str(it.get('kind') or '').strip():
+            terms.append((str(it['kind']).strip(), 'ItemKind'))
+        terms.append((str(it['id']), 'Item ID'))
 
-        found = False
-        pages = 0
-        while pages < BUNDLE_MAX_PAGES and not self.b_cancel:
-            st = await self._b_wait_rows(page, it['id'])
-            if st.get('hit'):
-                found = True
+        last = {}
+        for term, what in terms:
+            found, info = await self._b_seek(page, term, it['id'])
+            if found is None:
+                self.log('   ✗ ไม่เจอช่องค้นหา Item (%s) — ข้ามไอเทม %s'
+                         % (info.get('err'), it['id']), 'ERR')
+                return False
+            if found:
+                if what != 'Item ID' or info.get('page', 1) > 1:
+                    self.log('   · หาไอเทม %s เจอจาก %s (หน้า %d/%d)'
+                             % (it['id'], what, info.get('page', 1), info.get('total') or 1),
+                             'INFO')
                 break
-            if st.get('rows', 0) == 0:
-                break
-            nx = await page.evaluate(JS_BUNDLE_NEXT_PAGE)
-            if nx != 'ok':
-                break
-            pages += 1
-            await page.wait_for_timeout(400)
-        if not found:
-            self.log('   ✗ ค้นหา %s แล้วไม่เจอแถวที่ ID ตรง (ดู %d หน้า) — '
-                     'ไม่กดเพิ่ม กันได้ของผิด' % (it['id'], pages + 1), 'ERR')
+            last = info
+        else:
+            n, tot = last.get('page', 0), last.get('total') or 0
+            why = ('ค้นแล้วไม่มีผลเลย' if last.get('empty')
+                   else ('ผลเยอะเกิน ดูไป %d หน้า จาก %d หน้า' % (n, tot) if last.get('over')
+                         else 'ดูครบ %d หน้าแล้วไม่มีแถวที่ ID ตรง' % n))
+            self.log('   ✗ ค้นหา %s ไม่สำเร็จ — %s (ไม่กดเพิ่ม กันได้ของผิด)'
+                     % (it['id'], why), 'ERR')
             return False
 
         r2 = await page.evaluate(JS_BUNDLE_PICK_ROW, [str(it['id'])])
