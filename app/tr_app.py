@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.7 : ตารางยืดตามหน้าต่าง + แก้เลขลำดับในตาราง Bundle ซ้ำกันหมด
+V0.8.8 : แก้ชื่อบันเดิลทั้งหมดในหน้าเดียว + ลิสต์ไม่กางเองตอนแก้
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -4001,6 +4001,7 @@ class App:
         self.b_running = False
         self.b_cancel = False
         self._b_rowmap = {}          # iid ของ treeview -> ('b', i) หรือ ('i', i, j)
+        self.b_open_new = False      # นำเข้ามาใหม่ = หุบไว้ก่อน จะได้เห็นรายชื่อครบๆ
 
         s1 = self._card(p, 'นำเข้าจากไฟล์ต้นฉบับ')
         bar = tk.Frame(s1, bg=C['bg'])
@@ -4014,6 +4015,15 @@ class App:
         self._btn(bar, '🗑  ล้าง', self.b_clear).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
         self.b_count = tk.Label(bar, text='ยังไม่ได้นำเข้า', bg=C['bg'], fg=C['dim'], font=FM)
         self.b_count.pack(side='right')
+
+        bar2 = tk.Frame(s1, bg=C['bg'])
+        bar2.pack(fill='x', pady=(8, 0))
+        self._btn(bar2, '✏  แก้ชื่อบันเดิลทั้งหมด', self.b_rename_all,
+                  primary=True).pack(side='left', ipadx=10, ipady=3)
+        self._btn(bar2, '⌄  กางทั้งหมด', lambda: self._b_expand_all(True)).pack(
+            side='left', padx=(8, 0), ipadx=8, ipady=3)
+        self._btn(bar2, '⌃  หุบทั้งหมด', lambda: self._b_expand_all(False)).pack(
+            side='left', padx=(8, 0), ipadx=8, ipady=3)
         tk.Label(s1, text='คลิกช่อง “ใช้” เพื่อเลือก/ไม่เลือกบันเดิล · ดับเบิลคลิกเพื่อแก้ '
                           '(ชื่อบันเดิล / จำนวน / Tier / famepoint / exp)',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(
@@ -4103,8 +4113,30 @@ class App:
 
     # ---------- ตาราง ----------
     def _b_refresh(self):
+        # จำไว้ก่อนว่าใบไหนกางอยู่ · เลื่อนอยู่ตรงไหน · เลือกอะไรไว้
+        # ไม่งั้นแก้ชื่อทีเดียวแล้วทุกใบกางออกหมด ต้องมาไล่หุบใหม่ทุกครั้ง
+        was_open = {}
+        for row, m in getattr(self, '_b_rowmap', {}).items():
+            if m[0] == 'b':
+                try:
+                    was_open[m[1]] = bool(self.b_tree.item(row, 'open'))
+                except Exception:
+                    pass
+        sel_key = None
+        try:
+            cur = self.b_tree.selection()
+            if cur:
+                sel_key = getattr(self, '_b_rowmap', {}).get(cur[0])
+        except Exception:
+            pass
+        try:
+            top_frac = self.b_tree.yview()[0]
+        except Exception:
+            top_frac = 0.0
+
         self.b_tree.delete(*self.b_tree.get_children())
         self._b_rowmap = {}
+        self._b_open = was_open
         for i, b in enumerate(self.bq):
             rw = []
             for r in b.get('rewards', []):
@@ -4117,7 +4149,8 @@ class App:
             on = b.get('use', True)
             pid = self.b_tree.insert('', 'end', text='📦  ' + b['name'],
                                      values=('✔' if on else '✗', '', '', info),
-                                     open=True, tags=() if on else ('off',))
+                                     open=was_open.get(i, self.b_open_new),
+                                     tags=() if on else ('off',))
             self._b_rowmap[pid] = ('b', i)
             for j, it in enumerate(b['items']):
                 cid = self.b_tree.insert(
@@ -4132,6 +4165,22 @@ class App:
                                          values=('', r['qty'], DEFAULT_TIER, extra),
                                          tags=('rw',) if on else ('off',))
                 self._b_rowmap[rid] = ('r', i, r['type'])
+        # กลับไปอยู่ที่เดิม ทั้งแถวที่เลือกและจุดที่เลื่อนค้างไว้
+        if sel_key:
+            for row, m in self._b_rowmap.items():
+                if m == sel_key:
+                    try:
+                        self.b_tree.selection_set(row)
+                        self.b_tree.see(row)
+                    except Exception:
+                        pass
+                    break
+        try:
+            self.b_tree.update_idletasks()
+            self.b_tree.yview_moveto(top_frac)
+        except Exception:
+            pass
+
         n = len(self.bq)
         use = sum(1 for b in self.bq if b.get('use', True))
         self.b_count.config(text=('ยังไม่ได้นำเข้า' if not n
@@ -4222,6 +4271,105 @@ class App:
         except Exception:
             top.geometry('560x%d' % h)
         return top
+
+    def _b_expand_all(self, on):
+        """กาง/หุบทุกใบทีเดียว แล้วจำไว้ว่าจะให้ใบใหม่เป็นแบบไหน"""
+        self.b_open_new = bool(on)
+        for row, m in self._b_rowmap.items():
+            if m[0] == 'b':
+                try:
+                    self.b_tree.item(row, open=bool(on))
+                except Exception:
+                    pass
+
+    def b_rename_all(self):
+        """แก้ชื่อบันเดิลทุกอันในหน้าเดียว — ไม่ต้องดับเบิลคลิกทีละใบ
+
+        ของเดิมต้องดับเบิลคลิก -> แก้ -> ปิด -> เลื่อนหาใบถัดไป วนไปเรื่อยๆ
+        บันเดิลเยอะๆ (40-50 อัน) เสียเวลามาก
+        หน้านี้ไล่ Tab ลงไปพิมพ์ทีเดียวจบ แล้วกดบันทึกครั้งเดียว
+        """
+        if not self.bq:
+            messagebox.showinfo('ยังไม่มีบันเดิล', 'นำเข้าไฟล์ต้นฉบับก่อนนะ')
+            return
+        top = self._b_dialog('แก้ชื่อบันเดิลทั้งหมด (%d อัน)' % len(self.bq), 560)
+        try:      # หน้านี้กว้างกว่าปกติ จัดให้อยู่กลางจออีกที
+            self.root.update_idletasks()
+            x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - 820) // 2)
+            y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - 560) // 2)
+            top.geometry('820x560+%d+%d' % (x, y))
+        except Exception:
+            top.geometry('820x560')
+
+        head = tk.Frame(top, bg=C['bg'])
+        head.pack(fill='x', padx=18, pady=(14, 6))
+        tk.Label(head, text='พิมพ์ชื่อใหม่ได้เลย · กด Tab เพื่อไปช่องถัดไป · '
+                            'เว้นว่าง = ใช้ชื่อเดิม',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w').pack(side='left')
+
+        # แถบเลื่อนเอง เพราะรายการยาวกว่าหน้าจอ
+        wrap = tk.Frame(top, bg=C['bg'])
+        wrap.pack(fill='both', expand=True, padx=18)
+        cv = tk.Canvas(wrap, bg=C['bg'], highlightthickness=0)
+        sb = ttk.Scrollbar(wrap, orient='vertical', command=cv.yview)
+        inner = tk.Frame(cv, bg=C['bg'])
+        cv.configure(yscrollcommand=sb.set)
+        cv.pack(side='left', fill='both', expand=True)
+        sb.pack(side='right', fill='y')
+        win = cv.create_window((0, 0), window=inner, anchor='nw')
+
+        def _fit(_e=None):
+            cv.configure(scrollregion=cv.bbox('all'))
+            try:
+                cv.itemconfigure(win, width=cv.winfo_width())
+            except Exception:
+                pass
+        inner.bind('<Configure>', _fit)
+        cv.bind('<Configure>', _fit)
+
+        def _wheel(ev):
+            cv.yview_scroll(-1 * (ev.delta // 120 or (1 if ev.delta < 0 else -1)), 'units')
+        for w in (cv, inner, top):
+            w.bind('<MouseWheel>', _wheel)
+
+        vs = []
+        for i, b in enumerate(self.bq):
+            row = tk.Frame(inner, bg=C['bg'])
+            row.pack(fill='x', pady=2)
+            tk.Label(row, text='%2d.' % (i + 1), bg=C['bg'], fg=C['dim'],
+                     font=('Consolas', 9), width=4, anchor='e').pack(side='left')
+            v = tk.StringVar(value=b['name'])
+            e = self._entry(row, width=52)
+            e.config(textvariable=v)
+            e.pack(side='left', ipady=3, padx=(6, 8))
+            e.bind('<MouseWheel>', _wheel)
+            info = '%d ไอเทม' % len(b['items'])
+            if b.get('sheet'):
+                info += '  ·  ' + b['sheet']
+            tk.Label(row, text=info, bg=C['bg'], fg=C['dim'],
+                     font=('Segoe UI', 8), anchor='w').pack(side='left')
+            vs.append(v)
+            if i == 0:
+                e.focus_set()
+
+        def _save():
+            n = 0
+            for b, v in zip(self.bq, vs):
+                nm = v.get().strip()
+                if nm and nm != b['name']:
+                    b['name'] = nm
+                    n += 1
+            top.destroy()
+            self._b_refresh()
+            self.log('แก้ชื่อบันเดิล %d อัน' % n, 'OK' if n else 'INFO')
+
+        foot = tk.Frame(top, bg=C['card'], height=58)
+        foot.pack(fill='x', side='bottom')
+        foot.pack_propagate(False)
+        self._btn(foot, 'บันทึกทั้งหมด', _save, primary=True).pack(
+            side='right', padx=18, pady=12, ipadx=20, ipady=4)
+        self._btn(foot, 'ยกเลิก', top.destroy).pack(side='right', pady=12, ipadx=14, ipady=4)
+        self.root.wait_window(top)
 
     def _b_form_bundle(self, b):
         top = self._b_dialog('แก้ไขบันเดิล', 300)
