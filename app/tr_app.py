@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.8 : แก้ชื่อบันเดิลทั้งหมดในหน้าเดียว + ลิสต์ไม่กางเองตอนแก้
+V0.8.9 : ปุ่มคัดลอกเลข Bundle เอาแค่แถวที่เลือก และเอาแค่เลข
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -4089,9 +4089,12 @@ class App:
         self.lbl_made.pack(side='left', padx=10)
         self._btn(mb, '📋  คัดลอกเลข Bundle', self.copy_made).pack(
             side='right', ipadx=8, ipady=2)
+        tk.Label(mb, text='(เลือกแถวที่ต้องการก่อน · ไม่เลือก = เอาทั้งหมด)',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8)).pack(
+                     side='right', padx=8)
         mc = ('no', 'bid', 'bname', 'cnt', 'at')
         self.tree_made = ttk.Treeview(mw, columns=mc, show='headings', height=4,
-                                      style='TR.Treeview')
+                                      style='TR.Treeview', selectmode='extended')
         for c, t, w in (('no', '#', 42), ('bid', 'Bundle ID', 100),
                         ('bname', 'ชื่อ Bundle', 430), ('cnt', 'ไอเทม', 60),
                         ('at', 'เวลา', 80)):
@@ -5376,13 +5379,31 @@ class App:
         self.root.after(0, _do)
 
     def copy_made(self):
-        if not self.made:
+        """คัดลอกเฉพาะ "เลข" Bundle ของแถวที่เลือกไว้ — ไม่เลือกก็เอาทั้งหมด"""
+        rows = list(self.tree_made.selection())
+        picked = bool(rows)
+        if not picked:
+            rows = list(self.tree_made.get_children())
+        if not rows:
             messagebox.showinfo('ยังไม่มี', 'ยังไม่ได้สร้างบันเดิลในรอบนี้')
             return
-        txt = '\n'.join('%s\t%s' % (m['id'], m['name']) for m in self.made)
+        ids, blank = [], 0
+        for w in rows:
+            v = self.tree_made.item(w, 'values')
+            bid = str(v[1]).strip() if len(v) > 1 else ''
+            if bid and bid != '-':
+                ids.append(bid)
+            else:
+                blank += 1
+        if not ids:
+            messagebox.showinfo('ไม่มีเลข',
+                                'แถวที่เลือกยังไม่ได้เลข Bundle (ขึ้น - อยู่)')
+            return
         self.root.clipboard_clear()
-        self.root.clipboard_append(txt)
-        self.log('คัดลอกเลข Bundle %d รายการแล้ว' % len(self.made), 'OK')
+        self.root.clipboard_append('\n'.join(ids))
+        self.log('คัดลอกเลข Bundle %d รายการแล้ว (%s)%s' % (
+            len(ids), 'เฉพาะที่เลือก' if picked else 'ทั้งหมด',
+            '  ข้ามที่ยังไม่ได้เลข %d' % blank if blank else ''), 'OK')
 
     def _ins_result(self, r):
         tag = ('miss',) if r.get('miss') else (('dup',) if r.get('dup') else ())
