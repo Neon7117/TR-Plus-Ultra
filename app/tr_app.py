@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.9 : ปุ่มคัดลอกเลข Bundle เอาแค่แถวที่เลือก และเอาแค่เลข
+V0.8.11 : ค้นหาไม่เจอ → ส่งเข้าคิวสร้าง Item ได้เลย ไม่ต้องนำเข้าไฟล์ใหม่
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -76,7 +76,11 @@ SEL_CREATE = {
     'web_label':   'เปิดใช้งานการแสดงผลบนเว็บ',
     'trade_label': 'แลกเปลี่ยนได้',
     'submit':      'สร้าง Item',
+    'img_label':   'รูปภาพไอเทม',        # กล่องอัปโหลดรูปทางขวาของฟอร์ม
 }
+# กติกาไฟล์รูปตามที่เว็บเขียนไว้ใต้หัวข้อ "รูปภาพไอเทม": .png/.jpg/.webp ไม่เกิน 5 MB
+IMG_EXTS = ('.png', '.jpg', '.jpeg', '.webp')
+IMG_MAX_MB = 5
 DEFAULT_TYPE = 'GENERAL'
 DEFAULT_SUFFIX = '(Gift)'
 
@@ -990,6 +994,47 @@ JS_PICK_TYPE = """
   return 'combobox';
 }"""
 
+# หาช่องอัปโหลดรูป แล้วติดป้ายไว้ให้ playwright จับถูกตัว
+# อ้างจากข้อความ "รูปภาพไอเทม" ไม่อ้างตำแหน่ง — ฟอร์มสลับที่เมื่อไหร่ก็ยังหาเจอ
+JS_MARK_FILE = """
+([lbl]) => {
+  for (const el of document.querySelectorAll('[data-trpu-pic]'))
+    el.removeAttribute('data-trpu-pic');
+  const all = [...document.querySelectorAll('input[type=file]')];
+  if (!all.length) return 'ไม่เจอช่องอัปโหลดรูปในหน้านี้';
+  let target = null;
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+  let node;
+  while ((node = w.nextNode()) && !target) {
+    if ((node.textContent || '').indexOf(lbl) < 0) continue;
+    let c = node.parentElement;
+    for (let i = 0; i < 6 && c && !target; i++) {
+      const f = c.querySelector('input[type=file]');
+      if (f) target = f;
+      c = c.parentElement;
+    }
+  }
+  if (!target && all.length === 1) target = all[0];
+  if (!target) return 'เจอช่องอัปโหลด ' + all.length + ' ช่อง แต่ไม่รู้ว่าช่องไหนคือ ' + lbl;
+  target.setAttribute('data-trpu-pic', '1');
+  target.scrollIntoView({block: 'center'});
+  return 'ok';
+}"""
+
+# อ่านกลับมาว่าไฟล์เข้าไปอยู่ในช่องจริงไหม (และเว็บขึ้นรูปตัวอย่างให้รึยัง)
+JS_FILE_STATE = """
+() => {
+  const el = document.querySelector('input[type=file][data-trpu-pic]');
+  if (!el) return {n: -1, name: '', preview: false};
+  const n = el.files ? el.files.length : 0;
+  let box = el, prev = false;
+  for (let i = 0; i < 6 && box; i++) {
+    if (box.querySelector('img')) { prev = true; break; }
+    box = box.parentElement;
+  }
+  return {n: n, name: n ? el.files[0].name : '', preview: prev};
+}"""
+
 # อ่านค่าที่อยู่ในฟอร์มตอนนี้กลับมา — ใช้ตรวจว่ากรอกเข้าไปจริงไหม
 JS_READ_FORM = """
 (sel) => {
@@ -1889,6 +1934,29 @@ def split_name_qty(raw_name):
     return base, m.group(1), True
 
 
+def check_item_image(path):
+    """ตรวจไฟล์รูปก่อนจะเอาไปอัปโหลด — คืน (ผ่านไหม, เหตุผล)
+
+    ยึดตามที่เว็บเขียนไว้เอง: .png/.jpg/.webp ขนาดไม่เกิน 5 MB
+    """
+    p = str(path or '').strip()
+    if not p:
+        return False, 'ยังไม่ได้เลือกรูป'
+    if not os.path.isfile(p):
+        return False, 'ไม่เจอไฟล์รูปในเครื่อง: ' + p
+    ext = os.path.splitext(p)[1].lower()
+    if ext not in IMG_EXTS:
+        return False, ('นามสกุล %s ใช้ไม่ได้ — เว็บรับแค่ %s'
+                       % (ext or '(ไม่มี)', ' / '.join(IMG_EXTS)))
+    try:
+        mb = os.path.getsize(p) / (1024.0 * 1024.0)
+    except OSError as ex:
+        return False, 'อ่านไฟล์รูปไม่ได้: ' + str(ex)
+    if mb > IMG_MAX_MB:
+        return False, 'ไฟล์ใหญ่ %.1f MB — เว็บรับไม่เกิน %d MB' % (mb, IMG_MAX_MB)
+    return True, '%s (%.0f KB)' % (os.path.basename(p), mb * 1024)
+
+
 def make_item_name(cname, suffix='', dur=''):
     """ประกอบชื่อที่จะกรอกลงเว็บ: <ชื่อ> <คำต่อท้าย> (<X> วัน)
 
@@ -1924,7 +1992,24 @@ def row_to_item(r, type_name=DEFAULT_TYPE, suffix=DEFAULT_SUFFIX, price='', mail
         'qty': r.get('amount', '1'),
         'trade': r.get('trade', 'any') == 'yes',
         'web': True,
+        'img': '',            # รูปไอเทม — ไฟล์ต้นฉบับไม่มีรูป ต้องเลือกเองในหน้าแก้ไข
     }
+
+
+def miss_to_item(r, type_name=DEFAULT_TYPE, suffix=DEFAULT_SUFFIX, price='', mail=''):
+    """แถวผลค้นหาที่ "ไม่เจอ" -> ข้อมูลไอเทมสำหรับคิวสร้าง
+
+    ใช้กฎเดิมของการนำเข้าไฟล์ทุกอย่าง (row_to_item) — ไม่คิดกฎใหม่เอง
+    เพราะแถวที่ไม่เจอก็มาจากแถวในชีทใบเดียวกันนั่นแหละ
+    ถ้าเป็นการค้นทีละตัว (ไม่มีต้นทางจากชีท) ก็ใช้ชื่อกับเลขที่เห็นบนตารางแทน
+    """
+    src = dict(r.get('src') or {})
+    if not (src.get('cname') or src.get('disp')):
+        src['cname'] = r.get('name') or ''
+        src.setdefault('has_qty', False)   # ไม่รู้ว่าชื่อเดิมมี "ชิ้น" ไหม -> ไม่เติมอะไร
+    if not src.get('kind'):
+        src['kind'] = r.get('kind') or r.get('req') or ''
+    return row_to_item(src, type_name, suffix, price, mail)
 
 
 def parse_master_rows(rows, seen=None):
@@ -3479,6 +3564,8 @@ class App:
             side='right', ipadx=8, ipady=2)
         self._btn(bar, '📋  คัดลอก ID ทั้งหมด', self.copy_ids).pack(
             side='right', padx=6, ipadx=8, ipady=2)
+        self._btn(bar, '➕  ตัวที่ไม่เจอ → คิวสร้าง Item', self.miss_to_queue,
+                  primary=True).pack(side='right', padx=6, ipadx=8, ipady=2)
 
         wrap = tk.Frame(p, bg=C['bg'])
         wrap.pack(fill='both', expand=True, padx=14, pady=(0, 6))
@@ -3489,7 +3576,7 @@ class App:
                         font=('Segoe UI', 9, 'bold'), borderwidth=0)
         cols = ('seq', 'id', 'name', 'type', 'kind', 'notes')
         self.tree = ttk.Treeview(wrap, columns=cols, show='headings', height=9,
-                                 style='TR.Treeview')
+                                 style='TR.Treeview', selectmode='extended')
         for c, t, w in (('seq', '#', 42), ('id', 'Aztek Item Id', 96), ('name', 'ชื่อ', 330),
                         ('type', 'ประเภท', 80), ('kind', 'ItemKind', 90),
                         ('notes', 'หมายเหตุ', 210)):
@@ -3503,7 +3590,8 @@ class App:
         self.tree.pack(side='left', fill='both', expand=True)
         sb.pack(side='right', fill='y')
         tk.Label(p, text='# = ลำดับในรายการที่สั่งค้น  ·  แถวเหลือง = เว็บมีหลายตัว ต้องเลือกเอง'
-                         '  ·  แถวแดง = หาไม่เจอ',
+                         '  ·  แถวแดง = หาไม่เจอ — ส่งเข้าคิวสร้าง Item ได้เลย '
+                         '(เลือกแถวไว้ = เอาแค่ที่เลือก · ไม่เลือก = เอาแถวแดงทั้งหมด)',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(
             fill='x', padx=14, pady=(0, 10))
 
@@ -3556,13 +3644,14 @@ class App:
 
         tw = tk.Frame(s2, bg=C['bg'])
         tw.pack(fill='both', expand=True, pady=(10, 0))
-        cols = ('n', 'w', 'kind', 'name', 'type', 'price', 'dur', 'qty', 'trade')
+        cols = ('n', 'w', 'kind', 'name', 'type', 'price', 'dur', 'qty', 'trade', 'img')
         self.c_tree = ttk.Treeview(tw, columns=cols, show='headings',
                                    style='TR.Treeview', height=8)
         for c, t, w in (('n', '#', 38), ('w', '', 26), ('kind', 'ItemKind', 88),
-                        ('name', 'ชื่อที่จะกรอกลงเว็บ', 310), ('type', 'ประเภท', 85),
+                        ('name', 'ชื่อที่จะกรอกลงเว็บ', 280), ('type', 'ประเภท', 85),
                         ('price', 'Price', 60), ('dur', 'ระยะเวลา', 78),
-                        ('qty', 'จำนวน', 58), ('trade', 'แลกเปลี่ยน', 82)):
+                        ('qty', 'จำนวน', 58), ('trade', 'แลกเปลี่ยน', 82),
+                        ('img', 'รูป', 120)):
             self.c_tree.heading(c, text=t)
             self.c_tree.column(c, width=w, anchor='w')
         self.c_tree.tag_configure('warn', background='#3a3018', foreground='#e3b341')
@@ -3631,12 +3720,22 @@ class App:
             self.c_tree.insert('', 'end', tags=('warn',) if d.get('warn') else (), values=(
                 i, '⚠' if d.get('warn') else '', d['kind'], d['name'], d['type'],
                 d['price'] or '—', (d['dur'] + ' วัน') if d['dur'] else 'ถาวร',
-                d['qty'] or '—', 'ได้' if d['trade'] else 'ไม่ได้'))
+                d['qty'] or '—', 'ได้' if d['trade'] else 'ไม่ได้',
+                self._c_img_cell(d)))
         self.c_count.config(text=('คิวว่าง' if not self.cq else f'ในคิว {len(self.cq)} ไอเทม'))
         self.c_warn.config(
             text=(f'⚠  มี {nwarn} แถวหน้าตาไม่เหมือนไอเทมทั่วไป (สีเหลือง) — '
                   'คลิกที่แถวเพื่อดูเหตุผล · ดับเบิลคลิกเพื่อแก้ · ไม่เอาก็ลบออกจากคิวได้'
                   if nwarn else ''), fg=C['warn'])
+
+    @staticmethod
+    def _c_img_cell(d):
+        """ช่อง "รูป" ในคิว — บอกได้ทันทีว่าตัวไหนยังไม่มีรูป / รูปเสีย"""
+        p = str(d.get('img') or '').strip()
+        if not p:
+            return '—'
+        good, _ = check_item_image(p)
+        return ('🖼 ' if good else '⚠ ') + os.path.basename(p)
 
     def _c_sel(self):
         s = self.c_tree.selection()
@@ -3674,7 +3773,7 @@ class App:
              'type': self.cv_type.get().strip() or DEFAULT_TYPE,
              'price': self.cv_price.get().strip(), 'dur': '',
              'mail': self.cv_mail.get().strip(), 'qty': '1',
-             'trade': False, 'web': True}
+             'trade': False, 'web': True, 'img': ''}
         if self._c_form(d, 'เพิ่มไอเทมเข้าคิว'):
             self.cq.append(d)
             self._c_refresh()
@@ -3713,11 +3812,11 @@ class App:
         top.grab_set()
         try:    # วางกลางหน้าต่างหลัก ไม่ให้ไปโผล่มุมจอ
             self.root.update_idletasks()
-            x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - 640) // 2)
-            y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - 520) // 2)
-            top.geometry('640x520+%d+%d' % (x, y))
+            x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - 660) // 2)
+            y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - 600) // 2)
+            top.geometry('660x600+%d+%d' % (x, y))
         except Exception:
-            top.geometry('640x520')
+            top.geometry('660x600')
         ok = {'v': False}
 
         body = tk.Frame(top, bg=C['bg'])
@@ -3752,18 +3851,64 @@ class App:
                            highlightthickness=0).grid(row=r, column=1, sticky='w',
                                                       padx=(12, 0), pady=2)
 
+        # ---- รูปภาพไอเทม (เว็บมีช่องอัปโหลด — เลือกไฟล์จากเครื่องได้เลย) ----
+        pic = {'v': str(d.get('img') or '')}
+        prow = tk.Frame(body, bg=C['bg'])
+        prow.grid(row=len(fields) + 2, column=0, columnspan=2, sticky='w', pady=(10, 0))
+        tk.Label(prow, text='รูปภาพไอเทม', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9)).pack(side='left')
+        lb_pic = tk.Label(prow, text='', bg=C['bg'], fg=C['dim'],
+                          font=('Segoe UI', 8), wraplength=300, justify='left')
+
+        def _show_pic():
+            if not pic['v']:
+                lb_pic.config(text='ยังไม่ได้เลือกรูป — สร้างได้ แต่ไอเทมจะไม่มีรูป',
+                              fg=C['dim'])
+                return
+            good, why = check_item_image(pic['v'])
+            lb_pic.config(text=('🖼  ' if good else '⚠  ') + why,
+                          fg=C['ok'] if good else C['err'])
+
+        def _pick():
+            p = filedialog.askopenfilename(
+                parent=top, title='เลือกรูปไอเทม',
+                filetypes=[('รูปภาพ (.png .jpg .webp)', '*.png *.jpg *.jpeg *.webp'),
+                           ('ทุกไฟล์', '*.*')])
+            if not p:
+                return
+            good, why = check_item_image(p)
+            if not good:
+                return messagebox.showwarning('รูปนี้ใช้ไม่ได้', why, parent=top)
+            pic['v'] = p
+            _show_pic()
+
+        def _drop():
+            pic['v'] = ''
+            _show_pic()
+
+        self._btn(prow, '📁  เลือกรูป…', _pick).pack(side='left', padx=(12, 0),
+                                                     ipadx=8, ipady=2)
+        self._btn(prow, '✕  เอารูปออก', _drop).pack(side='left', padx=(6, 0),
+                                                     ipadx=6, ipady=2)
+        lb_pic.pack(side='left', padx=(10, 0))
+        _show_pic()
+        tk.Label(body, text='เว็บรับ .png / .jpg / .webp ขนาดไม่เกิน %d MB  ·  '
+                            'ไม่ใส่ก็สร้างได้ แค่ไอเทมจะไม่มีรูป' % IMG_MAX_MB,
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8)).grid(
+                     row=len(fields) + 3, column=0, columnspan=2, sticky='w')
+
         # ตัวช่วย: ประกอบชื่อใหม่จาก "ชื่อฐาน" + คำต่อท้าย + ระยะเวลา
         hint = tk.Label(body, text='ชื่อฐาน (ตัดจำนวนชิ้นออกแล้ว): ' + (d.get('cname') or '—'),
                         bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8),
                         wraplength=560, justify='left')
-        hint.grid(row=len(fields) + 2, column=0, columnspan=2, sticky='w', pady=(10, 0))
+        hint.grid(row=len(fields) + 4, column=0, columnspan=2, sticky='w', pady=(10, 0))
 
         def _rebuild():
             vs['name'].set(make_item_name(d.get('cname') or vs['name'].get(),
                                           self.cv_suffix.get().strip(),
                                           vs['dur'].get().strip()))
         self._btn(body, '↻ ประกอบชื่อใหม่จากชื่อฐาน + คำต่อท้าย + ระยะเวลา', _rebuild
-                  ).grid(row=len(fields) + 3, column=0, columnspan=2,
+                  ).grid(row=len(fields) + 5, column=0, columnspan=2,
                          sticky='w', pady=(6, 0), ipadx=6, ipady=3)
 
         foot = tk.Frame(top, bg=C['card'], height=58)
@@ -3775,6 +3920,7 @@ class App:
                 d[key] = v.get().strip()
             d['trade'] = vt.get()
             d['web'] = vw.get()
+            d['img'] = pic['v']
             if not d['kind'] or not d['name']:
                 return messagebox.showwarning('กรอกไม่ครบ', 'ต้องมี ItemKind และชื่อไอเทม')
             ok['v'] = True
@@ -3798,8 +3944,12 @@ class App:
             return messagebox.showwarning('คิวว่าง', 'ยังไม่มีไอเทมในคิว — นำเข้าไฟล์ต้นฉบับก่อน')
         do = self.cv_do.get()
         nwarn = sum(1 for d in self.cq if d.get('warn'))
+        nopic = sum(1 for d in self.cq if not check_item_image(d.get('img'))[0])
         if do:
             msg = f'จะสร้างไอเทมจริงบนเว็บ {len(self.cq)} รายการ\n'
+            if nopic:
+                msg += (f'\n🖼  มี {nopic} รายการที่ยังไม่มีรูป (หรือรูปใช้ไม่ได้)\n'
+                        '    จะสร้างต่อให้โดยไม่มีรูป — ใส่รูปทีหลังในเว็บได้\n')
             if nwarn:
                 msg += (f'\n⚠  ในคิวมี {nwarn} แถวที่หน้าตาไม่เหมือนไอเทมทั่วไป (แถวสีเหลือง)\n'
                         '    ถ้ายังไม่ได้ดู แนะนำให้กดยกเลิกแล้วไล่ดูก่อน\n')
@@ -3815,7 +3965,11 @@ class App:
         self.log('=' * 46, 'STEP')
         self.log(('เริ่มสร้างไอเทมจริง ' if do else 'เริ่มทดสอบกรอกฟอร์ม ')
                  + f'{len(self.cq)} รายการ', 'STEP')
-        log_event('create_start', count=len(self.cq), commit=bool(do))
+        if nopic:
+            self.log('ยังไม่มีรูป %d จาก %d รายการ — ตัวที่ไม่มีจะสร้างโดยไม่ใส่รูป'
+                     % (nopic, len(self.cq)), 'WARN')
+        log_event('create_start', count=len(self.cq), commit=bool(do),
+                  no_image=nopic)
         threading.Thread(target=self._c_thread, args=(list(self.cq), do), daemon=True).start()
 
     def _c_thread(self, queue_rows, do):
@@ -3917,6 +4071,9 @@ class App:
         await page.wait_for_timeout(300)
         await self._c_fill(page, 'qty', d.get('qty', ''), 'จำนวน')
 
+        # [3.5] รูปภาพไอเทม — ไม่มีรูปก็สร้างต่อ แต่ต้องเตือนไว้ใน Log
+        await self._c_image(page, d)
+
         # ตรวจว่าค่าเข้าไปจริง
         got = await page.evaluate(JS_READ_FORM, SEL_CREATE)
         bad = []
@@ -3962,6 +4119,39 @@ class App:
         log_event('create_item', kind_id=d['kind'], name=d['name'],
                   ok=bool(good), http=code)
         return good
+
+    async def _c_image(self, page, d):
+        """อัปโหลดรูปไอเทม — คืน True ถ้าใส่รูปเข้าไปได้จริง
+
+        ไม่มีรูป หรือใส่ไม่ได้ ก็ไม่ล้มงาน แค่เตือนไว้ใน Log แล้วสร้างต่อ
+        """
+        path = str(d.get('img') or '').strip()
+        if not path:
+            self.log('   ! ไม่ได้เลือกรูปให้ไอเทมนี้ — จะสร้างโดยไม่มีรูป', 'WARN')
+            return False
+        ok, why = check_item_image(path)
+        if not ok:
+            self.log('   ! รูปใช้ไม่ได้ (' + why + ') — จะสร้างโดยไม่มีรูป', 'WARN')
+            return False
+        r = await page.evaluate(JS_MARK_FILE, [SEL_CREATE['img_label']])
+        if r != 'ok':
+            self.log('   ! ' + str(r) + ' — จะสร้างโดยไม่มีรูป', 'WARN')
+            return False
+        try:
+            await page.locator('input[type="file"][data-trpu-pic]').first.set_input_files(
+                path, timeout=15000)
+        except Exception as ex:
+            self.log('   ! ใส่รูปไม่สำเร็จ: ' + str(ex)[:120] + ' — จะสร้างโดยไม่มีรูป', 'WARN')
+            return False
+        await page.wait_for_timeout(1200)
+        st = await page.evaluate(JS_FILE_STATE)
+        if not st or not st.get('n'):
+            self.log('   ! ใส่รูปแล้วแต่เว็บยังไม่รับไฟล์ — จะสร้างโดยไม่มีรูป', 'WARN')
+            return False
+        self.log('   · รูปภาพไอเทม = %s%s' % (
+            st.get('name') or os.path.basename(path),
+            '' if st.get('preview') else '  (ยังไม่ขึ้นรูปตัวอย่าง)'), 'INFO')
+        return True
 
     async def _c_switch(self, page, label, want):
         r = await page.evaluate(JS_SET_SWITCH, [label, bool(want)])
@@ -5432,7 +5622,9 @@ class App:
                 'id': '', 'name': c.get('disp') or c.get('name') or '',
                 'type': '', 'kind': c.get('kind') or '',
                 'notes': '✗ ' + why.get(i, 'ไม่เจอ'),
-                'seq': i, 'req': c.get('kind') or '', 'miss': True, 'dup': False})
+                'seq': i, 'req': c.get('kind') or '', 'miss': True, 'dup': False,
+                # เก็บแถวต้นทางไว้ด้วย เผื่อสั่งส่งเข้าคิวสร้าง Item ต่อ
+                'src': dict(c)})
 
         self.results.sort(key=lambda r: (r.get('seq') or 0, r.get('id') or ''))
         n_ok = sum(1 for r in self.results if not r.get('miss'))
@@ -5464,6 +5656,74 @@ class App:
         self.root.clipboard_clear()
         self.root.clipboard_append(ids)
         self.log(f'คัดลอก {len(self.results)} ID แล้ว', 'OK')
+
+    def picked_results(self):
+        """แถวที่เลือกไว้ในตารางผลค้นหา — ไม่ได้เลือกก็คืนทั้งหมด"""
+        sel = list(self.tree.selection())
+        if not sel:
+            return list(self.results), False
+        out = []
+        for iid in sel:
+            i = self.tree.index(iid)
+            if 0 <= i < len(self.results):
+                out.append(self.results[i])
+        return out, True
+
+    def miss_to_queue(self):
+        """ตัวที่ค้นแล้วไม่เจอ -> ส่งเข้าคิวสร้าง Item เลย ไม่ต้องนำเข้าไฟล์ใหม่"""
+        if self.c_running:
+            return messagebox.showinfo('กำลังทำงาน', 'ตอนนี้กำลังสร้างไอเทมอยู่ รอให้เสร็จก่อนนะ')
+        if not self.results:
+            return messagebox.showinfo('ยังไม่มีผลลัพธ์', 'ค้นหาก่อนแล้วค่อยส่งเข้าคิวนะ')
+        rows, picked = self.picked_results()
+        miss = [r for r in rows if r.get('miss')]
+        if not miss:
+            return messagebox.showinfo(
+                'ไม่มีตัวที่ไม่เจอ',
+                'แถวที่เลือกไว้เจอบนเว็บหมดแล้ว — ไม่ต้องสร้างใหม่'
+                if picked else 'รอบนี้เจอครบทุกตัว ไม่มีอะไรต้องสร้างใหม่')
+
+        t = self.cv_type.get().strip() or DEFAULT_TYPE
+        sfx = self.cv_suffix.get().strip()
+        pr = self.cv_price.get().strip()
+        ml = self.cv_mail.get().strip()
+        have = {str(d.get('kind') or '').strip() for d in self.cq}
+        add, dup = [], []
+        for r in miss:
+            it = miss_to_item(r, t, sfx, pr, ml)
+            k = str(it.get('kind') or '').strip()
+            if k and k in have:
+                dup.append(k)
+                continue
+            if k:
+                have.add(k)
+            add.append(it)
+
+        if not add:
+            return messagebox.showinfo(
+                'อยู่ในคิวอยู่แล้ว',
+                'ตัวที่ไม่เจอ %d รายการ อยู่ในคิวสร้าง Item อยู่แล้วทั้งหมด' % len(miss))
+
+        msg = ('ส่งเข้าคิวสร้าง Item %d รายการ\n(%s)\n\n'
+               % (len(add), 'เฉพาะที่เลือก' if picked else 'แถวแดงทั้งหมด'))
+        msg += '\n'.join('· %s  (ItemKind %s)' % (d['name'][:44], d['kind'])
+                         for d in add[:8])
+        if len(add) > 8:
+            msg += '\n· ... อีก %d รายการ' % (len(add) - 8)
+        if dup:
+            msg += '\n\n(ข้าม %d รายการที่อยู่ในคิวแล้ว)' % len(dup)
+        msg += '\n\nชื่อกับค่าต่างๆ ใช้กฎเดียวกับตอนนำเข้าไฟล์ — แก้เพิ่มทีหลังได้'
+        if not messagebox.askyesno('ส่งเข้าคิว', msg):
+            return
+
+        self.cq.extend(add)
+        self._c_refresh()
+        self.nb.select(self.tab_create)
+        self.log('ส่งตัวที่ไม่เจอเข้าคิวสร้าง Item %d รายการ (รวมในคิว %d)%s'
+                 % (len(add), len(self.cq),
+                    '  ข้ามที่อยู่ในคิวแล้ว %d' % len(dup) if dup else ''), 'OK')
+        log_event('miss_to_queue', count=len(add), skipped=len(dup),
+                  total=len(self.cq), picked=bool(picked))
 
     def export(self, kind):
         if not self.results:
