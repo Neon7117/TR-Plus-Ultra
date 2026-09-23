@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.12 : เอาแผง Deep Check ออกจากหน้าค้นหา — คืนที่ให้ตารางผลลัพธ์
+V0.8.13 : ผลลัพธ์สร้าง Item + เลข Aztek Item Id · แก้ Log ที่แจ้งเหมือนบั๊ก
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -954,26 +954,77 @@ JS_SET_BY_LABEL = """
 }"""
 
 # ติ๊ก/ปลดติ๊ก checkbox หรือสวิตช์ ที่อยู่ใกล้ข้อความที่ระบุ
+# เดินหาจาก "ข้อความ" ไม่ใช่ตัวอิลิเมนต์ใบสุดท้าย เพราะของจริงป้ายมักมีคำอธิบายต่อท้าย
+# อยู่ในก้อนเดียวกัน เช่น  แลกเปลี่ยนได้ (ไม่เลือก = "ผูกมัดไอดี")  -> ป้ายไม่ใช่ใบ
+# คืนค่าแยกให้ด้วยว่า "เปลี่ยนให้แล้ว" หรือ "เป็นแบบนี้อยู่แล้ว" จะได้ไม่ขึ้น Log เหมือนพัง
 JS_SET_SWITCH = """
 ([lbl, on]) => {
-  const nz = t => (t||'').trim();
-  const nodes = [...document.querySelectorAll('*')].filter(
-    e => e.children.length === 0 && (nz(e.textContent) === lbl ||
-         nz(e.textContent).indexOf(lbl) === 0));
-  for (const el of nodes) {
-    let n = el.parentElement;
-    for (let i=0; i<6 && n; i++) {
-      const cb = n.querySelector('input[type="checkbox"],[role="checkbox"],[role="switch"]');
-      if (cb) {
-        const cur = (cb.checked !== undefined)
-            ? cb.checked : (cb.getAttribute('aria-checked') === 'true');
-        if (cur !== on) cb.click();
-        return 'ok';
-      }
+  const rd = cb => (cb.tagName === 'INPUT' && cb.checked !== undefined)
+      ? cb.checked
+      : (cb.getAttribute('aria-checked') === 'true' ||
+         cb.getAttribute('data-state') === 'checked');
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+  let node, cb = null;
+  while ((node = w.nextNode()) && !cb) {
+    if ((node.textContent || '').trim().indexOf(lbl) !== 0) continue;
+    let n = node.parentElement;
+    for (let i = 0; i < 6 && n && !cb; i++) {
+      cb = n.querySelector('input[type="checkbox"],[role="checkbox"],[role="switch"]');
       n = n.parentElement;
     }
   }
-  return 'ไม่เจอสวิตช์';
+  if (!cb) return 'ไม่เจอสวิตช์';
+  if (rd(cb) === on) return 'ok|เป็นแบบนี้อยู่แล้ว';
+  cb.scrollIntoView({block: 'center'});
+  cb.click();
+  if (rd(cb) !== on) return 'กดแล้วค่าไม่เปลี่ยน';
+  return 'ok|เปลี่ยนให้แล้ว';
+}"""
+
+# อ่าน "ประเภทไอเทม (game_item_type)" ที่หน้าเว็บตั้งไว้ตอนนี้
+# หน้าสร้างไอเทมล็อกค่านี้เป็น GENERAL ไว้ กดเลือกไม่ได้ (คนกดเองก็ไม่ได้)
+# เลยต้องอ่านค่าปัจจุบันมาเทียบ ถ้าตรงกับที่ต้องการอยู่แล้วก็จบ ไม่ใช่ข้อผิดพลาด
+JS_READ_TYPE = """
+(labels) => {
+  const tx = el => (el.innerText || el.textContent || '').trim();
+  const hit = (box, lbl) => {
+    if (!box) return '';
+    const s = (box.tagName === 'SELECT') ? box : box.querySelector('select');
+    if (s && s.selectedIndex >= 0) return s.options[s.selectedIndex].text.trim();
+    const q = 'input:not([type=checkbox]):not([type=file]):not([type=radio])';
+    const inp = (box.tagName === 'INPUT' && box.type !== 'checkbox')
+        ? box : box.querySelector(q);
+    if (inp && String(inp.value || '').trim()) return String(inp.value).trim();
+    const t = tx(box);
+    if (t && t.length <= 40 && t.indexOf(lbl) !== 0) return t;
+    return '';
+  };
+  for (const lbl of labels) {
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+    let node;
+    while ((node = w.nextNode())) {
+      const t = (node.textContent || '').trim();
+      if (!t || t.indexOf(lbl) !== 0) continue;
+      const own = node.parentElement;
+      if (own && own.getAttribute && own.getAttribute('for')) {
+        const v = hit(document.getElementById(own.getAttribute('for')), lbl);
+        if (v) return v;
+      }
+      // ค่าของช่องอยู่ "ถัดจากป้าย" เสมอ — ไล่จากพี่น้องที่ตามมา ไม่ใช่กวาดทั้งกล่อง
+      // (กวาดทั้งกล่องจะไปเจอหัวข้อการ์ดที่อยู่ก่อนหน้าป้าย)
+      let el = own;
+      for (let up = 0; up < 3 && el; up++) {
+        let sib = el.nextElementSibling;
+        for (let k = 0; k < 3 && sib; k++) {
+          const v = hit(sib, lbl);
+          if (v) return v;
+          sib = sib.nextElementSibling;
+        }
+        el = el.parentElement;
+      }
+    }
+  }
+  return '';
 }"""
 
 # เลือกประเภทไอเทม (game_item_type) — รองรับทั้ง <select> และ combobox ของ React
@@ -1021,18 +1072,38 @@ JS_MARK_FILE = """
   return 'ok';
 }"""
 
-# อ่านกลับมาว่าไฟล์เข้าไปอยู่ในช่องจริงไหม (และเว็บขึ้นรูปตัวอย่างให้รึยัง)
-JS_FILE_STATE = """
-() => {
+# อ่านสภาพกล่องอัปโหลดรูป ณ ตอนนี้
+# สำคัญ: เว็บจริงอัปโหลดไฟล์ทันทีแล้ว "ล้างช่อง input ทิ้ง" (React คุมค่าเอง)
+# เพราะงั้นจะดูแค่ el.files.length ไม่ได้ ต้องดูหลักฐานฝั่งหน้าเว็บด้วย
+# (รูปตัวอย่างที่ขึ้นมา / ข้อความแจ้งอัปโหลดสำเร็จ) ไม่งั้นจะหาว่าเว็บไม่รับไฟล์ทั้งที่รับแล้ว
+JS_PIC_STATE = """
+([lbl]) => {
   const el = document.querySelector('input[type=file][data-trpu-pic]');
-  if (!el) return {n: -1, name: '', preview: false};
-  const n = el.files ? el.files.length : 0;
-  let box = el, prev = false;
-  for (let i = 0; i < 6 && box; i++) {
-    if (box.querySelector('img')) { prev = true; break; }
-    box = box.parentElement;
+  const n = (el && el.files) ? el.files.length : (el ? 0 : -1);
+  let box = null;
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+  let node;
+  while ((node = w.nextNode()) && !box) {
+    if ((node.textContent || '').indexOf(lbl) < 0) continue;
+    let c = node.parentElement;
+    for (let i = 0; i < 6 && c && !box; i++) {
+      if (c.querySelector('input[type=file]')) box = c;
+      c = c.parentElement;
+    }
   }
-  return {n: n, name: n ? el.files[0].name : '', preview: prev};
+  if (!box && el) {
+    box = el;
+    for (let i = 0; i < 4 && box.parentElement; i++) box = box.parentElement;
+  }
+  const imgs = box ? [...box.querySelectorAll('img')] : [];
+  const body = document.body ? (document.body.innerText || '') : '';
+  const low = body.toLowerCase();
+  const toast = (low.indexOf('upload') >= 0 || low.indexOf('อัปโหลด') >= 0) &&
+                (body.indexOf('สำเร็จ') >= 0 || low.indexOf('success') >= 0);
+  return {n: n, name: (n > 0) ? el.files[0].name : '',
+          imgs: imgs.length,
+          src: imgs.length ? String(imgs[0].src || '').slice(-80) : '',
+          toast: toast};
 }"""
 
 # อ่านค่าที่อยู่ในฟอร์มตอนนี้กลับมา — ใช้ตรวจว่ากรอกเข้าไปจริงไหม
@@ -1258,6 +1329,35 @@ JS_BUNDLE_MADE_ID = """
   const t = document.body ? (document.body.innerText || '') : '';
   return digitsAfter(t, 'Bundle ID') || digitsAfter(t, 'bundleId') ||
          digitsAfter(t, 'รหัส Bundle') || '';
+}"""
+
+# อ่าน "Aztek Item Id" ของไอเทมที่เพิ่งสร้าง จากหน้าเว็บ (เผื่อ API ไม่ส่งเลขกลับมา)
+# สร้างเสร็จเว็บมักเด้งไปหน้า .../items/<เลข>/edit  หรือโชว์เลขไว้ในหน้า
+JS_ITEM_MADE_ID = """
+() => {
+  function digitsAfter(t, key) {
+    const i = t.indexOf(key);
+    if (i < 0) return null;
+    let j = i + key.length, out = '';
+    while (j < t.length && (t.charAt(j) === ' ' || t.charAt(j) === ':' ||
+                            t.charAt(j) === '#' || t.charAt(j) === '=')) j++;
+    while (j < t.length && t.charAt(j) >= '0' && t.charAt(j) <= '9') { out += t.charAt(j); j++; }
+    return out || null;
+  }
+  const u = location.pathname;
+  if (u.indexOf('item') >= 0) {
+    const parts = u.split('/').filter(x => x);
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      let num = p.length > 0;
+      for (let j = 0; j < p.length; j++)
+        if (p.charAt(j) < '0' || p.charAt(j) > '9') num = false;
+      if (num) return p;
+    }
+  }
+  const t = document.body ? (document.body.innerText || '') : '';
+  return digitsAfter(t, 'Aztek Item Id') || digitsAfter(t, 'Item ID') ||
+         digitsAfter(t, 'ID') || '';
 }"""
 
 # อ่าน "หน้า X / Y" ของผลค้นหา — จะได้รู้ว่ามีกี่หน้า และอยู่หน้าไหนแล้ว
@@ -3611,7 +3711,7 @@ class App:
                  justify='left').grid(row=1, column=0, columnspan=8, sticky='w', pady=(8, 0))
 
         # ---------- คิว ----------
-        s2 = self._card(p, 'คิวไอเทมที่จะสร้าง')
+        s2 = self._card(p, 'คิวไอเทมที่จะสร้าง', grow=True)
         bar = tk.Frame(s2, bg=C['bg'])
         bar.pack(fill='x')
         self._btn(bar, '📂  นำเข้าไฟล์ต้นฉบับ (.xlsx)', self.c_import,
@@ -3627,7 +3727,7 @@ class App:
         tw.pack(fill='both', expand=True, pady=(10, 0))
         cols = ('n', 'w', 'kind', 'name', 'type', 'price', 'dur', 'qty', 'trade', 'img')
         self.c_tree = ttk.Treeview(tw, columns=cols, show='headings',
-                                   style='TR.Treeview', height=8)
+                                   style='TR.Treeview', height=6)
         for c, t, w in (('n', '#', 38), ('w', '', 26), ('kind', 'ItemKind', 88),
                         ('name', 'ชื่อที่จะกรอกลงเว็บ', 280), ('type', 'ประเภท', 85),
                         ('price', 'Price', 60), ('dur', 'ระยะเวลา', 78),
@@ -3674,6 +3774,37 @@ class App:
         self.c_btn_stop = self._btn(run, '■  ยกเลิก', self.c_stop)
         self.c_btn_stop.config(state='disabled')
         self.c_btn_stop.pack(side='left', padx=(8, 0), ipadx=12, ipady=5)
+
+        # ---- ไอเทมที่สร้างสำเร็จ + เลข Aztek Item Id ที่เว็บออกให้ ----
+        self.made_items = []
+        ib = tk.Frame(p, bg=C['bg'])
+        ib.pack(fill='x', padx=14, pady=(10, 4))
+        iw = tk.Frame(p, bg=C['bg'])
+        iw.pack(fill='both', expand=True, padx=14, pady=(0, 12))
+        tk.Label(ib, text='Item ที่สร้างแล้ว', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9, 'bold')).pack(side='left')
+        self.lbl_item = tk.Label(ib, text='ยังไม่ได้สร้าง', bg=C['bg'], fg=C['dim'],
+                                 font=('Segoe UI', 9))
+        self.lbl_item.pack(side='left', padx=10)
+        self._btn(ib, '📋  คัดลอก Aztek Item Id', self.copy_made_items).pack(
+            side='right', ipadx=8, ipady=2)
+        tk.Label(ib, text='(เลือกแถวที่ต้องการก่อน · ไม่เลือก = เอาทั้งหมด)',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8)).pack(
+                     side='right', padx=8)
+        ic = ('no', 'aid', 'kind', 'iname', 'pic', 'at', 'note')
+        self.tree_item = ttk.Treeview(iw, columns=ic, show='headings', height=6,
+                                      style='TR.Treeview', selectmode='extended')
+        for c, t, w in (('no', '#', 42), ('aid', 'Aztek Item Id', 110),
+                        ('kind', 'ItemKind', 90), ('iname', 'ชื่อไอเทม', 330),
+                        ('pic', 'รูป', 44), ('at', 'เวลา', 78),
+                        ('note', 'หมายเหตุ', 150)):
+            self.tree_item.heading(c, text=t)
+            self.tree_item.column(c, width=w, anchor='w')
+        self.tree_item.tag_configure('bad', background='#3a1f1e', foreground='#f0736a')
+        isb2 = ttk.Scrollbar(iw, orient='vertical', command=self.tree_item.yview)
+        self.tree_item.configure(yscrollcommand=isb2.set)
+        self.tree_item.pack(side='left', fill='both', expand=True)
+        isb2.pack(side='right', fill='y')
 
         self._c_do_changed()
         self._c_refresh()
@@ -3966,8 +4097,9 @@ class App:
             def _rst():
                 self.c_btn_run.config(state='normal')
                 self.c_btn_stop.config(state='disabled')
-                if self.results:
-                    self.nb.select(self.tab_search)
+                # ผลของการสร้างไอเทมอยู่ในแท็บของตัวเอง — เด้งกลับไปให้ดูเลย
+                if self.made_items:
+                    self.nb.select(self.tab_create)
             self.root.after(0, _rst)
 
     async def _c_work(self, rows, do):
@@ -4019,6 +4151,39 @@ class App:
         self.log(f'   ! ไม่เจอช่อง {label or key} ({sel})', 'WARN')
         return False
 
+    async def _c_read_type(self, page):
+        try:
+            return str(await page.evaluate(
+                JS_READ_TYPE, [SEL_CREATE['type_label'], 'game_item_type']) or '').strip()
+        except Exception:
+            return ''
+
+    async def _c_type(self, page, want):
+        """ตั้งประเภทไอเทม (game_item_type)
+
+        หน้าสร้างไอเทมของเว็บ "ล็อก" ช่องนี้ไว้เป็น GENERAL กดเลือกไม่ได้เลย
+        (คนกดเองก็ไม่ได้) ถ้าค่าบนหน้าตรงกับที่เราต้องการอยู่แล้ว = เรียบร้อย
+        ไม่ใช่ข้อผิดพลาด เลยต้องเช็กก่อนแล้วค่อยลองเลือก
+        """
+        want_s = str(want).strip()
+        cur = await self._c_read_type(page)
+        if cur and cur.lower() == want_s.lower():
+            self.log('   · ประเภทไอเทม = %s  (เว็บล็อกค่านี้ไว้ เลือกไม่ได้ '
+                     'แต่ตรงกับที่ต้องการอยู่แล้ว)' % cur, 'INFO')
+            return True
+        r = await page.evaluate(JS_PICK_TYPE, [want_s, SEL_CREATE['type_ph']])
+        if r == 'ok' or await self._c_pick_combo(page, want_s):
+            self.log('   · ประเภทไอเทม = %s' % want_s, 'INFO')
+            return True
+        cur = await self._c_read_type(page)
+        if cur and cur.lower() == want_s.lower():
+            self.log('   · ประเภทไอเทม = %s  (เว็บล็อกค่านี้ไว้ เลือกไม่ได้ '
+                     'แต่ตรงกับที่ต้องการอยู่แล้ว)' % cur, 'INFO')
+            return True
+        self.log('   ! ประเภทไอเทมไม่ตรง — อยากได้ “%s” แต่หน้าเว็บเป็น “%s” '
+                 'ต้องแก้เองบนเว็บ' % (want_s, cur or 'อ่านค่าไม่ได้'), 'WARN')
+        return False
+
     async def _c_one(self, page, d, do, hold):
         await page.goto(ITEM_CREATE_URL, wait_until='domcontentloaded', timeout=45000)
         await page.wait_for_timeout(2000)
@@ -4034,11 +4199,7 @@ class App:
         await self._c_fill(page, 'name', d['name'], 'ชื่อไอเทม')
         await self._c_fill(page, 'desc', d.get('desc', ''), 'คำอธิบาย')
         if d.get('type'):
-            r = await page.evaluate(JS_PICK_TYPE, [d['type'], SEL_CREATE['type_ph']])
-            if r == 'ok':
-                self.log(f'   · ประเภทไอเทม = {d["type"]}', 'INFO')
-            else:
-                await self._c_pick_combo(page, d['type'])
+            await self._c_type(page, d['type'])
 
         # [2] พารามิเตอร์ส่งเข้าเกม
         await self._c_fill(page, 'kind', d['kind'], 'game_item_id (ItemKind)')
@@ -4053,7 +4214,7 @@ class App:
         await self._c_fill(page, 'qty', d.get('qty', ''), 'จำนวน')
 
         # [3.5] รูปภาพไอเทม — ไม่มีรูปก็สร้างต่อ แต่ต้องเตือนไว้ใน Log
-        await self._c_image(page, d)
+        pic_ok = await self._c_image(page, d)
 
         # ตรวจว่าค่าเข้าไปจริง
         got = await page.evaluate(JS_READ_FORM, SEL_CREATE)
@@ -4069,36 +4230,67 @@ class App:
             self.log('   ✓ กรอกฟอร์มครบแล้ว (โหมดทดสอบ — ไม่กดสร้าง)', 'OK')
             if hold:
                 await page.wait_for_timeout(hold * 1000)
-            self.add_result({'kind': d['kind'], 'name': d['name'], 'id': '',
-                             'type': d['type'], 'dur': d.get('dur', ''),
-                             'qty': d.get('qty', '')}, 'กรอกฟอร์มแล้ว (ไม่สร้าง)')
+            self.add_made_item(d, '', 'กรอกฟอร์มแล้ว (โหมดทดสอบ — ไม่ได้สร้าง)',
+                               pic=pic_ok)
             return not bad
 
-        # [4] กดสร้างจริง
+        # [4] กดสร้างจริง — ดักคำตอบของเว็บไว้ เอา Aztek Item Id ออกมาให้ได้
         btn = page.locator(f'button:has-text("{SEL_CREATE["submit"]}")').last
         if await btn.count() == 0:
             self.log(f'   ✗ ไม่เจอปุ่ม “{SEL_CREATE["submit"]}”', 'ERR')
             return False
+
+        hits = []
+
+        def _grab(resp):
+            try:
+                if resp.request.method in ('POST', 'PUT', 'PATCH') \
+                        and 'item' in resp.url.lower():
+                    hits.append(resp)
+            except Exception:
+                pass
+        page.on('response', _grab)
         try:
-            async with page.expect_response(
-                    lambda r: r.request.method in ('POST', 'PUT', 'PATCH')
-                    and 'item' in r.url.lower(), timeout=20000) as ri:
-                await btn.click(timeout=10000)
-            resp = await ri.value
-            code = resp.status
-        except Exception:
-            code = 0
-        await page.wait_for_timeout(1500)
+            await btn.click(timeout=10000)
+            waited = 0
+            while waited < 20000 and not hits:
+                await page.wait_for_timeout(300)
+                waited += 300
+            await page.wait_for_timeout(1500)
+        finally:
+            try:
+                page.remove_listener('response', _grab)
+            except Exception:
+                pass
+
+        code = 0
+        aid = ''
+        for resp in hits:
+            try:
+                code = resp.status
+                body = await resp.json()
+            except Exception:
+                body = None
+            aid = aid or _dig_id(body)
+        if not aid:
+            try:
+                aid = str(await page.evaluate(JS_ITEM_MADE_ID) or '').strip()
+            except Exception:
+                aid = ''
+
         good = (code == 0) or (200 <= code < 300)
-        self.log('   ' + ('✓ สร้างแล้ว' if good else f'✗ เว็บตอบ HTTP {code}')
-                 + (f' (HTTP {code})' if good and code else ''),
-                 'OK' if good else 'ERR')
-        self.add_result({'kind': d['kind'], 'name': d['name'], 'id': '',
-                         'type': d['type'], 'dur': d.get('dur', ''),
-                         'qty': d.get('qty', '')},
-                        'สร้างแล้ว' if good else f'ไม่สำเร็จ (HTTP {code})')
+        if good:
+            self.log('   ✓ สร้างแล้ว%s%s'
+                     % ('  ·  Aztek Item Id = %s' % aid if aid
+                        else '  (เว็บไม่ได้ส่งเลข Aztek Item Id กลับมา)',
+                        '  (HTTP %d)' % code if code else ''), 'OK')
+        else:
+            self.log('   ✗ เว็บตอบ HTTP %d — ยังไม่ได้สร้าง' % code, 'ERR')
+        self.add_made_item(d, aid if good else '',
+                           'สร้างแล้ว' if good else 'ไม่สำเร็จ (HTTP %d)' % code,
+                           pic=pic_ok, ok=good)
         log_event('create_item', kind_id=d['kind'], name=d['name'],
-                  ok=bool(good), http=code)
+                  ok=bool(good), http=code, aztek_id=aid)
         return good
 
     async def _c_image(self, page, d):
@@ -4118,28 +4310,57 @@ class App:
         if r != 'ok':
             self.log('   ! ' + str(r) + ' — จะสร้างโดยไม่มีรูป', 'WARN')
             return False
+        before = await page.evaluate(JS_PIC_STATE, [SEL_CREATE['img_label']]) or {}
         try:
             await page.locator('input[type="file"][data-trpu-pic]').first.set_input_files(
                 path, timeout=15000)
         except Exception as ex:
             self.log('   ! ใส่รูปไม่สำเร็จ: ' + str(ex)[:120] + ' — จะสร้างโดยไม่มีรูป', 'WARN')
             return False
-        await page.wait_for_timeout(1200)
-        st = await page.evaluate(JS_FILE_STATE)
-        if not st or not st.get('n'):
-            self.log('   ! ใส่รูปแล้วแต่เว็บยังไม่รับไฟล์ — จะสร้างโดยไม่มีรูป', 'WARN')
+        # เว็บอัปโหลดทันทีแล้วล้างช่อง input ทิ้ง — ดู el.files อย่างเดียวไม่พอ
+        # ต้องรอแล้วดูหลักฐานฝั่งหน้าเว็บด้วย (รูปตัวอย่างโผล่ / ข้อความอัปโหลดสำเร็จ)
+        st = {}
+        for _ in range(12):
+            await page.wait_for_timeout(500)
+            st = await page.evaluate(JS_PIC_STATE, [SEL_CREATE['img_label']]) or {}
+            if self._pic_ok(before, st):
+                break
+        name = st.get('name') or os.path.basename(path)
+        if self._pic_ok(before, st):
+            self.log('   · รูปภาพไอเทม = %s  (เว็บรับรูปแล้ว)' % name, 'INFO')
+            return True
+        # ส่งไฟล์เข้าช่องไปแล้ว แต่ดูไม่ออกว่าเว็บรับรึยัง — ห้ามฟันธงว่าไม่รับ
+        self.log('   ? ส่งรูป %s เข้าช่องแล้ว แต่หน้าเว็บยังไม่ขึ้นอะไรให้ยืนยัน '
+                 '— ดูที่กล่อง “รูปภาพไอเทม” บนเว็บอีกที' % name, 'WARN')
+        return False
+
+    @staticmethod
+    def _pic_ok(before, after):
+        """เว็บรับรูปแล้วรึยัง — ดูหลายทางเพราะแต่ละเว็บโชว์ไม่เหมือนกัน"""
+        if not after:
             return False
-        self.log('   · รูปภาพไอเทม = %s%s' % (
-            st.get('name') or os.path.basename(path),
-            '' if st.get('preview') else '  (ยังไม่ขึ้นรูปตัวอย่าง)'), 'INFO')
-        return True
+        if (after.get('n') or 0) > 0:
+            return True                                  # ไฟล์ยังอยู่ในช่อง
+        if (after.get('imgs') or 0) > (before.get('imgs') or 0):
+            return True                                  # รูปตัวอย่างโผล่มาใหม่
+        if after.get('src') and after.get('src') != before.get('src'):
+            return True                                  # รูปตัวอย่างเปลี่ยนเป็นรูปใหม่
+        return bool(after.get('toast')) and not before.get('toast')
 
     async def _c_switch(self, page, label, want):
-        r = await page.evaluate(JS_SET_SWITCH, [label, bool(want)])
-        if r == 'ok':
-            self.log(f'   · {label} = {"เปิด" if want else "ปิด"}', 'INFO')
-        else:
-            self.log(f'   ! ไม่เจอสวิตช์ “{label}”', 'WARN')
+        r = str(await page.evaluate(JS_SET_SWITCH, [label, bool(want)]))
+        if r.startswith('ok'):
+            note = r.split('|', 1)[1] if '|' in r else ''
+            self.log('   · %s = %s%s' % (label, 'เปิด' if want else 'ปิด',
+                                         '  (%s)' % note if note else ''), 'INFO')
+            return True
+        if not want:
+            # หาสวิตช์ไม่เจอ แต่เราต้องการ "ไม่ติ๊ก" อยู่แล้ว = ผลตรงตามที่ต้องการ ไม่ใช่บั๊ก
+            self.log('   · %s = ปิด  (หน้านี้ไม่มีให้ติ๊ก ค่าเริ่มต้นคือไม่ติ๊กอยู่แล้ว)'
+                     % label, 'INFO')
+            return True
+        self.log('   ! เปิด “%s” ให้ไม่ได้ (%s) — ต้องไปติ๊กเองบนเว็บ' % (label, r), 'WARN')
+        return False
 
     async def _c_pick_combo(self, page, value):
         """combobox แบบ React — คลิกเปิดแล้วคลิกตัวเลือก"""
@@ -5529,6 +5750,56 @@ class App:
             self._ins_result(row)
             self.lbl_count.config(text=f'พบ {len(self.results)} รายการ')
         self.root.after(0, _do)
+
+    def add_made_item(self, d, aztek_id, notes='', pic=False, ok=True):
+        """จดไว้ว่าสร้างไอเทมอะไรไปแล้ว ได้ Aztek Item Id อะไร — โชว์ในแท็บสร้าง Item"""
+        row = {'name': d.get('name', ''), 'kind': str(d.get('kind') or ''),
+               'id': str(aztek_id or '').strip() or '-', 'notes': notes,
+               'pic': '🖼' if pic else '—', 'ok': bool(ok),
+               'at': datetime.now().strftime('%H:%M:%S')}
+        self.made_items.append(row)
+        row['no'] = len(self.made_items)
+
+        def _do():
+            self.tree_item.insert('', 'end', tags=() if row['ok'] else ('bad',),
+                                  values=(row['no'], row['id'], row['kind'],
+                                          row['name'], row['pic'], row['at'],
+                                          row['notes']))
+            self.tree_item.yview_moveto(1)
+            got = sum(1 for m in self.made_items if m['id'] != '-')
+            self.lbl_item.config(
+                text='สร้างแล้ว %d ไอเทม%s' % (
+                    len(self.made_items),
+                    '' if got == len(self.made_items)
+                    else ' (ได้เลข %d)' % got), fg=C['ok'])
+        self.root.after(0, _do)
+
+    def copy_made_items(self):
+        """คัดลอกเฉพาะ "เลข Aztek Item Id" ของแถวที่เลือกไว้ — ไม่เลือกก็เอาทั้งหมด"""
+        rows = list(self.tree_item.selection())
+        picked = bool(rows)
+        if not picked:
+            rows = list(self.tree_item.get_children())
+        if not rows:
+            messagebox.showinfo('ยังไม่มี', 'ยังไม่ได้สร้างไอเทมในรอบนี้')
+            return
+        ids, blank = [], 0
+        for w in rows:
+            v = self.tree_item.item(w, 'values')
+            aid = str(v[1]).strip() if len(v) > 1 else ''
+            if aid and aid != '-':
+                ids.append(aid)
+            else:
+                blank += 1
+        if not ids:
+            messagebox.showinfo('ไม่มีเลข',
+                                'แถวที่เลือกยังไม่ได้เลข Aztek Item Id (ขึ้น - อยู่)')
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append('\n'.join(ids))
+        self.log('คัดลอก Aztek Item Id %d รายการแล้ว (%s)%s' % (
+            len(ids), 'เฉพาะที่เลือก' if picked else 'ทั้งหมด',
+            '  ข้ามที่ยังไม่ได้เลข %d' % blank if blank else ''), 'OK')
 
     def add_made_bundle(self, name, bid, n_items):
         """จดไว้ว่าสร้างบันเดิลอะไรไปแล้ว ได้เลขอะไร — โชว์ในแท็บผลลัพธ์"""
