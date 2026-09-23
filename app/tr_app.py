@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.11 : ค้นหาไม่เจอ → ส่งเข้าคิวสร้าง Item ได้เลย ไม่ต้องนำเข้าไฟล์ใหม่
+V0.8.12 : เอาแผง Deep Check ออกจากหน้าค้นหา — คืนที่ให้ตารางผลลัพธ์
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -3495,33 +3495,14 @@ class App:
         self.imp_why.pack(fill='x', pady=(6, 0))
         self.imp_tree.bind('<<TreeviewSelect>>', lambda e: self._imp_why())
 
-        s3 = self._card(p, 'Deep Check  (เข้าไปดูค่าจริงในหน้ารายละเอียด)')
-        self.v_deep = tk.BooleanVar(value=bool(self.prefs.get('deep', False)))
-        tk.Checkbutton(s3, text='เปิด Deep Check', variable=self.v_deep, bg=C['bg'], fg=C['fg'],
-                       selectcolor=C['input'], activebackground=C['bg'], activeforeground=C['fg'],
-                       font=FM, bd=0, highlightthickness=0).grid(row=0, column=0, sticky='w')
-
-        tk.Label(s3, text='ระยะเวลา (วัน)', bg=C['bg'], fg=C['dim'],
-                 font=('Segoe UI', 9)).grid(row=1, column=0, sticky='w', pady=(8, 0))
-        tk.Label(s3, text='แลกเปลี่ยนได้', bg=C['bg'], fg=C['dim'],
-                 font=('Segoe UI', 9)).grid(row=1, column=1, sticky='w', padx=(12, 0), pady=(8, 0))
-        tk.Label(s3, text='จำนวน (ต้องตรงเป๊ะ)', bg=C['bg'], fg=C['dim'],
-                 font=('Segoe UI', 9)).grid(row=1, column=2, sticky='w', padx=(12, 0), pady=(8, 0))
-
-        self.v_dur = self._entry(s3, 18)
-        self.v_dur.insert(0, self.prefs.get('dur', 'any'))
-        self.v_dur.grid(row=2, column=0, sticky='w', ipady=4)
-        self.v_trade = ttk.Combobox(s3, values=['any', 'yes', 'no'], width=10, state='readonly', font=FM)
-        self.v_trade.set(self.prefs.get('trade', 'any'))
-        self.v_trade.grid(row=2, column=1, sticky='w', padx=(12, 0))
-        self.v_qty = self._entry(s3, 18)
-        self.v_qty.insert(0, self.prefs.get('qty', ''))
-        self.v_qty.grid(row=2, column=2, sticky='w', padx=(12, 0), ipady=4)
-
-        tk.Label(s3, text='ระยะเวลา: any = ไม่กรอง · เว้นว่าง = เฉพาะไอเทมถาวร · ตัวเลข = จำนวนวันนั้น '
-                          '(กรองด้วยตัวเลขอย่างเดียวจะใช้ฟิลเตอร์บนหน้า list ให้ เร็วกว่ามาก)',
-                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), justify='left'
-                 ).grid(row=3, column=0, columnspan=4, sticky='w', pady=(8, 0))
+        # ---- Deep Check ไม่มีช่องกรอกบนหน้าจอแล้ว (v0.8.12) ----
+        # ไฟล์ต้นฉบับพกเงื่อนไข (ระยะเวลา/แลกเปลี่ยน/จำนวน) มาในตัวอยู่แล้ว
+        # โปรแกรมเปิด deep ให้เองรายตัวตามที่ไฟล์บอก — ช่องกรอกพวกนี้เลยไม่ได้ใช้ เปลืองที่เปล่าๆ
+        # ตัวแปรยังอยู่ (ค่า "ไม่กรอง") เพื่อให้ส่วนอื่นที่อ้างถึงทำงานได้เหมือนเดิม
+        self.v_deep = tk.BooleanVar(value=False)
+        self.v_dur = tk.StringVar(value='any')
+        self.v_trade = tk.StringVar(value='any')
+        self.v_qty = tk.StringVar(value='')
 
         s4 = tk.Frame(p, bg=C['bg'])
         self.s_tail = s4
@@ -5877,8 +5858,6 @@ class App:
 
     def save_now(self):
         self.prefs.update({
-            'deep': self.v_deep.get(), 'dur': self.v_dur.get().strip(),
-            'trade': self.v_trade.get(), 'qty': self.v_qty.get().strip(),
             'headless': self.v_headless.get(),
             'exact': self.v_exact.get(),
             'c_type': self.cv_type.get().strip(),
@@ -5887,6 +5866,9 @@ class App:
             'c_mail': self.cv_mail.get().strip(),
             'c_hold': self.cv_hold.get().strip(),
         })
+        # ค่าเก่าของแผง Deep Check ที่เอาออกไปแล้ว — ล้างทิ้ง ไม่ให้ย้อนมาหลอนทีหลัง
+        for dead in ('deep', 'dur', 'trade', 'qty'):
+            self.prefs.pop(dead, None)
         save_prefs(self.prefs)
 
     def deep_criteria(self):
@@ -5934,8 +5916,10 @@ class App:
     def run_multi(self):
         if not self.imported:
             return
-        if any(has_deep(c) for c in self.imported) and not self.v_deep.get():
-            self.log('พบค่า deep check ในไฟล์ → เปิด Deep Check อัตโนมัติ', 'INFO')
+        n_deep = sum(1 for c in self.imported if has_deep(c))
+        if n_deep:
+            self.log('ไฟล์มีเงื่อนไข (ระยะเวลา/แลกเปลี่ยน/จำนวน) %d รายการ → '
+                     'เข้าไปดูค่าจริงในหน้ารายละเอียดให้อัตโนมัติ' % n_deep, 'INFO')
         self.start([dict(c) for c in self.imported])
 
     def start(self, criteria):
