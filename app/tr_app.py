@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.13 : ผลลัพธ์สร้าง Item + เลข Aztek Item Id · แก้ Log ที่แจ้งเหมือนบั๊ก
+V0.8.14 : สร้าง Item — กดยืนยันในป๊อปอัปให้เอง (เหมือนฝั่ง Bundle)
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -118,6 +118,9 @@ SEL_BUNDLE = {
 # ป๊อปอัปยืนยันหลังกดสร้าง — คำที่ถือว่า "ยืนยัน" กับคำที่ห้ามกด
 BUNDLE_YES = ['ยืนยัน', 'ตกลง', 'ยืนยันการสร้าง', 'Confirm', 'OK', 'Yes', 'ใช่']
 BUNDLE_NO = ['ยกเลิก', 'ปิด', 'Cancel', 'Close', 'ไม่', 'No']
+# ป๊อปอัปยืนยันหน้าตาเดียวกันนี้เด้งทั้งตอนสร้าง Item และสร้าง Bundle — ใช้ชุดคำเดียวกัน
+CONFIRM_YES = BUNDLE_YES
+CONFIRM_NO = BUNDLE_NO
 # ลำดับคอลัมน์ในตาราง: Aztek Item Id | ชื่อ | ประเภท | ItemKind | Actions
 COL = {'id': 0, 'name': 1, 'type': 2, 'kind': 3}
 
@@ -1306,6 +1309,9 @@ JS_BUNDLE_CONFIRM = """
   }
   return 'มีป๊อปอัปแต่ไม่เจอปุ่มยืนยัน (มี: ' + seen.join(', ') + ')';
 }"""
+
+# ป๊อปอัปยืนยันตัวเดียวกันนี้ใช้ได้ทั้งหน้าสร้าง Item และหน้าสร้าง Bundle
+JS_CONFIRM_POPUP = JS_BUNDLE_CONFIRM
 
 # หาเลข Bundle ที่เพิ่งสร้าง — จาก URL ก่อน ไม่มีค่อยหาในหน้า
 JS_BUNDLE_MADE_ID = """
@@ -4151,6 +4157,26 @@ class App:
         self.log(f'   ! ไม่เจอช่อง {label or key} ({sel})', 'WARN')
         return False
 
+    async def _click_confirm(self, page, hits=None, tries=12):
+        """กดปุ่มยืนยันในป๊อปอัปที่เด้งขึ้นมาหลังกดปุ่มสร้าง
+
+        ป๊อปอัปโผล่ช้ากว่าการคลิกนิดนึง เลยต้องวนดูหลายรอบ ไม่ใช่เช็กครั้งเดียวแล้วเลิก
+        ถ้าเว็บตอบกลับมาแล้ว (hits) แปลว่ารอบนี้ไม่มีป๊อปอัป — เลิกรอทันที ไม่ถ่วงเวลา
+        """
+        last = 'ไม่มีป๊อปอัป'
+        for _ in range(tries):
+            if hits:
+                return False
+            r = str(await page.evaluate(JS_CONFIRM_POPUP, [CONFIRM_YES, CONFIRM_NO]))
+            if r.startswith('ok'):
+                self.log('   · กดยืนยันในป๊อปอัปแล้ว (%s)' % r.split('|', 1)[1], 'INFO')
+                return True
+            last = r
+            await page.wait_for_timeout(250)
+        if last != 'ไม่มีป๊อปอัป':
+            self.log('   ! ' + last, 'WARN')
+        return False
+
     async def _c_read_type(self, page):
         try:
             return str(await page.evaluate(
@@ -4252,6 +4278,9 @@ class App:
         page.on('response', _grab)
         try:
             await btn.click(timeout=10000)
+            await page.wait_for_timeout(600)
+            # เว็บเด้งป๊อปอัป “ยืนยันการสร้าง” ต่ออีกที — ไม่กดยืนยัน = ไม่ได้สร้างจริง
+            await self._click_confirm(page, hits)
             waited = 0
             while waited < 20000 and not hits:
                 await page.wait_for_timeout(300)
