@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.14 : สร้าง Item — กดยืนยันในป๊อปอัปให้เอง (เหมือนฝั่ง Bundle)
+V0.8.16 : แก้นำเข้าบันเดิลหยิบคอลัมน์ Aztek Item Id ผิด — ของหายและเลขผิด
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -960,28 +960,48 @@ JS_SET_BY_LABEL = """
 # เดินหาจาก "ข้อความ" ไม่ใช่ตัวอิลิเมนต์ใบสุดท้าย เพราะของจริงป้ายมักมีคำอธิบายต่อท้าย
 # อยู่ในก้อนเดียวกัน เช่น  แลกเปลี่ยนได้ (ไม่เลือก = "ผูกมัดไอดี")  -> ป้ายไม่ใช่ใบ
 # คืนค่าแยกให้ด้วยว่า "เปลี่ยนให้แล้ว" หรือ "เป็นแบบนี้อยู่แล้ว" จะได้ไม่ขึ้น Log เหมือนพัง
-JS_SET_SWITCH = """
-([lbl, on]) => {
-  const rd = cb => (cb.tagName === 'INPUT' && cb.checked !== undefined)
-      ? cb.checked
-      : (cb.getAttribute('aria-checked') === 'true' ||
-         cb.getAttribute('data-state') === 'checked');
+JS_SWITCH = """
+([lbl, act]) => {
+  const vis = el => { if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false;
+    const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  // อ่านสถานะ: เอา aria-checked / data-state ก่อน เพราะเว็บสมัยใหม่ใช้ปุ่มวาดเอง
+  const rd = el => {
+    const a = el.getAttribute('aria-checked');
+    if (a === 'true' || a === 'false') return a === 'true';
+    const d = el.getAttribute('data-state');
+    if (d === 'checked' || d === 'unchecked') return d === 'checked';
+    return !!el.checked;
+  };
+  // เลือกตัวที่ "มองเห็นได้" ก่อนเสมอ
+  // เว็บสมัยใหม่ซ่อน <input type=checkbox> ตัวจริงไว้ แล้ววาดปุ่มสวยๆ ทับ
+  // ถ้าเผลอไปกดตัวที่ซ่อนอยู่ หน้าจอจะไม่เปลี่ยนตาม แล้วอ่านค่ากลับมาก็ไม่ตรง
+  const pick = box => {
+    const all = [...box.querySelectorAll(
+      'input[type="checkbox"],[role="checkbox"],[role="switch"]')];
+    if (!all.length) return null;
+    return all.filter(vis)[0] || all[0];
+  };
   const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
   let node, cb = null;
   while ((node = w.nextNode()) && !cb) {
     if ((node.textContent || '').trim().indexOf(lbl) !== 0) continue;
     let n = node.parentElement;
-    for (let i = 0; i < 6 && n && !cb; i++) {
-      cb = n.querySelector('input[type="checkbox"],[role="checkbox"],[role="switch"]');
-      n = n.parentElement;
-    }
+    for (let i = 0; i < 6 && n && !cb; i++) { cb = pick(n); n = n.parentElement; }
   }
   if (!cb) return 'ไม่เจอสวิตช์';
-  if (rd(cb) === on) return 'ok|เป็นแบบนี้อยู่แล้ว';
+  if (act === 'read') return 'ok|' + (rd(cb) ? '1' : '0');
   cb.scrollIntoView({block: 'center'});
+  if (act === 'label') {                 // กดที่ตัวควบคุมไม่ได้ผล ลองกดที่ป้ายแทน
+    let lab = cb.closest ? cb.closest('label') : null;
+    if (!lab && cb.id) lab = document.querySelector('label[for="' + cb.id + '"]');
+    if (!lab) return 'ไม่มีป้ายให้กด';
+    lab.click();
+    return 'ok';
+  }
   cb.click();
-  if (rd(cb) !== on) return 'กดแล้วค่าไม่เปลี่ยน';
-  return 'ok|เปลี่ยนให้แล้ว';
+  return 'ok';
 }"""
 
 # อ่าน "ประเภทไอเทม (game_item_type)" ที่หน้าเว็บตั้งไว้ตอนนี้
@@ -2332,7 +2352,13 @@ def parse_bundle_sheet(rows, sheet_name):
         if not drows:
             continue
 
-        # คอลัมน์ Aztek Item Id = คอลัมน์ตัวเลขที่ "ไม่มีหัวตารางที่รู้จัก"
+        # คอลัมน์ Aztek Item Id
+        # ชีทส่วนใหญ่ตั้งหัวคอลัมน์นี้ว่า "Bundle" (บางใบเขียน Aztek Item Id / Item Id)
+        # ถ้ามีหัวตารางบอกไว้ ให้เชื่อหัวตารางก่อนเสมอ — เดาเองเมื่อจำเป็นเท่านั้น
+        idc_named = col([lambda h: h == 'bundle', lambda h: 'aztek' in h,
+                         lambda h: h in ('item id', 'itemid', 'bundle id', 'bundleid')])
+
+        # เดาเอง: คอลัมน์ตัวเลขที่ "ไม่มีหัวตารางที่รู้จัก"
         labeled = set(j for j, h in enumerate(low) if any(k in h for k in _SRC_KNOWN))
         for c in (kindc, posc, ikc, amtc, rankc, namec):
             if c is not None:
@@ -2343,21 +2369,29 @@ def parse_bundle_sheet(rows, sheet_name):
                     if c < len(rows[r] or []) and src_int((rows[r] or [])[c]) is not None)
                 >= max(1, int(len(drows) * 0.6))]
 
-        # เลข Bundle: ดูแค่ 1-2 แถวเหนือหัวตาราง (กันไปหยิบเลขของบล็อกก่อนหน้า)
         idcol = bid = None
-        above = hdr[bi - 1] + 1 if bi > 0 else 0
-        bid_top = max(hr - 2, above)
-        for c in cand:
-            for r in range(hr - 1, bid_top - 1, -1):
-                row = rows[r] or []
-                b = src_int(row[c]) if c < len(row) else None
-                if b is not None:
-                    idcol, bid = c, b
+        if idc_named is not None and any(
+                idc_named < len(rows[r] or []) and
+                src_int((rows[r] or [])[idc_named]) is not None for r in drows):
+            idcol = idc_named
+        else:
+            # เลข Bundle: ดูแค่ 1-2 แถวเหนือหัวตาราง (กันไปหยิบเลขของบล็อกก่อนหน้า)
+            above = hdr[bi - 1] + 1 if bi > 0 else 0
+            bid_top = max(hr - 2, above)
+            for c in cand:
+                for r in range(hr - 1, bid_top - 1, -1):
+                    row = rows[r] or []
+                    b = src_int(row[c]) if c < len(row) else None
+                    if b is not None:
+                        idcol, bid = c, b
+                        break
+                if idcol is not None:
                     break
-            if idcol is not None:
-                break
-        if idcol is None and cand:
-            idcol = cand[0]
+            if idcol is None and cand:
+                # เอาคอลัมน์ที่ "อยู่ติดกับตารางไอเทม" ที่สุด ไม่ใช่ตัวซ้ายสุดของทั้งแผ่น
+                # (ชีทที่มีตารางรายชื่อคนอยู่ข้างๆ จะมีคอลัมน์ลำดับ 1,2,3 หลอกอยู่)
+                anchor = kindc if kindc is not None else 0
+                idcol = min(cand, key=lambda c: (abs(c - anchor), c))
         if idcol is None:
             warns.append('%s บล็อก %d: หาคอลัมน์ Aztek Item Id ไม่เจอ -> ข้าม'
                          % (sheet_name, bi + 1))
@@ -2376,6 +2410,26 @@ def parse_bundle_sheet(rows, sheet_name):
                     break
             if name:
                 break
+        if not name:
+            # หัวข้อของบล็อกอยู่เหนือหัวตาราง "ในช่วงคอลัมน์เดียวกับตาราง"
+            # ต้องดูเฉพาะช่วงคอลัมน์นั้น เพราะบางชีทมีตารางรายชื่อคนอยู่ข้างๆ
+            # เรียงกันแบบ  ชื่อเรื่อง -> คำอธิบาย -> หัวตาราง  เลยเอา "บรรทัดบนสุด"
+            band = [c for c in (kindc, posc, ikc, amtc, rankc, namec, idcol)
+                    if c is not None]
+            bl, br = min(band), max(band)
+            picks = []
+            for r in range(hr - 1, max(hr - 7, 0) - 1, -1):
+                rl = [('' if c is None else str(c)).strip() for c in (rows[r] or [])]
+                seg = [rl[j] for j in range(bl, min(br + 1, len(rl))) if rl[j]]
+                if not seg:
+                    break
+                nz = [t for t in seg
+                      if src_int(t) is None and t.lower() not in _SRC_STOP]
+                if len(nz) != 1:
+                    break
+                picks.append(nz[0])
+            if picks:
+                name = picks[-1]
         if not name:
             for r in range(hr - 1, max(hr - 4, 0) - 1, -1):
                 texts = [('' if c is None else str(c)).strip() for c in (rows[r] or [])]
@@ -2416,6 +2470,18 @@ def parse_bundle_sheet(rows, sheet_name):
                 ikind = src_int(row[kindc]) or ''
             items.append({'id': iid, 'qty': qty, 'tier': tier, 'disp': disp,
                           'kind': ikind})
+        # กันพลาดซ้ำรอย: อ่านไอเทมได้ไม่ครบทุกแถวในตาราง = มีอะไรผิดแน่ๆ ต้องดังไว้ก่อน
+        if len(items) < len(drows):
+            warns.append('%s "%s": ตารางมี %d แถว แต่อ่านมาได้ %d — '
+                         'ไปดูคอลัมน์ Aztek Item Id ในชีทด้วย'
+                         % (sheet_name, name, len(drows), len(items)))
+        # เลขเรียง 1,2,3... ทั้งชุด = น่าจะไปหยิบคอลัมน์ "ลำดับ" มาแทน Aztek Item Id
+        if idc_named is None and len(items) >= 3:
+            nums = [int(i['id']) for i in items]
+            if nums == list(range(nums[0], nums[0] + len(nums))) and nums[0] <= len(items):
+                warns.append('%s "%s": Aztek Item Id ที่ได้เป็นเลขเรียง %s — '
+                             'อาจหยิบผิดคอลัมน์ ตรวจก่อนสร้าง'
+                             % (sheet_name, name, ', '.join(str(n) for n in nums[:4])))
         if items:
             bundles.append({'name': name, 'type': DEFAULT_BUNDLE_TYPE, 'deliver': True,
                             'items': items, 'rewards': bundle_rewards(rows, hr),
@@ -4376,19 +4442,48 @@ class App:
             return True                                  # รูปตัวอย่างเปลี่ยนเป็นรูปใหม่
         return bool(after.get('toast')) and not before.get('toast')
 
+    async def _switch_read(self, page, label):
+        """อ่านว่าสวิตช์นี้เปิดอยู่ไหม — คืน True/False หรือ None ถ้าไม่เจอสวิตช์"""
+        r = str(await page.evaluate(JS_SWITCH, [label, 'read']))
+        if not r.startswith('ok'):
+            return None
+        return r.split('|', 1)[1] == '1'
+
     async def _c_switch(self, page, label, want):
-        r = str(await page.evaluate(JS_SET_SWITCH, [label, bool(want)]))
-        if r.startswith('ok'):
-            note = r.split('|', 1)[1] if '|' in r else ''
-            self.log('   · %s = %s%s' % (label, 'เปิด' if want else 'ปิด',
-                                         '  (%s)' % note if note else ''), 'INFO')
+        """ติ๊ก/ปลดติ๊กสวิตช์ให้เป็นค่าที่ต้องการ
+
+        สำคัญ: เว็บเป็น React — กดแล้วค่าบนหน้าไม่ได้เปลี่ยนทันทีในจังหวะเดียวกัน
+        ต้อง "กด แล้วรอ แล้วค่อยอ่านใหม่" ไม่ใช่อ่านทันทีหลังกด
+        ไม่งั้นจะหาว่า "กดแล้วค่าไม่เปลี่ยน" ทั้งที่หน้าเว็บเปลี่ยนให้เรียบร้อยแล้ว
+        """
+        want = bool(want)
+        cur = await self._switch_read(page, label)
+        if cur is None:
+            if not want:
+                # ไม่เจอสวิตช์ แต่เราต้องการ "ไม่ติ๊ก" อยู่แล้ว = ตรงตามที่ต้องการ ไม่ใช่บั๊ก
+                self.log('   · %s = ปิด  (หน้านี้ไม่มีให้ติ๊ก ค่าเริ่มต้นคือไม่ติ๊กอยู่แล้ว)'
+                         % label, 'INFO')
+                return True
+            self.log('   ! เปิด “%s” ให้ไม่ได้ (ไม่เจอสวิตช์) — ต้องไปติ๊กเองบนเว็บ'
+                     % label, 'WARN')
+            return False
+        if cur == want:
+            self.log('   · %s = %s  (เป็นแบบนี้อยู่แล้ว)'
+                     % (label, 'เปิด' if want else 'ปิด'), 'INFO')
             return True
-        if not want:
-            # หาสวิตช์ไม่เจอ แต่เราต้องการ "ไม่ติ๊ก" อยู่แล้ว = ผลตรงตามที่ต้องการ ไม่ใช่บั๊ก
-            self.log('   · %s = ปิด  (หน้านี้ไม่มีให้ติ๊ก ค่าเริ่มต้นคือไม่ติ๊กอยู่แล้ว)'
-                     % label, 'INFO')
-            return True
-        self.log('   ! เปิด “%s” ให้ไม่ได้ (%s) — ต้องไปติ๊กเองบนเว็บ' % (label, r), 'WARN')
+
+        for act in ('click', 'label'):        # กดตัวควบคุมก่อน ไม่ขยับค่อยลองกดที่ป้าย
+            r = str(await page.evaluate(JS_SWITCH, [label, act]))
+            if not r.startswith('ok'):
+                continue
+            for _ in range(6):                # รอ React วาดใหม่ก่อนค่อยอ่านซ้ำ
+                await page.wait_for_timeout(200)
+                if (await self._switch_read(page, label)) == want:
+                    self.log('   · %s = %s  (เปลี่ยนให้แล้ว)'
+                             % (label, 'เปิด' if want else 'ปิด'), 'INFO')
+                    return True
+        self.log('   ! ตั้ง “%s” เป็น%s ไม่ได้ — ต้องไปกดเองบนเว็บ'
+                 % (label, 'เปิด' if want else 'ปิด'), 'WARN')
         return False
 
     async def _c_pick_combo(self, page, value):
@@ -4654,8 +4749,19 @@ class App:
             self.bq.append(b)
         self._b_refresh()
         self.log('นำเข้าบันเดิล %d อัน (รวม %d)' % (len(dlg.result), len(self.bq)), 'OK')
-        for w in (dlg.warns or [])[:20]:
+        for w in (dlg.warns or [])[:40]:
             self.log('  ⚠ ' + w, 'WARN')
+        # เรื่องที่ "ของหาย/เลขอาจผิด" ต้องเด้งบอกเลย ไม่ใช่ซ่อนไว้ในแท็บ Log
+        # (เคยมีเคสไอเทมหายไป 2 ใบต่อบันเดิลแล้วไม่มีใครเห็นคำเตือน)
+        heavy = [w for w in (dlg.warns or [])
+                 if 'ข้าม' in w or 'เลขเรียง' in w or 'อ่านมาได้' in w]
+        if heavy:
+            messagebox.showwarning(
+                'อ่านไฟล์ได้ไม่ครบ',
+                'นำเข้ามาแล้ว แต่มี %d เรื่องที่ควรดูก่อนสร้าง:\n\n%s%s\n\n'
+                'ดูทั้งหมดได้ในแท็บ Log'
+                % (len(heavy), '\n'.join('· ' + w for w in heavy[:6]),
+                   '\n· ...' if len(heavy) > 6 else ''))
         log_event('bundle_import', count=len(dlg.result), total=len(self.bq),
                   file=os.path.basename(path))
 
