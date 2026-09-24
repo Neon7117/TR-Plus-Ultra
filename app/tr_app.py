@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.16 : แก้นำเข้าบันเดิลหยิบคอลัมน์ Aztek Item Id ผิด — ของหายและเลขผิด
+V0.8.17 : ตัดอีโมจิออกจากทุกข้อความที่อ่านมาจากชีท เอาแค่ตัวหนังสือ
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -632,6 +632,37 @@ def read_template(path):
 # ============================================================================
 #  [3.5] อ่านไฟล์ Excel ต้นฉบับ (ชีทเยอะ หัวตารางอยู่ลึก และมีหลายบล็อกต่อชีท)
 # ============================================================================
+# อีโมจิ/สัญลักษณ์รูปภาพที่ชีทชอบใส่นำหน้าหัวข้อ (🎨 ✅ 🎁 ⚙️ 💛 ✨ 🖌️ 🐾 ...)
+# ไม่รวม ™ © ® และ • · — ที่อาจเป็นส่วนหนึ่งของชื่อจริง
+_EMOJI_RE = re.compile(
+    '['
+    '\U0001F000-\U0001FAFF'      # อีโมจิทั้งก้อน (หน้ายิ้ม ของใช้ ธง ฯลฯ)
+    '☀-➿'              # สัญลักษณ์เบ็ดเตล็ด + dingbats (✅ ✨ ⚙ ✔ ❌ ➡)
+    '⬀-⯿'              # ดาว/ลูกศรแบบอีโมจิ (⭐ ⬅)
+    '⌀-⏿'              # สัญลักษณ์เทคนิค (⏰ ⌛ ⏳)
+    '■-◿'              # รูปทรงเรขาคณิต (◼ ▶ ●)
+    '︀-️'              # variation selector (ตัวที่ทำให้กลายเป็นอีโมจิสี)
+    '‍⃣⃠'         # ZWJ / keycap
+    ']+')
+_TRIM_CHARS = ' \t\n\r ​•·|'
+
+
+def clean_text(v):
+    """เอาเฉพาะตัวหนังสือจากข้อความในชีท — ตัดอีโมจิ/สัญลักษณ์รูปภาพออกให้หมด
+
+    ชีทของทีมชอบใส่อีโมจินำหน้าหัวข้อ เช่น "🎨 Digital Grand Winner (1 รางวัล)"
+    อีโมจิพวกนี้ไม่ควรติดไปถึงเว็บหรือชื่อบันเดิล — เอาแต่ตัวหนังสือพอ
+    ใช้กับทุกข้อความที่อ่านมาจากไฟล์ต้นฉบับ (ชื่อบันเดิล / ชื่อไอเทม / ชื่อชีท)
+    """
+    s = '' if v is None else str(v)
+    if not s:
+        return ''
+    s = _EMOJI_RE.sub(' ', s)
+    s = re.sub(r'[ \t ]+', ' ', s)
+    s = re.sub(r' *\n *', '\n', s)
+    return s.strip(_TRIM_CHARS)
+
+
 def num_str(v):
     """แปลงค่าจากเซลล์เป็นข้อความ — ตัด .0 ที่ Excel ติดมากับตัวเลข"""
     if v is None:
@@ -2197,7 +2228,8 @@ def parse_master_rows(rows, seen=None):
             if not re.fullmatch(r'\d+', kind):
                 continue
             nc = t['name'] if t['name'] is not None else (a + 4)
-            name = cells[nc] if nc < len(cells) else ''
+            # ตัดอีโมจิออกตั้งแต่ตรงนี้ ทุกอย่างที่แตกออกไปจะสะอาดตามหมด
+            name = clean_text(cells[nc] if nc < len(cells) else '')
             # ต้องมีตัวอักษรจริงในชื่อ ไม่ใช่ตัวเลขล้วน (กันแถวยอดรวม)
             if not name.strip() or not re.search(r'[^\d.,\s]', name):
                 continue
@@ -2222,7 +2254,7 @@ def parse_master_rows(rows, seen=None):
 
             dsc = ''
             if t.get('desc') is not None and t['desc'] < len(cells):
-                dsc = cells[t['desc']].strip()
+                dsc = clean_text(cells[t['desc']])
 
             cname, amount, has_qty = split_name_qty(name)
 
@@ -2317,6 +2349,8 @@ def bundle_rewards(rows, hr):
 
 def parse_bundle_sheet(rows, sheet_name):
     """คืน (bundles, warnings) — แต่ละ bundle พร้อมเอาไปกรอกหน้าเว็บได้เลย"""
+    # ชื่อชีทเองก็มีอีโมจิ (✅ 💛) และติดไปกับชื่อบันเดิลสำรอง/คำเตือน — ล้างตั้งแต่ต้นทาง
+    sheet_name = clean_text(sheet_name) or str(sheet_name or '')
     bundles = []
     warns = []
     hdr = [i for i, row in enumerate(rows)
@@ -2405,7 +2439,7 @@ def parse_bundle_sheet(rows, sheet_name):
                 if 'product name' in cell.lower():
                     for k in range(j + 1, len(rl)):
                         if rl[k]:
-                            name = rl[k]
+                            name = clean_text(rl[k])
                             break
                     break
             if name:
@@ -2427,7 +2461,7 @@ def parse_bundle_sheet(rows, sheet_name):
                       if src_int(t) is None and t.lower() not in _SRC_STOP]
                 if len(nz) != 1:
                     break
-                picks.append(nz[0])
+                picks.append(clean_text(nz[0]))
             if picks:
                 name = picks[-1]
         if not name:
@@ -2435,12 +2469,12 @@ def parse_bundle_sheet(rows, sheet_name):
                 texts = [('' if c is None else str(c)).strip() for c in (rows[r] or [])]
                 nz = [t for t in texts if t and src_int(t) is None]
                 if len(nz) == 1 and nz[0].lower() not in _SRC_STOP:
-                    name = nz[0]
+                    name = clean_text(nz[0])
                     break
         if not name:
             h0 = header[idcol] if idcol < len(header) else ''
             if h0 and src_int(h0) is None and h0.lower() not in _SRC_STOP:
-                name = h0
+                name = clean_text(h0)
         if not name:
             name = '%s #%d' % (sheet_name, bi + 1)
 
@@ -2450,7 +2484,7 @@ def parse_bundle_sheet(rows, sheet_name):
             iid = src_int(row[idcol]) if idcol < len(row) else None
             disp = ''
             if namec is not None and namec < len(row):
-                disp = ('' if row[namec] is None else str(row[namec])).strip()
+                disp = clean_text(row[namec])
             if iid is None:
                 warns.append('%s "%s" แถว %d: ไม่มี Aztek Item Id -> ข้าม'
                              % (sheet_name, name, r + 1))
@@ -2683,7 +2717,8 @@ class ImportDialog:
         self.lb.delete(0, tk.END)
         first_hit = None
         for i, (name, n) in enumerate(self.sheets):
-            self.lb.insert(tk.END, (f'★ ({n})  ' if n else '     ') + name)
+            self.lb.insert(tk.END, (f'★ ({n})  ' if n else '     ')
+                           + (clean_text(name) or name))
             if n and first_hit is None:
                 first_hit = i
         hits = sum(1 for _, n in self.sheets if n)
@@ -3000,7 +3035,8 @@ class BundleImportDialog:
         self.lb.delete(0, tk.END)
         first = None
         for i, (name, n) in enumerate(self.sheets):
-            self.lb.insert(tk.END, ('★ (%d)  ' % n if n else '     ') + name)
+            self.lb.insert(tk.END, ('★ (%d)  ' % n if n else '     ')
+                           + (clean_text(name) or name))
             if n and first is None:
                 first = i
         hits = sum(1 for _, n in self.sheets if n)
