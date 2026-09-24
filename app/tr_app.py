@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.18 : ชีทแบบ Master Code — ดึงโค้ดจากแถว CODE มาตั้งชื่อบันเดิลให้เอง
+V0.9.0 : แท็บใหม่ WR Master — สร้าง Item Code จากชีทให้อัตโนมัติ
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -121,6 +121,36 @@ BUNDLE_NO = ['ยกเลิก', 'ปิด', 'Cancel', 'Close', 'ไม่', 
 # ป๊อปอัปยืนยันหน้าตาเดียวกันนี้เด้งทั้งตอนสร้าง Item และสร้าง Bundle — ใช้ชุดคำเดียวกัน
 CONFIRM_YES = BUNDLE_YES
 CONFIRM_NO = BUNDLE_NO
+# ---- หน้าสร้าง Item Code (แถบ WR Master) ----
+ITEMCODE_CREATE_URL = BASE + '/hof/talesrunner/itemcodes/create'
+WR_SPARE = 2               # ชีทบอก 550 -> ใส่ 552 เผื่อไว้เทสเอง
+SEL_CODE = {
+    # ฝั่งซ้าย
+    'name_th':   'ชื่อ Item Code (ไทย)',
+    'name_en':   'ชื่อ Item Code (อังกฤษ)',
+    'kind':      'ประเภท',
+    'kind_val':  'ALL',
+    'per_user':  'จำนวนการใช้งานต่อ 1 User',
+    'start':     'เวลาเริ่มใช้งาน',
+    'end':       'เวลาสิ้นสุด',
+    'limit_sw':  'จำกัดจำนวน',
+    'limit_max': 'จำนวนครั้งที่สามารถใช้งานได้',
+    'limit_left': 'จำนวนคงเหลือ',
+    # ฝั่งขวา (ของรางวัล)
+    'reward':    'ของรางวัล',
+    'rw_th':     'ชื่อรางวัล (ไทย)',
+    'rw_en':     'ชื่อรางวัล (อังกฤษ)',
+    'rw_sw':     'จำกัดจำนวน Code',
+    'rw_max':    'จำนวนซอง',
+    'rw_left':   'จำนวนคงเหลือ',
+    'code_type': 'ประเภทของ Code',
+    'code_fix':  'Fix Codes',
+    'code_list': 'รายการ Code',
+    'bundle':    'Bundle',
+    'bundle_btn': 'เลือก bundle',
+    'submit':    'สร้าง Item Code',
+}
+
 # ลำดับคอลัมน์ในตาราง: Aztek Item Id | ชื่อ | ประเภท | ItemKind | Actions
 COL = {'id': 0, 'name': 1, 'type': 2, 'kind': 3}
 
@@ -1390,6 +1420,201 @@ JS_BUNDLE_MADE_ID = """
 
 # อ่าน "Aztek Item Id" ของไอเทมที่เพิ่งสร้าง จากหน้าเว็บ (เผื่อ API ไม่ส่งเลขกลับมา)
 # สร้างเสร็จเว็บมักเด้งไปหน้า .../items/<เลข>/edit  หรือโชว์เลขไว้ในหน้า
+# ============================================================================
+#  JS ของหน้าสร้าง Item Code (WR Master)
+#  หน้านี้มีป้ายชื่อ "ซ้ำกันเป๊ะ" สองฝั่ง เช่น "จำนวนการใช้งานต่อ 1 User"
+#  และ "จำนวนคงเหลือ" -> ทุกคำสั่งต้องบอกด้วยว่าจะเอาฝั่งไหน
+#  ฝั่งขวา = กล่องที่มีหัวข้อ "ของรางวัล" · ฝั่งซ้าย = ทุกอย่างที่ไม่ได้อยู่ในกล่องนั้น
+# ============================================================================
+_JS_CODE_LIB = """
+  const vis = el => { if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const rdsw = el => {
+    const a = el.getAttribute('aria-checked');
+    if (a === 'true' || a === 'false') return a === 'true';
+    const d = el.getAttribute('data-state');
+    if (d === 'checked' || d === 'unchecked') return d === 'checked';
+    return !!el.checked;
+  };
+  // กล่องของรางวัล = กล่องที่เล็กที่สุดที่ครอบข้อความ "ของรางวัล" ไว้
+  function rewardBox() {
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+    let node;
+    while ((node = w.nextNode())) {
+      if ((node.textContent || '').trim().indexOf('ของรางวัล') !== 0) continue;
+      let c = node.parentElement;
+      for (let i = 0; i < 6 && c; i++) {
+        if (c.querySelector('textarea') || c.querySelectorAll('input').length >= 3)
+          return c;
+        c = c.parentElement;
+      }
+    }
+    return null;
+  }
+  function inSide(el, side) {
+    const rw = rewardBox();
+    if (!rw) return true;                       // หาไม่เจอ ก็ไม่ต้องกรอง
+    const inside = rw.contains(el);
+    return side === 'right' ? inside : !inside;
+  }
+  // หาช่องกรอก/ปุ่มที่อยู่ "ใต้ป้าย" ที่ระบุ และอยู่ฝั่งที่ต้องการ
+  function findBy(lbl, side, pick) {
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+    let node;
+    while ((node = w.nextNode())) {
+      const t = (node.textContent || '').trim().replace(/\\s*\\*\\s*$/, '');
+      if (t !== lbl && t.indexOf(lbl) !== 0) continue;
+      const own = node.parentElement;
+      if (!own || !inSide(own, side)) continue;
+      if (own.getAttribute && own.getAttribute('for')) {
+        const g = pick(document.getElementById(own.getAttribute('for')));
+        if (g) return g;
+      }
+      let el = own;
+      for (let up = 0; up < 4 && el; up++) {
+        let sib = el.nextElementSibling;
+        for (let k = 0; k < 3 && sib; k++) {
+          const g = pick(sib);
+          if (g && inSide(g, side)) return g;
+          sib = sib.nextElementSibling;
+        }
+        const g2 = pick(el.parentElement);
+        if (g2 && inSide(g2, side)) return g2;
+        el = el.parentElement;
+      }
+    }
+    return null;
+  }
+  const pickText = box => {
+    if (!box) return null;
+    const q = 'input:not([type=checkbox]):not([type=radio]):not([type=file]),textarea';
+    if (box.matches && box.matches(q) && vis(box)) return box;
+    const all = [...box.querySelectorAll(q)].filter(vis);
+    return all[0] || null;
+  };
+  const pickSel = box => {
+    if (!box) return null;
+    if (box.tagName === 'SELECT' && vis(box)) return box;
+    const all = [...box.querySelectorAll('select')].filter(vis);
+    return all[0] || null;
+  };
+  const pickSw = box => {
+    if (!box) return null;
+    const q = 'input[type=checkbox],[role=checkbox],[role=switch]';
+    if (box.matches && box.matches(q)) return vis(box) ? box : null;
+    const all = [...box.querySelectorAll(q)];
+    return all.filter(vis)[0] || null;
+  };
+  function setVal(el, val) {
+    el.scrollIntoView({block: 'center'});
+    const proto = el.tagName === 'TEXTAREA'
+        ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const d = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (d && d.set) d.set.call(el, String(val)); else el.value = String(val);
+    el.dispatchEvent(new Event('input', {bubbles: true}));
+    el.dispatchEvent(new Event('change', {bubbles: true}));
+  }
+"""
+
+# กรอกช่องข้อความ / อ่านค่ากลับ — ต้องบอกฝั่ง (left/right)
+JS_CODE_TEXT = """
+([lbl, side, act, val]) => {
+""" + _JS_CODE_LIB + """
+  const el = findBy(lbl, side, pickText);
+  if (!el) return 'ไม่เจอช่อง';
+  if (act === 'read') return 'ok|' + String(el.value == null ? '' : el.value);
+  setVal(el, val);
+  return 'ok';
+}"""
+
+# เลือกค่าในดรอปดาวน์ (ประเภท / ประเภทของ Code)
+JS_CODE_SELECT = """
+([lbl, side, act, val]) => {
+""" + _JS_CODE_LIB + """
+  const s = findBy(lbl, side, pickSel);
+  if (!s) return 'ไม่เจอดรอปดาวน์';
+  if (act === 'read')
+    return 'ok|' + (s.selectedIndex >= 0 ? s.options[s.selectedIndex].text.trim() : '');
+  const opts = [...s.options];
+  const low = String(val).toLowerCase();
+  let i = opts.findIndex(o => o.text.trim().toLowerCase() === low);
+  if (i < 0) i = opts.findIndex(o => o.text.trim().toLowerCase().indexOf(low) === 0);
+  if (i < 0) i = opts.findIndex(o => o.text.trim().toLowerCase().indexOf(low) >= 0);
+  if (i < 0) return 'ไม่มีตัวเลือกนี้ (มี: ' + opts.map(o => o.text.trim()).join(', ') + ')';
+  const d = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+  d.set.call(s, opts[i].value);
+  s.dispatchEvent(new Event('input', {bubbles: true}));
+  s.dispatchEvent(new Event('change', {bubbles: true}));
+  return 'ok';
+}"""
+
+# สวิตช์ของหน้านี้ — แยกฝั่งได้ และอ่าน/กดแยกกัน (รอ React วาดใหม่ฝั่ง Python)
+JS_CODE_SWITCH = """
+([lbl, side, act]) => {
+""" + _JS_CODE_LIB + """
+  const cb = findBy(lbl, side, pickSw);
+  if (!cb) return 'ไม่เจอสวิตช์';
+  if (act === 'read') return 'ok|' + (rdsw(cb) ? '1' : '0');
+  cb.scrollIntoView({block: 'center'});
+  cb.click();
+  return 'ok';
+}"""
+
+# ปุ่ม "เลือก bundle" / ช่องค้นหา / แถวผลลัพธ์ในป๊อปอัป
+JS_CODE_BUNDLE = """
+([act, val]) => {
+""" + _JS_CODE_LIB + """
+  if (act === 'open') {
+    const btns = [...document.querySelectorAll('button,[role=button],a')].filter(vis);
+    const hit = btns.find(b => {
+      const t = (b.textContent || '').trim();
+      return t === 'เลือก bundle' || t === 'เปลี่ยน' || t.indexOf('เลือก bundle') === 0;
+    });
+    if (!hit) return 'ไม่เจอปุ่มเลือก bundle';
+    hit.click();
+    return 'ok';
+  }
+  if (act === 'search') {
+    const ins = [...document.querySelectorAll('input[type=text],input:not([type])')]
+        .filter(vis);
+    const box = ins.find(i => {
+      const p = (i.getAttribute('placeholder') || '');
+      return p.indexOf('ค้นหา') >= 0 || p.toLowerCase().indexOf('search') >= 0;
+    });
+    if (!box) return 'ไม่เจอช่องค้นหา bundle';
+    setVal(box, val);
+    return 'ok';
+  }
+  if (act === 'pick') {
+    // แถวที่ "เลข id ตรงเป๊ะ" เท่านั้น กันไปคลิกตัวที่เลขคล้ายกัน
+    const want = String(val);
+    const all = [...document.querySelectorAll('[data-id],li,tr,div')].filter(vis);
+    for (const el of all) {
+      if (el.querySelector && el.querySelector('[data-id],li,tr')) continue;
+      const t = (el.textContent || '').trim();
+      if (!t || t.length > 160) continue;
+      const byAttr = el.getAttribute && el.getAttribute('data-id') === want;
+      const byText = new RegExp('(^|[^0-9])(ID|Id|id)?\\\\s*:?\\\\s*#?' +
+                                want + '([^0-9]|$)').test(t);
+      if (byAttr || byText) { el.click(); return 'ok|' + t.slice(0, 90); }
+    }
+    return 'ไม่เจอ bundle เลข ' + want + ' ในรายการ';
+  }
+  if (act === 'read') {
+    const rw = rewardBox() || document.body;
+    const w = document.createTreeWalker(rw, NodeFilter.SHOW_TEXT, null, false);
+    let node;
+    while ((node = w.nextNode())) {
+      const t = (node.textContent || '').trim();
+      if (t.indexOf('#') === 0 && t.length > 1) return 'ok|' + t.slice(0, 90);
+    }
+    return 'ok|';
+  }
+  return 'ไม่รู้จักคำสั่ง';
+}"""
+
 JS_ITEM_MADE_ID = """
 () => {
   function digitsAfter(t, key) {
@@ -2588,6 +2813,158 @@ def scan_bundle_sheets_wb(wb, progress=None):
     return out
 
 
+# ============================================================================
+#  [5.9] อ่านไฟล์ต้นฉบับ -> Item Code (แถบ WR Master)
+#        ชีทแพทเทิร์น "Master Code" — แต่ละบล็อกมีหน้าตาแบบนี้
+#            CODE | <โค้ด>            ... Start | <วันที่> | <เวลา>
+#                                     ... End   | <วันที่> | <เวลา>
+#            Bundle                   ... Limit การใช้งาน | <จำนวน หรือ ไม่จำกัด>
+#            <เลข Bundle>
+#        อ่านโดยอ้าง "ป้ายข้อความ" ทั้งหมด ไม่ยึดตำแหน่งคอลัมน์
+# ============================================================================
+_WR_MONTH = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+             'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+
+
+def wr_date(v):
+    """อ่านวันที่จากเซลล์ -> (ปี, เดือน, วัน) ไม่ใช่วันที่ -> None"""
+    if isinstance(v, datetime):
+        return (v.year, v.month, v.day)
+    s = clean_text(v)
+    m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})', s)
+    if m:
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    m = re.match(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$', s)
+    if m:
+        return (int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    return None
+
+
+def wr_time(v, end=False):
+    """อ่านเวลาจากเซลล์ '13.00' / '23.59' -> 'HH:MM:SS'
+
+    ปลายทางเวลาสิ้นสุดของทีมคือ 23.59 = 23:59:59 (เอาให้ถึงวินาทีสุดท้าย)
+    เวลาเริ่มใช้วินาทีเป็น 00
+    """
+    s = clean_text(v).replace('น.', '').strip()
+    m = re.match(r'^(\d{1,2})[.:](\d{2})(?:[.:](\d{2}))?$', s)
+    if not m:
+        return None
+    hh, mm = int(m.group(1)), int(m.group(2))
+    ss = int(m.group(3)) if m.group(3) else (59 if end else 0)
+    if hh > 23 or mm > 59:
+        return None
+    return '%02d:%02d:%02d' % (hh, mm, ss)
+
+
+def wr_name_date(ymd):
+    """(2026, 10, 1) -> '1 Oct 2026' — รูปแบบชื่อที่ทีมใช้"""
+    if not ymd:
+        return ''
+    return '%d %s %d' % (ymd[2], _WR_MONTH[ymd[1] - 1], ymd[0])
+
+
+def _wr_after(cells, j, want_num=False):
+    """ค่าถัดไปทางขวาของช่อง j ที่ไม่ว่าง"""
+    for k in range(j + 1, len(cells)):
+        t = clean_text(cells[k])
+        if not t:
+            continue
+        if want_num and src_int(t) is None:
+            continue
+        return cells[k]
+    return None
+
+
+def parse_code_sheet(rows, sheet_name):
+    """คืน (codes, warnings) — แต่ละตัวพร้อมเอาไปกรอกหน้าสร้าง Item Code
+
+    ต้องเป็นชีทที่มีช่องเขียนว่า CODE เดี่ยวๆ เท่านั้น ชีทแบบอื่นคืนลิสต์ว่าง
+    """
+    sheet_name = clean_text(sheet_name) or str(sheet_name or '')
+    out, warns = [], []
+    starts = []
+    for i, row in enumerate(rows):
+        for j, c in enumerate(row or []):
+            if clean_text(c).lower() == 'code':
+                starts.append((i, j))
+                break
+    for n, (r0, jc) in enumerate(starts):
+        end_r = starts[n + 1][0] if n + 1 < len(starts) else len(rows)
+        code = clean_text(_wr_after(rows[r0], jc))
+        if not code:
+            warns.append('%s แถว %d: มีป้าย CODE แต่ไม่มีโค้ด -> ข้าม'
+                         % (sheet_name, r0 + 1))
+            continue
+
+        d = {'code': code, 'sheet': sheet_name, 'row': r0 + 1,
+             'start': '', 'end': '', 'limit': '', 'bundle': '', 'per_user': '1'}
+        # ---- Start / End / Limit / Bundle : หาโดยอ้างป้าย ในช่วงของบล็อกนี้ ----
+        for r in range(r0, min(r0 + 6, end_r)):
+            cells = list(rows[r] or [])
+            for j, c in enumerate(cells):
+                lab = clean_text(c).lower().rstrip(':')
+                if lab in ('start', 'end'):
+                    ymd = wr_date(_wr_after(cells, j))
+                    tm = None
+                    for k in range(j + 1, len(cells)):
+                        tm = wr_time(cells[k], end=(lab == 'end'))
+                        if tm:
+                            break
+                    if ymd:
+                        d[lab] = '%04d-%02d-%02d %s' % (
+                            ymd[0], ymd[1], ymd[2], tm or
+                            ('23:59:59' if lab == 'end' else '00:00:00'))
+                        if lab == 'start':
+                            d['name'] = code + ' ' + wr_name_date(ymd)
+                elif lab.startswith('limit'):
+                    v = clean_text(_wr_after(cells, j))
+                    d['limit'] = v
+                elif lab == 'bundle':
+                    # เลข Bundle อยู่ "ใต้ป้าย" ในคอลัมน์เดียวกัน
+                    for r2 in range(r + 1, min(r + 3, end_r)):
+                        rw = list(rows[r2] or [])
+                        b = src_int(rw[j]) if j < len(rw) else None
+                        if b:
+                            d['bundle'] = b
+                            break
+
+        if not d.get('name'):
+            d['name'] = (code + ' ' + sheet_name).strip()
+        cap = src_int(d['limit'])
+        d['cap'] = str(int(cap) + WR_SPARE) if cap else ''      # '' = ไม่จำกัด
+        d['unlimited'] = not cap
+        if not d['start'] or not d['end']:
+            warns.append('%s "%s": ไม่เจอเวลาเริ่ม/สิ้นสุดในชีท'
+                         % (sheet_name, code))
+        if not d['bundle']:
+            warns.append('%s "%s": ไม่เจอเลข Bundle ในชีท -> ต้องใส่เอง'
+                         % (sheet_name, code))
+        out.append(d)
+    return out, warns
+
+
+def read_codes_wb(wb, sheet):
+    rows = [list(r) if r else [] for r in
+            wb[sheet].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True)]
+    return parse_code_sheet(rows, sheet)
+
+
+def scan_code_sheets_wb(wb, progress=None):
+    """คืน list ของ (ชื่อชีท, จำนวนโค้ดที่เจอ) — ชีทที่ไม่ใช่แพทเทิร์น CODE ได้ 0"""
+    out = []
+    names = wb.sheetnames
+    for i, s in enumerate(names, 1):
+        if progress:
+            progress(i, len(names), s)
+        try:
+            c, _ = read_codes_wb(wb, s)
+        except Exception:
+            c = []
+        out.append((s, len(c)))
+    return out
+
+
 def read_bundles_wb(wb, sheet):
     rows = [list(r) if r else [] for r in
             wb[sheet].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True)]
@@ -2929,6 +3306,17 @@ class ImportDialog:
 #  [5.9] หน้าต่างนำเข้าบันเดิลจากไฟล์ต้นฉบับ — เลือกชีท แล้วดูว่าได้บันเดิลอะไรบ้าง
 # ============================================================================
 class BundleImportDialog:
+    # ข้อความบนหน้าต่าง — คลาสลูก (CodeImportDialog) เปลี่ยนได้โดยไม่ต้องก๊อปโค้ดทั้งก้อน
+    TITLE = 'นำเข้าบันเดิลจาก Excel'
+    PICK_ALL = 'เลือกชีทที่มีบันเดิลทั้งหมด'
+    HINT = ('อ่านให้อัตโนมัติ — Aztek Item Id เอาจากคอลัมน์ Bundle ของตาราง · '
+            'จำนวนเอาจาก Amt/Amount · Tier เอาจาก Rank · '
+            'famepoint/exp เอาจากกล่อง “ได้รับ famepoint กับ exp”')
+    TREE_TITLE = 'บันเดิลที่เจอ'
+    TREE_HEAD = 'บันเดิล / ไอเทม'
+    scan_fn = staticmethod(lambda wb, progress=None: scan_bundle_sheets_wb(wb, progress))
+    read_fn = staticmethod(lambda wb, nm: read_bundles_wb(wb, nm))
+
     def __init__(self, parent, path):
         self.path = path
         self.result = None
@@ -2938,7 +3326,7 @@ class BundleImportDialog:
         self._pending = None
 
         self.top = tk.Toplevel(parent)
-        self.top.title('นำเข้าบันเดิลจาก Excel')
+        self.top.title(self.TITLE)
         self.top.configure(bg=C['bg'])
         self.top.geometry('1010x660')
         self.top.transient(parent)
@@ -2947,7 +3335,7 @@ class BundleImportDialog:
         head = tk.Frame(self.top, bg=C['card'], height=56)
         head.pack(fill='x')
         head.pack_propagate(False)
-        tk.Label(head, text='นำเข้าบันเดิลจาก Excel', bg=C['card'], fg=C['fg'],
+        tk.Label(head, text=self.TITLE, bg=C['card'], fg=C['fg'],
                  font=('Segoe UI', 13, 'bold')).pack(side='left', padx=18)
         tk.Label(head, text=os.path.basename(path), bg=C['card'], fg=C['dim'],
                  font=('Segoe UI', 9)).pack(side='left')
@@ -2991,7 +3379,7 @@ class BundleImportDialog:
         self.sel_lbl.pack(fill='x', pady=(8, 2))
         bf = tk.Frame(left, bg=C['bg'])
         bf.pack(fill='x')
-        for txt, cmd in (('เลือกชีทที่มีบันเดิลทั้งหมด', self._pick_all),
+        for txt, cmd in ((self.PICK_ALL, self._pick_all),
                          ('ล้างที่เลือก', self._pick_none)):
             tk.Button(bf, text=txt, bg=C['input'], fg=C['fg'], bd=0, font=('Segoe UI', 9),
                       cursor='hand2', activebackground=C['line'], command=cmd).pack(
@@ -3005,9 +3393,7 @@ class BundleImportDialog:
         self.info = tk.Label(right, text='กำลังสแกนไฟล์…', bg=C['bg'], fg=C['dim'],
                              font=('Segoe UI', 9), anchor='w', justify='left')
         self.info.pack(fill='x')
-        tk.Label(right, text='อ่านให้อัตโนมัติ — Aztek Item Id เอาจากเลขซ้ายมือของตาราง · '
-                             'จำนวนเอาจาก Amt/Amount · Tier เอาจาก Rank · '
-                             'famepoint/exp เอาจากกล่อง “ได้รับ famepoint กับ exp”',
+        tk.Label(right, text=self.HINT,
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), wraplength=690,
                  justify='left', anchor='w').pack(fill='x', pady=(6, 0))
         self.warn_lbl = tk.Label(right, text='', bg=C['bg'], fg=C['warn'],
@@ -3015,13 +3401,13 @@ class BundleImportDialog:
                                  wraplength=690)
         self.warn_lbl.pack(fill='x', pady=(6, 0))
 
-        tk.Label(right, text='บันเดิลที่เจอ', bg=C['bg'], fg=C['dim'],
+        tk.Label(right, text=self.TREE_TITLE, bg=C['bg'], fg=C['dim'],
                  font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(10, 4))
         pv = tk.Frame(right, bg=C['bg'])
         pv.pack(fill='both', expand=True)
         self.tree = ttk.Treeview(pv, columns=('qty', 'tier', 'info'), show='tree headings',
                                  style='TR.Treeview', height=13)
-        self.tree.heading('#0', text='บันเดิล / ไอเทม')
+        self.tree.heading('#0', text=self.TREE_HEAD)
         self.tree.column('#0', width=330, anchor='w')
         for c, t, w in (('qty', 'จำนวน', 70), ('tier', 'Tier', 70), ('info', 'รายละเอียด', 220)):
             self.tree.heading(c, text=t)
@@ -3071,7 +3457,7 @@ class BundleImportDialog:
             with self.lock:
                 self.q.put(('info', 'กำลังเปิดไฟล์…'))
                 self.wb = open_workbook(self.path)
-                sheets = scan_bundle_sheets_wb(
+                sheets = self.scan_fn(
                     self.wb, progress=lambda k, n, nm: self.q.put(
                         ('info', 'กำลังสแกน… %d/%d   %s' % (k, n, nm))))
         except Exception as ex:
@@ -3150,7 +3536,7 @@ class BundleImportDialog:
         try:
             with self.lock:
                 for nm in names:
-                    b, w = read_bundles_wb(self.wb, nm)
+                    b, w = self.read_fn(self.wb, nm)
                     bs.extend(b)
                     ws.extend(w)
         except Exception as ex:
@@ -3209,6 +3595,47 @@ class BundleImportDialog:
         self.result = None
         self._close()
         self.top.destroy()
+
+
+class CodeImportDialog(BundleImportDialog):
+    """หน้าต่างนำเข้า Item Code — โครงเดียวกับนำเข้าบันเดิล เปลี่ยนแค่สิ่งที่อ่านกับที่โชว์"""
+    TITLE = 'นำเข้า Item Code จาก Excel (WR Master)'
+    PICK_ALL = 'เลือกชีทที่มีโค้ดทั้งหมด'
+    HINT = ('อ่านเฉพาะชีทแบบ Master Code (มีแถว CODE) — '
+            'ชื่อ Item Code = โค้ด + วันที่เริ่ม · เวลาเอาจากช่อง Start/End ในชีท · '
+            'Limit ที่ชีทบอกจะเผื่อให้อีก %d · Bundle เอาจากเลขใต้ป้าย Bundle' % WR_SPARE)
+    TREE_TITLE = 'Item Code ที่เจอ'
+    TREE_HEAD = 'CODE / ชื่อ Item Code'
+    scan_fn = staticmethod(lambda wb, progress=None: scan_code_sheets_wb(wb, progress))
+    read_fn = staticmethod(lambda wb, nm: read_codes_wb(wb, nm))
+
+    def _show(self, bs, ws, note):
+        self.bundles = bs
+        self.warns = ws
+        self.tree.delete(*self.tree.get_children())
+        for d in bs:
+            pid = self.tree.insert(
+                '', 'end', text='🎟  ' + d['code'], open=False,
+                values=(d.get('cap') or 'ไม่จำกัด',
+                        ('Bundle ' + d['bundle']) if d.get('bundle') else '⚠ ไม่มี Bundle',
+                        d['name']))
+            self.tree.insert(pid, 'end', text='      เริ่มใช้งาน',
+                             values=('', '', d.get('start') or '⚠ ไม่เจอในชีท'))
+            self.tree.insert(pid, 'end', text='      สิ้นสุด',
+                             values=('', '', d.get('end') or '⚠ ไม่เจอในชีท'))
+        nobd = sum(1 for d in bs if not d.get('bundle'))
+        self.info.config(text='%s · พบ %d โค้ด' % (note, len(bs)))
+        msg = ''
+        if nobd:
+            msg = '⚠  %d โค้ดยังไม่มีเลข Bundle ในชีท' % nobd
+        if ws:
+            msg = (msg + '  ·  ' if msg else '') + '%d จุดที่ต้องดู เช่น %s' % (
+                len(ws), ws[0][:80])
+        self.warn_lbl.config(text=msg)
+        self.count_lbl.config(text='จะนำเข้า %d โค้ด' % len(bs) if bs else '')
+        self.ok_btn.config(state='normal' if bs else 'disabled',
+                           bg=C['accent'] if bs else C['input'],
+                           fg='white' if bs else C['dim'])
 
 
 # ============================================================================
@@ -3643,18 +4070,21 @@ class App:
         self.tab_search = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_create = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_bundle = tk.Frame(self.nb.body, bg=C['bg'])
+        self.tab_wr = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_log = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_check = tk.Frame(self.nb.body, bg=C['bg'])
         # ซ้าย = แท็บที่ใช้ทำงาน · ขวา = แท็บไว้ดูข้อมูล จะได้ไม่ปนกัน
         self.nb.add(self.tab_search, '🔍  ค้นหา')
         self.nb.add(self.tab_create, '➕  สร้าง Item')
         self.nb.add(self.tab_bundle, '📦  สร้าง Bundle')
+        self.nb.add(self.tab_wr, '🎟  WR Master')
         self.nb.add(self.tab_check, '🩺  ตรวจระบบ', side='right')
         self.nb.add(self.tab_log, '📜  Log', side='right')
 
         self._build_search()
         self._build_create()
         self._build_bundle()
+        self._build_wr()
         self._build_log()
         self._build_check()
 
@@ -4359,6 +4789,200 @@ class App:
         self.log('   ! ประเภทไอเทมไม่ตรง — อยากได้ “%s” แต่หน้าเว็บเป็น “%s” '
                  'ต้องแก้เองบนเว็บ' % (want_s, cur or 'อ่านค่าไม่ได้'), 'WARN')
         return False
+
+    # ==================================================================
+    #  WR Master — กรอกหน้าสร้าง Item Code
+    # ==================================================================
+    async def _w_text(self, page, label, side, value, what=''):
+        r = str(await page.evaluate(JS_CODE_TEXT, [label, side, 'set', str(value)]))
+        if r == 'ok':
+            self.log('   · %s = %s' % (what or label, str(value)[:44]), 'INFO')
+            return True
+        self.log('   ! กรอก “%s” ไม่ได้ (%s)' % (what or label, r), 'WARN')
+        return False
+
+    async def _w_read(self, page, label, side):
+        r = str(await page.evaluate(JS_CODE_TEXT, [label, side, 'read', '']))
+        return r.split('|', 1)[1] if r.startswith('ok|') else None
+
+    async def _w_select(self, page, label, side, value, what=''):
+        cur = str(await page.evaluate(JS_CODE_SELECT, [label, side, 'read', '']))
+        if cur.startswith('ok|') and value.lower() in cur.split('|', 1)[1].lower():
+            self.log('   · %s = %s  (เป็นค่านี้อยู่แล้ว)'
+                     % (what or label, cur.split('|', 1)[1]), 'INFO')
+            return True
+        r = str(await page.evaluate(JS_CODE_SELECT, [label, side, 'set', value]))
+        if r == 'ok':
+            self.log('   · %s = %s' % (what or label, value), 'INFO')
+            return True
+        self.log('   ! เลือก “%s” เป็น %s ไม่ได้ (%s)' % (what or label, value, r), 'WARN')
+        return False
+
+    async def _w_switch(self, page, label, side, want, what=''):
+        """สวิตช์ของหน้านี้เป็น React เหมือนหน้าสร้าง Item — กดแล้วต้องรอค่อยอ่าน"""
+        want = bool(want)
+
+        async def read():
+            r = str(await page.evaluate(JS_CODE_SWITCH, [label, side, 'read']))
+            return (r.split('|', 1)[1] == '1') if r.startswith('ok|') else None
+
+        cur = await read()
+        if cur is None:
+            self.log('   ! ไม่เจอสวิตช์ “%s”' % (what or label), 'WARN')
+            return False
+        if cur == want:
+            self.log('   · %s = %s  (เป็นแบบนี้อยู่แล้ว)'
+                     % (what or label, 'เปิด' if want else 'ปิด'), 'INFO')
+            return True
+        await page.evaluate(JS_CODE_SWITCH, [label, side, 'click'])
+        for _ in range(6):
+            await page.wait_for_timeout(200)
+            if (await read()) == want:
+                self.log('   · %s = %s  (เปลี่ยนให้แล้ว)'
+                         % (what or label, 'เปิด' if want else 'ปิด'), 'INFO')
+                await page.wait_for_timeout(200)     # รอช่องที่ซ่อนอยู่โผล่มา
+                return True
+        self.log('   ! ตั้งสวิตช์ “%s” ไม่ได้' % (what or label), 'WARN')
+        return False
+
+    async def _w_bundle(self, page, bid):
+        """เลือก Bundle จากเลขในชีท — เปิดป๊อปอัป ค้นด้วยเลข แล้วคลิกแถวที่ตรงเป๊ะ"""
+        bid = str(bid or '').strip()
+        if not bid:
+            self.log('   ! ไม่มีเลข Bundle ในชีท — ต้องเลือกเองบนเว็บ', 'WARN')
+            return False
+        r = str(await page.evaluate(JS_CODE_BUNDLE, ['open', '']))
+        if r != 'ok':
+            self.log('   ! ' + r, 'WARN')
+            return False
+        await page.wait_for_timeout(500)
+        r = str(await page.evaluate(JS_CODE_BUNDLE, ['search', bid]))
+        if r != 'ok':
+            self.log('   ! ' + r, 'WARN')
+            return False
+        for _ in range(10):                       # รอรายการโหลด แล้วค่อยคลิก
+            await page.wait_for_timeout(400)
+            r = str(await page.evaluate(JS_CODE_BUNDLE, ['pick', bid]))
+            if r.startswith('ok'):
+                await page.wait_for_timeout(400)
+                self.log('   · Bundle = %s' % (r.split('|', 1)[1] if '|' in r else bid),
+                         'INFO')
+                return True
+        self.log('   ! %s' % r, 'WARN')
+        return False
+
+    async def _w_one(self, page, d, do, hold):
+        """กรอก Item Code หนึ่งตัวให้ครบทุกช่องตามที่ทีมใช้จริง"""
+        await page.goto(ITEMCODE_CREATE_URL, wait_until='domcontentloaded', timeout=45000)
+        await page.wait_for_timeout(2000)
+        if any(k in page.url.lower() for k in ('login', 'signin', 'auth')):
+            self.log('   ✗ ยังไม่ได้ล็อกอิน — กด “เปิดหน้า Login” ด้านบนก่อน', 'ERR')
+            return False
+
+        cap = str(d.get('cap') or '').strip()
+        limited = bool(cap)
+
+        # ---------- ฝั่งซ้าย ----------
+        await self._w_text(page, SEL_CODE['name_th'], 'left', d['name'], 'ชื่อ Item Code (ไทย)')
+        await self._w_text(page, SEL_CODE['name_en'], 'left', d['name'], 'ชื่อ Item Code (อังกฤษ)')
+        await self._w_select(page, SEL_CODE['kind'], 'left', SEL_CODE['kind_val'], 'ประเภท')
+        await self._w_text(page, SEL_CODE['per_user'], 'left', d.get('per_user', '1'),
+                           'จำนวนการใช้งานต่อ 1 User (ซ้าย)')
+        if d.get('start'):
+            await self._w_text(page, SEL_CODE['start'], 'left', d['start'], 'เวลาเริ่มใช้งาน')
+        if d.get('end'):
+            await self._w_text(page, SEL_CODE['end'], 'left', d['end'], 'เวลาสิ้นสุด')
+        await self._w_switch(page, SEL_CODE['limit_sw'], 'left', limited, 'จำกัดจำนวน (ซ้าย)')
+        if limited:
+            await self._w_text(page, SEL_CODE['limit_max'], 'left', cap,
+                               'จำนวนครั้งที่สามารถใช้งานได้')
+            await self._w_text(page, SEL_CODE['limit_left'], 'left', cap,
+                               'จำนวนคงเหลือ (ซ้าย)')
+
+        # ---------- ฝั่งขวา (ของรางวัล) ----------
+        await self._w_text(page, SEL_CODE['rw_th'], 'right', d['code'], 'ชื่อรางวัล (ไทย)')
+        await self._w_text(page, SEL_CODE['rw_en'], 'right', d['code'], 'ชื่อรางวัล (อังกฤษ)')
+        await self._w_text(page, SEL_CODE['per_user'], 'right', d.get('per_user', '1'),
+                           'จำนวนการใช้งานต่อ 1 User (ขวา)')
+        await self._w_switch(page, SEL_CODE['rw_sw'], 'right', limited, 'จำกัดจำนวน Code')
+        if limited:
+            await self._w_text(page, SEL_CODE['rw_max'], 'right', cap, 'จำนวนซอง')
+            await self._w_text(page, SEL_CODE['rw_left'], 'right', cap, 'จำนวนคงเหลือ (ขวา)')
+        await self._w_select(page, SEL_CODE['code_type'], 'right', SEL_CODE['code_fix'],
+                             'ประเภทของ Code')
+        await self._w_text(page, SEL_CODE['code_list'], 'right', d['code'], 'รายการ Code')
+        await self._w_bundle(page, d.get('bundle'))
+
+        # ---------- ตรวจว่าค่าเข้าไปจริง ----------
+        bad = []
+        for lbl, side, want, what in (
+                (SEL_CODE['name_th'], 'left', d['name'], 'ชื่อ Item Code'),
+                (SEL_CODE['code_list'], 'right', d['code'], 'รายการ Code')):
+            got = await self._w_read(page, lbl, side)
+            if (got or '').strip() != str(want).strip():
+                bad.append('%s: อยากได้ “%s” แต่ในฟอร์มเป็น “%s”' % (what, want, got))
+        for b in bad:
+            self.log('   ! ' + b, 'WARN')
+
+        if not do:
+            self.log('   ✓ กรอกฟอร์มครบแล้ว (โหมดทดสอบ — ไม่กดสร้าง)', 'OK')
+            if hold:
+                await page.wait_for_timeout(hold * 1000)
+            self.add_made_code(d, '', 'กรอกฟอร์มแล้ว (โหมดทดสอบ — ไม่ได้สร้าง)')
+            return not bad
+
+        # ---------- กดสร้างจริง + ป๊อปอัปยืนยัน ----------
+        btn = page.locator('button:has-text("%s")' % SEL_CODE['submit']).last
+        if await btn.count() == 0:
+            self.log('   ✗ ไม่เจอปุ่ม “%s”' % SEL_CODE['submit'], 'ERR')
+            return False
+        hits = []
+
+        def _grab(resp):
+            try:
+                if resp.request.method in ('POST', 'PUT', 'PATCH') \
+                        and 'code' in resp.url.lower():
+                    hits.append(resp)
+            except Exception:
+                pass
+        page.on('response', _grab)
+        try:
+            await btn.click(timeout=10000)
+            await page.wait_for_timeout(600)
+            await self._click_confirm(page, hits)
+            waited = 0
+            while waited < 20000 and not hits:
+                await page.wait_for_timeout(300)
+                waited += 300
+            await page.wait_for_timeout(1500)
+        finally:
+            try:
+                page.remove_listener('response', _grab)
+            except Exception:
+                pass
+
+        code_http = 0
+        cid = ''
+        for resp in hits:
+            try:
+                code_http = resp.status
+                body = await resp.json()
+            except Exception:
+                body = None
+            cid = cid or _dig_id(body)
+        good = (code_http == 0) or (200 <= code_http < 300)
+        if good:
+            self.log('   ✓ สร้างแล้ว%s%s'
+                     % ('  ·  Item Code Id = %s' % cid if cid else '',
+                        '  (HTTP %d)' % code_http if code_http else ''), 'OK')
+        else:
+            self.log('   ✗ เว็บตอบ HTTP %d — ยังไม่ได้สร้าง' % code_http, 'ERR')
+        self.add_made_code(d, cid if good else '',
+                           'สร้างแล้ว' if good else 'ไม่สำเร็จ (HTTP %d)' % code_http,
+                           ok=good)
+        log_event('create_itemcode', code=d['code'], name=d['name'],
+                  bundle=d.get('bundle'), ok=bool(good), http=code_http)
+        return good
 
     async def _c_one(self, page, d, do, hold):
         await page.goto(ITEM_CREATE_URL, wait_until='domcontentloaded', timeout=45000)
@@ -5932,6 +6556,374 @@ class App:
             self.log('เปิดหน้าแจ้งบั๊กไม่ได้: %s' % str(ex)[:80], 'ERR')
             messagebox.showerror('เปิดไม่ได้', str(ex))
 
+    # ==================================================================
+    #  แท็บ WR Master — สร้าง Item Code จากชีท Master Code
+    # ==================================================================
+    def _build_wr(self):
+        p = self.tab_wr
+        self.wq = []                       # คิวโค้ดที่จะสร้าง
+        self.w_running = False
+        self.w_cancel = False
+
+        s1 = self._card(p, 'นำเข้าจากไฟล์ต้นฉบับ')
+        bar = tk.Frame(s1, bg=C['bg'])
+        bar.pack(fill='x')
+        self._btn(bar, '📂  นำเข้าไฟล์ต้นฉบับ (.xlsx)', self.w_import,
+                  primary=True).pack(side='left', ipadx=10, ipady=4)
+        self._btn(bar, '✏  แก้ไข', self.w_edit).pack(side='left', padx=(8, 0),
+                                                     ipadx=8, ipady=4)
+        self._btn(bar, '🗑  ลบที่เลือก', self.w_del).pack(side='left', padx=(8, 0),
+                                                          ipadx=8, ipady=4)
+        self._btn(bar, 'ล้างคิว', self.w_clear).pack(side='left', padx=(8, 0),
+                                                     ipadx=8, ipady=4)
+        self.w_count = tk.Label(bar, text='คิวว่าง', bg=C['bg'], fg=C['dim'], font=FM)
+        self.w_count.pack(side='right')
+        tk.Label(s1, text='อ่านเฉพาะชีทแบบ Master Code (มีแถว CODE) — '
+                          'ชีทบอก Limit เท่าไหร่ จะเผื่อให้อีก %d เสมอ  ·  '
+                          'ดับเบิลคลิกเพื่อแก้รายตัว' % WR_SPARE,
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w',
+                 justify='left').pack(fill='x', pady=(8, 0))
+
+        s2 = self._card(p, 'คิว Item Code ที่จะสร้าง', grow=True)
+        tw = tk.Frame(s2, bg=C['bg'])
+        tw.pack(fill='both', expand=True)
+        wc = ('n', 'code', 'wname', 'start', 'end', 'cap', 'bundle')
+        self.w_tree = ttk.Treeview(tw, columns=wc, show='headings', height=7,
+                                   style='TR.Treeview', selectmode='extended')
+        for c, t, w in (('n', '#', 38), ('code', 'CODE', 120),
+                        ('wname', 'ชื่อ Item Code', 220), ('start', 'เริ่มใช้งาน', 140),
+                        ('end', 'สิ้นสุด', 140), ('cap', 'จำกัดจำนวน', 90),
+                        ('bundle', 'Bundle', 80)):
+            self.w_tree.heading(c, text=t)
+            self.w_tree.column(c, width=w, anchor='w')
+        self.w_tree.tag_configure('warn', background='#3a3018', foreground='#e3b341')
+        wsb = ttk.Scrollbar(tw, orient='vertical', command=self.w_tree.yview)
+        self.w_tree.configure(yscrollcommand=wsb.set)
+        self.w_tree.pack(side='left', fill='both', expand=True)
+        wsb.pack(side='right', fill='y')
+        self.w_tree.bind('<Double-1>', lambda e: self.w_edit())
+        self.w_warn = tk.Label(s2, text='', bg=C['bg'], fg=C['warn'],
+                               font=('Segoe UI', 9), anchor='w', justify='left',
+                               wraplength=940)
+        self.w_warn.pack(fill='x', pady=(8, 0))
+
+        s3 = self._card(p, 'ลงมือสร้าง')
+        self.wv_do = tk.BooleanVar(value=False)
+        tk.Checkbutton(s3, variable=self.wv_do, command=self._w_do_changed,
+                       text='กดปุ่ม “สร้าง Item Code” จริง',
+                       bg=C['bg'], fg=C['fg'], selectcolor=C['input'],
+                       activebackground=C['bg'], activeforeground=C['fg'],
+                       font=FB, bd=0, highlightthickness=0).grid(row=0, column=0,
+                                                                 sticky='w')
+        self.w_mode = tk.Label(s3, text='', bg=C['bg'], fg=C['warn'], font=FM)
+        self.w_mode.grid(row=0, column=1, sticky='w', padx=(10, 0))
+        self.wv_hold = tk.StringVar(value=self.prefs.get('w_hold', '3'))
+        tk.Label(s3, text='โหมดทดสอบ: กรอกเสร็จแล้วค้างหน้าไว้ให้ดู (วินาที)',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9)
+                 ).grid(row=1, column=0, sticky='w', pady=(8, 0))
+        eh = self._entry(s3, width=6)
+        eh.config(textvariable=self.wv_hold)
+        eh.grid(row=1, column=1, sticky='w', padx=(10, 0), pady=(8, 0), ipady=3)
+        run = tk.Frame(s3, bg=C['bg'])
+        run.grid(row=2, column=0, columnspan=3, sticky='w', pady=(12, 0))
+        self.w_btn_run = self._btn(run, '▶  เริ่มทำงาน', self.w_start, primary=True)
+        self.w_btn_run.pack(side='left', ipadx=18, ipady=5)
+        self.w_btn_stop = self._btn(run, '■  ยกเลิก', self.w_stop)
+        self.w_btn_stop.config(state='disabled')
+        self.w_btn_stop.pack(side='left', padx=(8, 0), ipadx=12, ipady=5)
+
+        # ---- ผลลัพธ์ ----
+        self.made_codes = []
+        ib = tk.Frame(p, bg=C['bg'])
+        ib.pack(fill='x', padx=14, pady=(10, 4))
+        iw = tk.Frame(p, bg=C['bg'])
+        iw.pack(fill='both', expand=True, padx=14, pady=(0, 12))
+        tk.Label(ib, text='Item Code ที่สร้างแล้ว', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9, 'bold')).pack(side='left')
+        self.lbl_wmade = tk.Label(ib, text='ยังไม่ได้สร้าง', bg=C['bg'], fg=C['dim'],
+                                  font=('Segoe UI', 9))
+        self.lbl_wmade.pack(side='left', padx=10)
+        self._btn(ib, '📋  คัดลอก CODE', self.copy_made_codes).pack(
+            side='right', ipadx=8, ipady=2)
+        tk.Label(ib, text='(เลือกแถวที่ต้องการก่อน · ไม่เลือก = เอาทั้งหมด)',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8)).pack(side='right', padx=8)
+        mc = ('no', 'code', 'cid', 'cname', 'at', 'note')
+        self.tree_code = ttk.Treeview(iw, columns=mc, show='headings', height=5,
+                                      style='TR.Treeview', selectmode='extended')
+        for c, t, w in (('no', '#', 42), ('code', 'CODE', 130),
+                        ('cid', 'Item Code Id', 100), ('cname', 'ชื่อ Item Code', 230),
+                        ('at', 'เวลา', 78), ('note', 'หมายเหตุ', 150)):
+            self.tree_code.heading(c, text=t)
+            self.tree_code.column(c, width=w, anchor='w')
+        self.tree_code.tag_configure('bad', background='#3a1f1e', foreground='#f0736a')
+        csb2 = ttk.Scrollbar(iw, orient='vertical', command=self.tree_code.yview)
+        self.tree_code.configure(yscrollcommand=csb2.set)
+        self.tree_code.pack(side='left', fill='both', expand=True)
+        csb2.pack(side='right', fill='y')
+
+        self._w_do_changed()
+        self._w_refresh()
+
+    def _w_do_changed(self):
+        if self.wv_do.get():
+            self.w_mode.config(text='⚠  จะสร้าง Item Code จริงบนเว็บ', fg=C['err'])
+        else:
+            self.w_mode.config(text='โหมดทดสอบ — กรอกฟอร์มให้ดูเฉยๆ ไม่กดสร้าง', fg=C['ok'])
+
+    def _w_refresh(self):
+        self.w_tree.delete(*self.w_tree.get_children())
+        nobd = 0
+        for i, d in enumerate(self.wq, 1):
+            bad = not d.get('bundle')
+            if bad:
+                nobd += 1
+            self.w_tree.insert('', 'end', tags=('warn',) if bad else (), values=(
+                i, d['code'], d['name'], d.get('start', '—'), d.get('end', '—'),
+                d.get('cap') or 'ไม่จำกัด', d.get('bundle') or '⚠ ไม่มี'))
+        self.w_count.config(text='คิวว่าง' if not self.wq
+                            else 'ในคิว %d โค้ด' % len(self.wq))
+        self.w_warn.config(
+            text=('⚠  มี %d โค้ดที่ยังไม่มีเลข Bundle ในชีท (แถวเหลือง) — '
+                  'ดับเบิลคลิกใส่เองก่อน ไม่งั้นตัวนั้นจะเลือก Bundle ไม่ได้' % nobd)
+            if nobd else '', fg=C['warn'])
+
+    def _w_sel(self):
+        s = self.w_tree.selection()
+        return self.w_tree.index(s[0]) if s else None
+
+    def w_import(self):
+        if self.w_running:
+            return
+        path = filedialog.askopenfilename(
+            title='เลือกไฟล์ต้นฉบับ',
+            filetypes=[('Excel', '*.xlsx *.xlsm'), ('ทุกไฟล์', '*.*')])
+        if not path:
+            return
+        dlg = CodeImportDialog(self.root, path)
+        if not dlg.result:
+            return
+        have = {d['code'] for d in self.wq}
+        add = [d for d in dlg.result if d['code'] not in have]
+        self.wq.extend(add)
+        self._w_refresh()
+        self.log('นำเข้า Item Code %d โค้ด (รวม %d)' % (len(add), len(self.wq)), 'OK')
+        for w in (dlg.warns or [])[:20]:
+            self.log('  ⚠ ' + w, 'WARN')
+        if len(add) < len(dlg.result):
+            self.log('  ข้ามโค้ดที่อยู่ในคิวอยู่แล้ว %d' % (len(dlg.result) - len(add)),
+                     'INFO')
+        log_event('wr_import', count=len(add), total=len(self.wq),
+                  file=os.path.basename(path))
+
+    def w_edit(self):
+        if self.w_running:
+            return
+        i = self._w_sel()
+        if i is None:
+            return messagebox.showinfo('แก้ไข', 'เลือกแถวในคิวก่อนนะ')
+        d = dict(self.wq[i])
+        if self._w_form(d, 'แก้ไข Item Code #%d' % (i + 1)):
+            self.wq[i] = d
+            self._w_refresh()
+
+    def w_del(self):
+        i = self._w_sel()
+        if i is None or self.w_running:
+            return
+        del self.wq[i]
+        self._w_refresh()
+
+    def w_clear(self):
+        if self.w_running or not self.wq:
+            return
+        if messagebox.askyesno('ล้างคิว', 'ลบทั้ง %d โค้ดออกจากคิว?' % len(self.wq)):
+            self.wq = []
+            self._w_refresh()
+
+    def _w_form(self, d, title):
+        """หน้าต่างแก้ไข Item Code หนึ่งตัว — คืน True ถ้ากดบันทึก"""
+        top = tk.Toplevel(self.root)
+        top.title(title)
+        top.configure(bg=C['bg'])
+        top.transient(self.root)
+        top.grab_set()
+        try:
+            self.root.update_idletasks()
+            x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - 620) // 2)
+            y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - 430) // 2)
+            top.geometry('620x430+%d+%d' % (x, y))
+        except Exception:
+            top.geometry('620x430')
+        ok = {'v': False}
+        body = tk.Frame(top, bg=C['bg'])
+        body.pack(fill='both', expand=True, padx=18, pady=14)
+        fields = (('CODE', 'code', 26), ('ชื่อ Item Code (ไทย/อังกฤษ)', 'name', 44),
+                  ('เวลาเริ่มใช้งาน', 'start', 26), ('เวลาสิ้นสุด', 'end', 26),
+                  ('จำนวนการใช้งานต่อ 1 User', 'per_user', 10),
+                  ('จำกัดจำนวน (เว้นว่าง = ไม่จำกัด)', 'cap', 12),
+                  ('เลข Bundle', 'bundle', 12))
+        vs = {}
+        for r, (lbl, key, w) in enumerate(fields):
+            tk.Label(body, text=lbl, bg=C['bg'], fg=C['dim'],
+                     font=('Segoe UI', 9)).grid(row=r, column=0, sticky='w', pady=5)
+            v = tk.StringVar(value=str(d.get(key, '') or ''))
+            vs[key] = v
+            e = self._entry(body, width=w)
+            e.config(textvariable=v)
+            e.grid(row=r, column=1, sticky='w', padx=(12, 0), ipady=3)
+        tk.Label(body, text='เวลาใส่แบบ 2026-10-01 13:00:00  ·  '
+                            'ชีทบอก Limit เท่าไหร่ โปรแกรมเผื่อให้อีก %d แล้ว' % WR_SPARE,
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), justify='left'
+                 ).grid(row=len(fields), column=0, columnspan=2, sticky='w', pady=(10, 0))
+        foot = tk.Frame(top, bg=C['card'], height=58)
+        foot.pack(fill='x', side='bottom')
+        foot.pack_propagate(False)
+
+        def _save():
+            for key, v in vs.items():
+                d[key] = v.get().strip()
+            d['unlimited'] = not d.get('cap')
+            if not d['code'] or not d['name']:
+                return messagebox.showwarning('กรอกไม่ครบ', 'ต้องมี CODE และชื่อ Item Code',
+                                              parent=top)
+            ok['v'] = True
+            top.destroy()
+        self._btn(foot, 'บันทึก', _save, primary=True).pack(side='right', padx=18,
+                                                            pady=12, ipadx=20, ipady=4)
+        self._btn(foot, 'ยกเลิก', top.destroy).pack(side='right', pady=12,
+                                                    ipadx=14, ipady=4)
+        self.root.wait_window(top)
+        return ok['v']
+
+    def add_made_code(self, d, cid, notes='', ok=True):
+        row = {'code': d.get('code', ''), 'name': d.get('name', ''),
+               'id': str(cid or '').strip() or '-', 'notes': notes, 'ok': bool(ok),
+               'at': datetime.now().strftime('%H:%M:%S')}
+        self.made_codes.append(row)
+        row['no'] = len(self.made_codes)
+
+        def _do():
+            self.tree_code.insert('', 'end', tags=() if row['ok'] else ('bad',),
+                                  values=(row['no'], row['code'], row['id'],
+                                          row['name'], row['at'], row['notes']))
+            self.tree_code.yview_moveto(1)
+            got = sum(1 for m in self.made_codes if m['id'] != '-')
+            self.lbl_wmade.config(
+                text='สร้างแล้ว %d โค้ด%s' % (
+                    len(self.made_codes),
+                    '' if got == len(self.made_codes) else ' (ได้เลข %d)' % got),
+                fg=C['ok'])
+        self.root.after(0, _do)
+
+    def copy_made_codes(self):
+        """คัดลอกเฉพาะ CODE ของแถวที่เลือกไว้ — ไม่เลือกก็เอาทั้งหมด"""
+        rows = list(self.tree_code.selection())
+        picked = bool(rows)
+        if not picked:
+            rows = list(self.tree_code.get_children())
+        if not rows:
+            messagebox.showinfo('ยังไม่มี', 'ยังไม่ได้สร้าง Item Code ในรอบนี้')
+            return
+        out = []
+        for w in rows:
+            v = self.tree_code.item(w, 'values')
+            if len(v) > 1 and str(v[1]).strip():
+                out.append(str(v[1]).strip())
+        if not out:
+            messagebox.showinfo('ไม่มีโค้ด', 'แถวที่เลือกไม่มี CODE')
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append('\n'.join(out))
+        self.log('คัดลอก CODE %d รายการแล้ว (%s)'
+                 % (len(out), 'เฉพาะที่เลือก' if picked else 'ทั้งหมด'), 'OK')
+
+    def w_stop(self):
+        self.w_cancel = True
+        self.log('กำลังยกเลิกการสร้าง Item Code...', 'WARN')
+
+    def w_start(self):
+        if self.w_running or self.running or self.c_running or self.b_running:
+            return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
+        if not self.wq:
+            return messagebox.showwarning('คิวว่าง',
+                                          'ยังไม่มีโค้ดในคิว — นำเข้าไฟล์ต้นฉบับก่อน')
+        do = self.wv_do.get()
+        nobd = sum(1 for d in self.wq if not d.get('bundle'))
+        if do:
+            msg = 'จะสร้าง Item Code จริงบนเว็บ %d โค้ด\n' % len(self.wq)
+            if nobd:
+                msg += ('\n⚠  มี %d โค้ดที่ยังไม่มีเลข Bundle — ตัวนั้นจะเลือก Bundle '
+                        'ไม่ได้\n' % nobd)
+            msg += '\nตรวจชื่อ/เวลา/จำนวนในคิวเรียบร้อยแล้วใช่ไหม?'
+            if not messagebox.askyesno('ยืนยัน', msg):
+                return
+        self.save_now()
+        self.w_running = True
+        self.w_cancel = False
+        self.w_btn_run.config(state='disabled')
+        self.w_btn_stop.config(state='normal')
+        self.nb.select(self.tab_log)
+        self.log('=' * 46, 'STEP')
+        self.log(('เริ่มสร้าง Item Code จริง ' if do else 'เริ่มทดสอบกรอกฟอร์ม ')
+                 + '%d โค้ด' % len(self.wq), 'STEP')
+        log_event('wr_start', count=len(self.wq), commit=bool(do), no_bundle=nobd)
+        threading.Thread(target=self._w_thread, args=(list(self.wq), do),
+                         daemon=True).start()
+
+    def _w_thread(self, rows, do):
+        try:
+            asyncio.run(self._w_work(rows, do))
+        except Exception as ex:
+            log_event('error', where='wr', message=str(ex)[:300])
+            self.log('ผิดพลาด: ' + str(ex), 'ERR')
+            self.log(traceback.format_exc(), 'ERR')
+        finally:
+            self.w_running = False
+
+            def _rst():
+                self.w_btn_run.config(state='normal')
+                self.w_btn_stop.config(state='disabled')
+                if self.made_codes:
+                    self.nb.select(self.tab_wr)
+            self.root.after(0, _rst)
+
+    async def _w_work(self, rows, do):
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch_persistent_context(**launch_kwargs(False))
+            page = browser.pages[0] if browser.pages else await browser.new_page()
+            try:
+                try:
+                    hold = max(0, int(float(self.wv_hold.get() or 0)))
+                except Exception:
+                    hold = 3
+                okc = errc = 0
+                for i, d in enumerate(rows, 1):
+                    if self.w_cancel:
+                        self.log('ยกเลิกแล้ว', 'WARN')
+                        break
+                    self.set_progress(i - 1, len(rows), d['code'])
+                    self.log('[%d/%d] %s  (%s)' % (i, len(rows), d['code'], d['name']),
+                             'STEP')
+                    try:
+                        if await self._w_one(page, d, do, hold):
+                            okc += 1
+                        else:
+                            errc += 1
+                    except Exception as ex:
+                        errc += 1
+                        self.log('   ✗ ' + str(ex)[:160], 'ERR')
+                        log_event('error', where='wr_one', code=d.get('code'),
+                                  message=str(ex)[:200])
+                self.set_progress(len(rows), len(rows), 'เสร็จ')
+                self.log('จบ — สำเร็จ %d · ไม่ผ่าน %d' % (okc, errc),
+                         'OK' if not errc else 'WARN')
+                log_event('wr_done', ok=okc, fail=errc, commit=bool(do))
+            finally:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+
     def _build_log(self):
         self.log_box = scrolledtext.ScrolledText(
             self.tab_log, bg=C['input'], fg=C['fg'], bd=0, font=('Consolas', 9),
@@ -6355,6 +7347,7 @@ class App:
             'c_price': self.cv_price.get().strip(),
             'c_mail': self.cv_mail.get().strip(),
             'c_hold': self.cv_hold.get().strip(),
+            'w_hold': self.wv_hold.get().strip(),
         })
         # ค่าเก่าของแผง Deep Check ที่เอาออกไปแล้ว — ล้างทิ้ง ไม่ให้ย้อนมาหลอนทีหลัง
         for dead in ('deep', 'dur', 'trade', 'qty'):
