@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.8.17 : ตัดอีโมจิออกจากทุกข้อความที่อ่านมาจากชีท เอาแค่ตัวหนังสือ
+V0.8.18 : ชีทแบบ Master Code — ดึงโค้ดจากแถว CODE มาตั้งชื่อบันเดิลให้เอง
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -2353,6 +2353,30 @@ def parse_bundle_sheet(rows, sheet_name):
     sheet_name = clean_text(sheet_name) or str(sheet_name or '')
     bundles = []
     warns = []
+    # หัวเรื่องบนสุดของชีท เช่น "Master Code 01/10/2026"
+    # ใช้เฉพาะกับชีทแพทเทิร์น CODE เท่านั้น (ดูที่ _bundle_code ด้านล่าง)
+    top_title = ''
+    for r in rows[:4]:
+        stop_row = False
+        for c in (r or []):
+            t = clean_text(c)
+            if t.lower() == 'code':        # ถึงแถวโค้ดแล้ว = หมดเขตหัวเรื่อง เลิกหา
+                stop_row = True
+                break
+            if not t or src_int(t) is not None or len(t) > 60:
+                continue
+            if re.match(r'^\d{4}-\d{2}-\d{2}', t) or re.match(r'^\d{1,2}[.:]\d{2}$', t):
+                continue                   # วันที่/เวลา ไม่ใช่หัวเรื่อง
+            if t.startswith('*'):          # บรรทัดหมายเหตุ ไม่ใช่หัวเรื่อง
+                continue
+            if t.lower() in _SRC_STOP:
+                continue
+            top_title = t
+            break
+        if stop_row or top_title:
+            break
+    if not top_title:                      # ชีทไหนไม่มีหัวเรื่อง ใช้ชื่อชีทแทน
+        top_title = sheet_name
     hdr = [i for i, row in enumerate(rows)
            if any('fditemnum' in str(c).lower() for c in (row or []))]
     for bi, hr in enumerate(hdr):
@@ -2431,9 +2455,36 @@ def parse_bundle_sheet(rows, sheet_name):
                          % (sheet_name, bi + 1))
             continue
 
+        # ช่วงคอลัมน์ของตารางนี้ — ใช้กันไปหยิบของบล็อกที่วางคู่กันอยู่คนละฝั่ง
+        band = [c for c in (kindc, posc, ikc, amtc, rankc, namec, idcol)
+                if c is not None]
+        bl, br = min(band), max(band)
+
         # ชื่อบันเดิล
         name = None
+
+        # (0) ชีทแพทเทิร์น "Master Code": เหนือหัวตารางมีแถวที่เขียนว่า CODE เดี่ยวๆ
+        #     แล้วช่องถัดไปทางขวาคือโค้ด เช่น  CODE | MARS8X3P9V2K
+        #     -> ตั้งชื่อเป็น "<โค้ด> <หัวเรื่องบนสุดของชีท>"
+        #     ยิงเฉพาะชีทที่มีคำว่า CODE เดี่ยวๆ จริงๆ เท่านั้น
+        #     ("CODE START DATE" / "CODE: TALES RUNNER" / "Item Code" ไม่เข้าเงื่อนไข)
+        #     และต้องอยู่ในช่วงคอลัมน์ของตารางนี้ ไม่ใช่ของบล็อกที่วางคู่กันอยู่
+        for r in range(hr - 1, max(hr - 8, 0) - 1, -1):
+            rl = [clean_text(c) for c in (rows[r] or [])]
+            for j in range(bl, min(br + 1, len(rl))):
+                if rl[j].lower() != 'code':
+                    continue
+                for k in range(j + 1, min(br + 2, len(rl))):
+                    if rl[k] and src_int(rl[k]) is None:
+                        name = (rl[k] + ' ' + top_title).strip()
+                        break
+                break
+            if name:
+                break
+
         for r in range(hr - 1, max(hr - 14, 0) - 1, -1):
+            if name:
+                break
             rl = [('' if c is None else str(c)).strip() for c in (rows[r] or [])]
             for j, cell in enumerate(rl):
                 if 'product name' in cell.lower():
@@ -2448,9 +2499,6 @@ def parse_bundle_sheet(rows, sheet_name):
             # หัวข้อของบล็อกอยู่เหนือหัวตาราง "ในช่วงคอลัมน์เดียวกับตาราง"
             # ต้องดูเฉพาะช่วงคอลัมน์นั้น เพราะบางชีทมีตารางรายชื่อคนอยู่ข้างๆ
             # เรียงกันแบบ  ชื่อเรื่อง -> คำอธิบาย -> หัวตาราง  เลยเอา "บรรทัดบนสุด"
-            band = [c for c in (kindc, posc, ikc, amtc, rankc, namec, idcol)
-                    if c is not None]
-            bl, br = min(band), max(band)
             picks = []
             for r in range(hr - 1, max(hr - 7, 0) - 1, -1):
                 rl = [('' if c is None else str(c)).strip() for c in (rows[r] or [])]
