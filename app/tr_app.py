@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.9.1 : WR Master — ใส่ Slug · เลือกวันจากปฏิทินจริง · คลิกเลือก Bundle จริง · ตรวจทุกช่องก่อนกดสร้าง
+V0.9.2 : WR Master — ดรอปดาวน์ ประเภท / ประเภทของ Code เลือกได้จริง (แบบปุ่ม combobox ของเว็บ)
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -1511,12 +1511,19 @@ _JS_CODE_LIB = """
     const all = [...box.querySelectorAll(q)].filter(vis);
     return all[0] || null;
   };
+  // ดรอปดาวน์: เว็บจริงเป็นปุ่ม combobox (Radix/shadcn) ไม่ใช่ <select> — รองรับทั้งสองแบบ
+  const SELQ = '[role=combobox],button[aria-haspopup=listbox],select';
+  const selOk = el => vis(el) && !(el.tagName === 'SELECT' &&
+      (el.getAttribute('aria-hidden') === 'true' || el.getBoundingClientRect().height < 6));
   const pickSel = box => {
     if (!box) return null;
-    if (box.tagName === 'SELECT' && vis(box)) return box;
-    const all = [...box.querySelectorAll('select')].filter(vis);
-    return all[0] || null;
+    if (box.matches && box.matches(SELQ) && selOk(box)) return box;
+    const all = [...box.querySelectorAll(SELQ)].filter(selOk);
+    return all.find(e => e.tagName !== 'SELECT') || all[0] || null;
   };
+  const selText = s => s.tagName === 'SELECT'
+      ? (s.selectedIndex >= 0 ? s.options[s.selectedIndex].text.trim() : '')
+      : (s.textContent || '').replace(/\s+/g, ' ').trim();
   const pickSw = box => {
     if (!box) return null;
     const q = 'input[type=checkbox],[role=checkbox],[role=switch]';
@@ -1561,13 +1568,15 @@ JS_CODE_TEXT = """
 }"""
 
 # เลือกค่าในดรอปดาวน์ (ประเภท / ประเภทของ Code)
+#   <select> ธรรมดา -> ตั้งค่าตรงนี้เลย
+#   ปุ่ม combobox (แบบเว็บจริง) -> ติดป้ายไว้ คืน 'combo' ให้ Python คลิกเปิดแล้วเลือกเอง
 JS_CODE_SELECT = """
 ([lbl, side, act, val]) => {
 """ + _JS_CODE_LIB + """
   const s = findBy(lbl, side, pickSel);
   if (!s) return 'ไม่เจอดรอปดาวน์';
-  if (act === 'read')
-    return 'ok|' + (s.selectedIndex >= 0 ? s.options[s.selectedIndex].text.trim() : '');
+  if (act === 'read') return 'ok|' + selText(s);
+  if (s.tagName !== 'SELECT') { mark(s, 'data-trw-sel'); return 'combo'; }
   const opts = [...s.options];
   const low = String(val).toLowerCase();
   let i = opts.findIndex(o => o.text.trim().toLowerCase() === low);
@@ -1579,6 +1588,27 @@ JS_CODE_SELECT = """
   s.dispatchEvent(new Event('input', {bubbles: true}));
   s.dispatchEvent(new Event('change', {bubbles: true}));
   return 'ok';
+}"""
+
+# รายการตัวเลือกที่เด้งขึ้นมาหลังกดปุ่ม combobox -> หาตัวที่ชื่อตรง แล้วติดป้ายให้คลิก
+#   ตรงเป๊ะก่อน > ขึ้นต้นด้วย > มีคำนี้อยู่  (ไม่สนตัวพิมพ์เล็ก/ใหญ่)
+JS_CODE_OPTION = """
+(val) => {
+  const vis = el => { if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const opts = [...document.querySelectorAll('[role=option]')].filter(vis);
+  if (!opts.length) return 'none';
+  const t = o => (o.textContent || '').replace(/\\s+/g, ' ').trim();
+  const low = String(val).toLowerCase();
+  let o = opts.find(x => t(x).toLowerCase() === low) ||
+          opts.find(x => t(x).toLowerCase().indexOf(low) === 0) ||
+          opts.find(x => t(x).toLowerCase().indexOf(low) >= 0);
+  if (!o) return 'ไม่มีตัวเลือกนี้ (มี: ' + opts.map(t).join(', ') + ')';
+  document.querySelectorAll('[data-trw-opt]').forEach(e => e.removeAttribute('data-trw-opt'));
+  o.setAttribute('data-trw-opt', '1');
+  return 'ok|' + t(o);
 }"""
 
 # สวิตช์ของหน้านี้ — แยกฝั่งได้ และอ่าน/กดแยกกัน (รอ React วาดใหม่ฝั่ง Python)
@@ -5144,20 +5174,57 @@ class App:
         return r.split('|', 1)[1] if r.startswith('ok|') else None
 
     async def _w_select(self, page, label, side, value, what=''):
-        cur = str(await page.evaluate(JS_CODE_SELECT, [label, side, 'read', '']))
-        if cur.startswith('ok|') and value.lower() in cur.split('|', 1)[1].lower():
-            self.log('   · %s = %s  (เป็นค่านี้อยู่แล้ว)'
-                     % (what or label, cur.split('|', 1)[1]), 'INFO')
+        """เลือกค่าในดรอปดาวน์ตามชื่อตัวเลือก (ALL / WINNER / Fix Codes / Server Generate ...)
+        รองรับทั้ง <select> และปุ่ม combobox ที่กดแล้วเด้งรายการ — เลือกแล้วอ่านกลับทุกครั้ง"""
+        what = what or label
+        low = str(value).lower()
+
+        async def cur():
+            r = str(await page.evaluate(JS_CODE_SELECT, [label, side, 'read', '']))
+            return r.split('|', 1)[1] if r.startswith('ok|') else None
+
+        now = await cur()
+        if now is None:
+            self.log('   ! เลือก “%s” เป็น %s ไม่ได้ (ไม่เจอดรอปดาวน์)' % (what, value), 'WARN')
+            return False
+        if now.lower().startswith(low):
+            self.log('   · %s = %s  (เป็นค่านี้อยู่แล้ว)' % (what, now), 'INFO')
             return True
-        r = str(await page.evaluate(JS_CODE_SELECT, [label, side, 'set', value]))
-        if r == 'ok':
-            await page.wait_for_timeout(150)
-            cur = str(await page.evaluate(JS_CODE_SELECT, [label, side, 'read', '']))
-            if cur.startswith('ok|') and value.lower() in cur.split('|', 1)[1].lower():
-                self.log('   · %s = %s' % (what or label, cur.split('|', 1)[1]), 'INFO')
+        why = ''
+        for _ in range(2):
+            r = str(await page.evaluate(JS_CODE_SELECT, [label, side, 'set', value]))
+            if r == 'combo':
+                try:
+                    await page.locator('[data-trw-sel="1"]').first.click(timeout=4000)
+                except Exception:
+                    why = 'กดเปิดดรอปดาวน์ไม่ได้'
+                    continue
+                r = 'none'
+                for _ in range(10):
+                    await page.wait_for_timeout(150)
+                    r = str(await page.evaluate(JS_CODE_OPTION, str(value)))
+                    if r != 'none':
+                        break
+                if not r.startswith('ok'):
+                    why = 'รายการไม่เด้ง' if r == 'none' else r
+                    await page.keyboard.press('Escape')
+                    continue
+                try:
+                    await page.locator('[data-trw-opt="1"]').first.click(timeout=4000)
+                except Exception:
+                    why = 'คลิกตัวเลือกไม่ได้'
+                    await page.keyboard.press('Escape')
+                    continue
+            elif r != 'ok':
+                why = r
+                break
+            await page.wait_for_timeout(200)
+            now = await cur()
+            if (now or '').lower().startswith(low):
+                self.log('   · %s = %s  (เลือกให้แล้ว)' % (what, now), 'INFO')
                 return True
-            r = 'เลือกแล้วแต่ค่าไม่เปลี่ยน'
-        self.log('   ! เลือก “%s” เป็น %s ไม่ได้ (%s)' % (what or label, value, r), 'WARN')
+            why = 'เลือกแล้วแต่ช่องยังเป็น “%s”' % (now or '')
+        self.log('   ! เลือก “%s” เป็น %s ไม่ได้ (%s)' % (what, value, why), 'WARN')
         return False
 
     async def _w_switch(self, page, label, side, want, what=''):
