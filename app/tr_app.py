@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.9.0 : แท็บใหม่ WR Master — สร้าง Item Code จากชีทให้อัตโนมัติ
+V0.9.1 : WR Master — ใส่ Slug · เลือกวันจากปฏิทินจริง · คลิกเลือก Bundle จริง · ตรวจทุกช่องก่อนกดสร้าง
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -128,6 +128,7 @@ SEL_CODE = {
     # ฝั่งซ้าย
     'name_th':   'ชื่อ Item Code (ไทย)',
     'name_en':   'ชื่อ Item Code (อังกฤษ)',
+    'slug':      'Slug',
     'kind':      'ประเภท',
     'kind_val':  'ALL',
     'per_user':  'จำนวนการใช้งานต่อ 1 User',
@@ -141,7 +142,7 @@ SEL_CODE = {
     'rw_th':     'ชื่อรางวัล (ไทย)',
     'rw_en':     'ชื่อรางวัล (อังกฤษ)',
     'rw_sw':     'จำกัดจำนวน Code',
-    'rw_max':    'จำนวนซอง',
+    'rw_max':    'จำนวนรวม',
     'rw_left':   'จำนวนคงเหลือ',
     'code_type': 'ประเภทของ Code',
     'code_fix':  'Fix Codes',
@@ -1460,6 +1461,15 @@ _JS_CODE_LIB = """
     return side === 'right' ? inside : !inside;
   }
   // หาช่องกรอก/ปุ่มที่อยู่ "ใต้ป้าย" ที่ระบุ และอยู่ฝั่งที่ต้องการ
+  // ห้ามไต่ขึ้นไปเกินกล่องของช่องนั้นเอง — เคยพลาด: ป้าย "เวลาเริ่มใช้งาน" เป็นปุ่มปฏิทิน
+  // ไม่ใช่ช่องพิมพ์ แล้วโค้ดไต่ขึ้นไปเจอช่อง "จำนวนการใช้งานต่อ 1 User" แทน -> ช่องนั้นโดนล้าง
+  const CTRL = 'input:not([type=hidden]),textarea,select,button,[role=combobox],' +
+               '[role=switch],[role=checkbox]';
+  const ctrlOut = (box, own) => {
+    if (!box) return false;
+    if (box.matches && box.matches(CTRL) && !own.contains(box)) return true;
+    return [...box.querySelectorAll(CTRL)].some(c => !own.contains(c));
+  };
   function findBy(lbl, side, pick) {
     const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
     let node;
@@ -1472,17 +1482,24 @@ _JS_CODE_LIB = """
         const g = pick(document.getElementById(own.getAttribute('for')));
         if (g) return g;
       }
-      let el = own;
-      for (let up = 0; up < 4 && el; up++) {
+      let el = own, done = false;
+      for (let up = 0; up < 4 && el && !done; up++) {
         let sib = el.nextElementSibling;
         for (let k = 0; k < 3 && sib; k++) {
           const g = pick(sib);
           if (g && inSide(g, side)) return g;
+          if (ctrlOut(sib, own)) { done = true; break; }   // ช่องของป้ายนี้ไม่ใช่ชนิดที่หา
           sib = sib.nextElementSibling;
         }
-        const g2 = pick(el.parentElement);
-        if (g2 && inSide(g2, side)) return g2;
-        el = el.parentElement;
+        if (done) break;
+        const par = el.parentElement;
+        if (!par || par === document.body) break;
+        if (ctrlOut(par, own)) {                 // ถึงกล่องของช่องนี้แล้ว หยุดตรงนี้
+          const g2 = pick(par);
+          if (g2 && inSide(g2, side)) return g2;
+          break;
+        }
+        el = par;
       }
     }
     return null;
@@ -1507,6 +1524,20 @@ _JS_CODE_LIB = """
     const all = [...box.querySelectorAll(q)];
     return all.filter(vis)[0] || null;
   };
+  // ปุ่มเปิดปฏิทิน (ช่อง "เลือกวันและเวลา")
+  const pickTrig = box => {
+    if (!box) return null;
+    const q = 'button,[role=button],[role=combobox],[aria-haspopup],' +
+              'input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file])';
+    if (box.matches && box.matches(q) && vis(box)) return box;
+    return [...box.querySelectorAll(q)].filter(vis)[0] || null;
+  };
+  // ติดป้าย data-trw ให้ตัวที่เจอ เพื่อให้ Playwright คลิก/พิมพ์ด้วยเมาส์+คีย์บอร์ดจริง
+  function mark(el, key) {
+    document.querySelectorAll('[' + key + ']').forEach(e => e.removeAttribute(key));
+    if (el) { el.setAttribute(key, '1'); el.scrollIntoView({block: 'center'}); }
+    return el;
+  }
   function setVal(el, val) {
     el.scrollIntoView({block: 'center'});
     const proto = el.tagName === 'TEXTAREA'
@@ -1562,53 +1593,275 @@ JS_CODE_SWITCH = """
   return 'ok';
 }"""
 
+# ติดป้ายให้ช่องใต้ป้ายชื่อ แล้วให้ Playwright พิมพ์/คลิกเอง (เหมือนคนทำ)
+#   kind = 'text' ช่องพิมพ์ · 'trig' ปุ่มเปิดปฏิทิน
+JS_CODE_MARK = r"""
+([lbl, side, kind]) => {
+""" + _JS_CODE_LIB + r"""
+  const el = findBy(lbl, side, kind === 'trig' ? pickTrig : pickText);
+  if (!el) return 'ไม่เจอช่อง';
+  mark(el, 'data-trw');
+  const shown = (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
+      ? String(el.value || '') : (el.textContent || '').replace(/\s+/g, ' ').trim();
+  return 'ok|' + el.tagName + '|' + (el.getAttribute('type') || '') + '|' + shown;
+}"""
+
+# ปฏิทินเลือกวัน-เวลา (ป๊อปอัปที่เด้งหลังกดช่อง "เลือกวันและเวลา")
+#   หน้าตาในเว็บจริง: [<] [เดือน v] [ปี v] [>] / ตารางวัน Su..Sa / [ชม v] : [นาที] : [วินาที]
+#   ไม่ยึดตำแหน่ง — หาจากโครงสร้าง (ตารางวันที่ที่มีเลข 1..31) แล้วค่อยหาของรอบๆ
+JS_CODE_CAL = r"""
+([act, a, b, c]) => {
+  const vis = el => { if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const txt = e => (e.textContent || '').replace(/\s+/g, ' ').trim();
+  const MONTHS = [
+    ['jan', 'january', 'มกราคม', 'ม.ค.'], ['feb', 'february', 'กุมภาพันธ์', 'ก.พ.'],
+    ['mar', 'march', 'มีนาคม', 'มี.ค.'], ['apr', 'april', 'เมษายน', 'เม.ย.'],
+    ['may', 'may', 'พฤษภาคม', 'พ.ค.'], ['jun', 'june', 'มิถุนายน', 'มิ.ย.'],
+    ['jul', 'july', 'กรกฎาคม', 'ก.ค.'], ['aug', 'august', 'สิงหาคม', 'ส.ค.'],
+    ['sep', 'september', 'กันยายน', 'ก.ย.'], ['oct', 'october', 'ตุลาคม', 'ต.ค.'],
+    ['nov', 'november', 'พฤศจิกายน', 'พ.ย.'], ['dec', 'december', 'ธันวาคม', 'ธ.ค.']];
+  const monthOf = t => {
+    t = String(t || '').toLowerCase().trim();
+    if (!t) return -1;
+    for (let i = 0; i < 12; i++)
+      for (const al of MONTHS[i])
+        if (t === al || (al.length >= 3 && /^[a-z]/.test(al) && t.indexOf(al) === 0)) return i;
+    return -1;
+  };
+  const yearOf = t => { const m = String(t || '').trim().match(/^(\d{4})$/);
+    if (!m) return 0; const y = parseInt(m[1], 10); return y > 2400 ? y - 543 : y; };
+  const cellsOf = gr => {
+    let cells = [...gr.querySelectorAll('button')].filter(vis)
+        .filter(e => /^\d{1,2}$/.test(txt(e)));
+    if (cells.length < 20)
+      cells = [...gr.querySelectorAll('[role=gridcell],td')].filter(vis)
+          .filter(e => /^\d{1,2}$/.test(txt(e)));
+    return cells;
+  };
+  // ตารางวันที่ที่เปิดอยู่ (ตัวท้ายสุดของหน้า = ตัวที่เพิ่งเด้ง)
+  function grid() {
+    const gs = [...document.querySelectorAll('[role=grid],table')].filter(vis);
+    for (let i = gs.length - 1; i >= 0; i--) if (cellsOf(gs[i]).length >= 20) return gs[i];
+    return null;
+  }
+  // กล่องป๊อปอัปทั้งก้อน = ไต่จากตารางขึ้นไปจนเจอกล่องลอย (fixed/absolute) หรือ dialog
+  function root() {
+    const gr = grid();
+    if (!gr) return null;
+    let c = gr, firstCtl = null;
+    for (let i = 0; i < 12 && c.parentElement && c.parentElement !== document.body; i++) {
+      c = c.parentElement;
+      const st = getComputedStyle(c).position;
+      if (c.matches('[role=dialog],[data-radix-popper-content-wrapper],' +
+                    '[data-radix-popover-content],[data-slot=popover-content]') ||
+          st === 'fixed' || st === 'absolute') return c;
+      if (!firstCtl && c.querySelector('select,input:not([type=hidden])')) firstCtl = c;
+    }
+    return firstCtl || gr.parentElement;
+  }
+  const before = (x, gr) => !!(gr.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_PRECEDING);
+  const after = (x, gr) => !!(gr.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING)
+                           && !gr.contains(x);
+  function caption(rt, gr) {
+    let m = -1, y = 0, ms = null, ys = null;
+    for (const s of [...rt.querySelectorAll('select')].filter(vis)) {
+      if (!before(s, gr)) continue;
+      const opts = [...s.options].map(o => o.text.trim());
+      const cur = s.selectedIndex >= 0 ? s.options[s.selectedIndex].text.trim() : '';
+      if (opts.length === 12 && monthOf(opts[0]) === 0) { ms = s; m = monthOf(cur); }
+      else if (opts.length && opts.every(o => /^\d{4}$/.test(o))) { ys = s; y = yearOf(cur); }
+    }
+    if (m < 0 || !y) {
+      const w = document.createTreeWalker(rt, NodeFilter.SHOW_TEXT, null, false);
+      let n;
+      while ((n = w.nextNode())) {
+        const p = n.parentElement;
+        if (!p || p.closest('select,option') || !before(p, gr) || !vis(p)) continue;
+        for (const tok of String(n.textContent || '').trim().split(/[\s,]+/)) {
+          if (m < 0 && monthOf(tok) >= 0) m = monthOf(tok);
+          if (!y && yearOf(tok)) y = yearOf(tok);
+        }
+      }
+    }
+    return {m, y, ms, ys};
+  }
+  const rt = root();
+  const gr = grid();
+  if (!rt || !gr) return 'ไม่เจอปฏิทิน';
+
+  if (act === 'dump') return rt.outerHTML.slice(0, 60000);
+  if (act === 'cap') {
+    const k = caption(rt, gr);
+    document.querySelectorAll('[data-trw-m],[data-trw-y]').forEach(e => {
+      e.removeAttribute('data-trw-m'); e.removeAttribute('data-trw-y'); });
+    if (k.ms) k.ms.setAttribute('data-trw-m', '1');
+    let yv = '';
+    if (k.ys) {
+      k.ys.setAttribute('data-trw-y', '1');
+      const want = [String(a), String(Number(a) + 543)];
+      const o = [...k.ys.options].find(o => want.indexOf(o.text.trim()) >= 0);
+      yv = o ? o.value : '';
+    }
+    return 'ok|' + k.m + '|' + k.y + '|' + (k.ms ? 1 : 0) + '|' + (k.ys ? 1 : 0) + '|' + yv;
+  }
+  if (act === 'nav') {            // a = 'next' | 'prev'
+    const bs = [...rt.querySelectorAll('button')].filter(vis)
+        .filter(x => before(x, gr) && !/\d/.test(txt(x)) && x.getAttribute('role') !== 'combobox');
+    if (!bs.length) return 'ไม่เจอปุ่มเลื่อนเดือน';
+    const lab = x => ((x.getAttribute('aria-label') || '') + ' ' + (x.getAttribute('name') || '') +
+                      ' ' + (x.className && x.className.baseVal == null ? x.className : ''))
+                     .toLowerCase();
+    let hit = a === 'next'
+        ? bs.find(x => /next|ถัด/.test(lab(x))) : bs.find(x => /prev|ก่อน|ย้อน/.test(lab(x)));
+    if (!hit) hit = a === 'next' ? bs[bs.length - 1] : bs[0];
+    if (hit.disabled) return 'ปุ่มเลื่อนเดือนกดไม่ได้';
+    document.querySelectorAll('[data-trw-nav]').forEach(e => e.removeAttribute('data-trw-nav'));
+    hit.setAttribute('data-trw-nav', '1');
+    return 'ok';
+  }
+  if (act === 'day') {            // a = ปี, b = เดือน (0-11), c = วัน
+    const pad = n => (n < 10 ? '0' : '') + n;
+    const iso = a + '-' + pad(b + 1) + '-' + pad(c);
+    let t = gr.querySelector('[data-day="' + iso + '"]');
+    if (t && t.tagName !== 'BUTTON') t = t.querySelector('button') || t;
+    if (!t) {
+      const cells = cellsOf(gr);
+      const isOut = e => {
+        const cls = x => (x && typeof x.className === 'string') ? x.className : '';
+        return /outside/i.test(cls(e) + ' ' + cls(e.parentElement)) ||
+               !!e.closest('[data-outside]');
+      };
+      // วันของเดือนนี้ = เลขที่เรียงต่อกัน 1,2,3,... (วันของเดือนก่อน/ถัดไปจะหลุดลำดับ)
+      const st = cells.findIndex(e => txt(e) === '1' && !isOut(e));
+      if (st < 0) return 'ไม่เจอวันที่ 1 ในปฏิทิน';
+      const run = [cells[st]];
+      for (let i = st + 1; i < cells.length; i++) {
+        if (parseInt(txt(cells[i]), 10) !== run.length + 1 || isOut(cells[i])) break;
+        run.push(cells[i]);
+      }
+      t = run[c - 1];
+      if (t && t.tagName !== 'BUTTON') t = t.querySelector('button') || t;
+    }
+    if (!t) return 'ไม่เจอวันที่ ' + c + ' ในปฏิทิน';
+    if (t.disabled || t.getAttribute('aria-disabled') === 'true')
+      return 'วันที่ ' + c + ' ถูกปิดไว้ กดไม่ได้';
+    document.querySelectorAll('[data-trw-day]').forEach(e => e.removeAttribute('data-trw-day'));
+    t.setAttribute('data-trw-day', '1');
+    return 'ok';
+  }
+  if (act === 'time') {           // ติดป้ายช่องเวลา (ชม./นาที/วินาที) ที่อยู่ใต้ตารางวัน
+    const q = 'select,input:not([type=hidden]):not([type=checkbox]):not([type=radio]),' +
+              '[role=combobox]';
+    const ctl = [...rt.querySelectorAll(q)].filter(vis).filter(x => after(x, gr));
+    document.querySelectorAll('[data-trw-t]').forEach(e => e.removeAttribute('data-trw-t'));
+    ctl.forEach((x, i) => x.setAttribute('data-trw-t', String(i)));
+    return 'ok|' + ctl.map(x => x.tagName === 'SELECT' ? 'select'
+        : x.tagName === 'INPUT' ? ('input:' + (x.getAttribute('type') || 'text')) : 'combo').join(',');
+  }
+  if (act === 'timeval') {
+    const ctl = [...rt.querySelectorAll('[data-trw-t]')];
+    ctl.sort((p, q) => Number(p.getAttribute('data-trw-t')) - Number(q.getAttribute('data-trw-t')));
+    return 'ok|' + ctl.map(x => x.tagName === 'SELECT'
+        ? (x.selectedIndex >= 0 ? x.options[x.selectedIndex].text.trim() : '')
+        : x.tagName === 'INPUT' ? String(x.value || '') : txt(x)).join('|');
+  }
+  if (act === 'optval') {         // a = ลำดับช่อง, b = ตัวเลขที่อยากได้ -> value ของ option
+    const s = rt.querySelector('[data-trw-t="' + a + '"]');
+    if (!s || s.tagName !== 'SELECT') return 'ไม่ใช่ดรอปดาวน์';
+    const o = [...s.options].find(o => parseInt(o.text.trim(), 10) === Number(b));
+    return o ? 'ok|' + o.value : 'ไม่มีตัวเลือก ' + b;
+  }
+  if (act === 'okbtn') {          // ปุ่มยืนยันในปฏิทิน (บางเว็บมี)
+    const words = ['ตกลง', 'ok', 'apply', 'ยืนยัน', 'done', 'เสร็จ', 'confirm'];
+    const bt = [...rt.querySelectorAll('button')].filter(vis)
+        .find(x => words.indexOf(txt(x).toLowerCase()) >= 0);
+    if (!bt) return 'none';
+    document.querySelectorAll('[data-trw-ok]').forEach(e => e.removeAttribute('data-trw-ok'));
+    bt.setAttribute('data-trw-ok', '1');
+    return 'ok';
+  }
+  return 'ไม่รู้จักคำสั่ง';
+}"""
+
 # ปุ่ม "เลือก bundle" / ช่องค้นหา / แถวผลลัพธ์ในป๊อปอัป
-JS_CODE_BUNDLE = """
+#   เว็บจริง: พิมพ์เลขแล้วขึ้น "กำลังโหลด..." ก่อน แล้วค่อยมีแถว "ชื่อ...   ID: 4226"
+#   ต้องคลิก "ตัวแถว" จริงๆ (เคยพลาดไปคลิกกรอบนอก -> ไม่ได้เลือก แต่ log บอกว่าเลือกแล้ว)
+#   เลือกสำเร็จหน้าเว็บจะขึ้น "#4226 — ชื่อ bundle  [เปลี่ยน]"
+JS_CODE_BUNDLE = r"""
 ([act, val]) => {
-""" + _JS_CODE_LIB + """
+""" + _JS_CODE_LIB + r"""
+  const txt = e => (e.textContent || '').replace(/\s+/g, ' ').trim();
   if (act === 'open') {
     const btns = [...document.querySelectorAll('button,[role=button],a')].filter(vis);
     const hit = btns.find(b => {
-      const t = (b.textContent || '').trim();
+      const t = txt(b);
       return t === 'เลือก bundle' || t === 'เปลี่ยน' || t.indexOf('เลือก bundle') === 0;
     });
     if (!hit) return 'ไม่เจอปุ่มเลือก bundle';
-    hit.click();
+    mark(hit, 'data-trw-b');
     return 'ok';
   }
-  if (act === 'search') {
-    const ins = [...document.querySelectorAll('input[type=text],input:not([type])')]
+  const searchBox = () => {
+    const ins = [...document.querySelectorAll('input[type=text],input[type=search],input:not([type])')]
         .filter(vis);
-    const box = ins.find(i => {
-      const p = (i.getAttribute('placeholder') || '');
-      return p.indexOf('ค้นหา') >= 0 || p.toLowerCase().indexOf('search') >= 0;
-    });
+    return ins.find(i => {
+      const p = (i.getAttribute('placeholder') || '').toLowerCase();
+      return p.indexOf('ค้นหา') >= 0 || p.indexOf('search') >= 0;
+    }) || (ins.indexOf(document.activeElement) >= 0 ? document.activeElement : null);
+  };
+  if (act === 'search') {
+    const box = searchBox();
     if (!box) return 'ไม่เจอช่องค้นหา bundle';
-    setVal(box, val);
+    mark(box, 'data-trw-b');
     return 'ok';
+  }
+  if (act === 'loading') {
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+    let n;
+    while ((n = w.nextNode()))
+      if (/กำลังโหลด|loading/i.test(n.textContent || '') && vis(n.parentElement)) return '1';
+    return '0';
   }
   if (act === 'pick') {
-    // แถวที่ "เลข id ตรงเป๊ะ" เท่านั้น กันไปคลิกตัวที่เลขคล้ายกัน
+    // หาข้อความที่มีเลข id ตรงเป๊ะ (เช่น "ID: 4226") แล้วไต่ขึ้นไปหา "ตัวแถวที่คลิกได้"
     const want = String(val);
-    const all = [...document.querySelectorAll('[data-id],li,tr,div')].filter(vis);
-    for (const el of all) {
-      if (el.querySelector && el.querySelector('[data-id],li,tr')) continue;
-      const t = (el.textContent || '').trim();
-      if (!t || t.length > 160) continue;
-      const byAttr = el.getAttribute && el.getAttribute('data-id') === want;
-      const byText = new RegExp('(^|[^0-9])(ID|Id|id)?\\\\s*:?\\\\s*#?' +
-                                want + '([^0-9]|$)').test(t);
-      if (byAttr || byText) { el.click(); return 'ok|' + t.slice(0, 90); }
+    const re = new RegExp('(^|[^0-9])(ID|Id|id)?\\s*:?\\s*#?' + want + '([^0-9]|$)');
+    const sb = searchBox();
+    const CLICK = 'button,[role=option],[role=menuitem],[cmdk-item],li,a,tr,[data-id],' +
+                  '[tabindex]:not([tabindex="-1"])';
+    const cand = [];
+    for (const el of [...document.querySelectorAll('body *')].filter(vis)) {
+      if (el.children.length && [...el.children].some(ch => re.test(txt(ch)))) continue;
+      const t = txt(el);
+      if (!t || t.length > 200 || !re.test(t)) continue;
+      if (/^#/.test(t)) continue;                        // ตัวที่เลือกไปแล้ว ไม่ใช่แถวในรายการ
+      let row = el.closest(CLICK);
+      if (!row) {                                        // ไม่มีแท็กคลิกได้ -> ดูเคอร์เซอร์รูปมือ
+        let c = el;
+        while (c && c !== document.body && getComputedStyle(c).cursor !== 'pointer') c = c.parentElement;
+        row = (c && c !== document.body) ? c : null;
+        while (row && row.parentElement && getComputedStyle(row.parentElement).cursor === 'pointer'
+               && !row.parentElement.contains(sb)) row = row.parentElement;
+      }
+      if (!row || (sb && row.contains(sb)) || /เลือก bundle|เปลี่ยน/.test(txt(row))) continue;
+      cand.push(row);
     }
-    return 'ไม่เจอ bundle เลข ' + want + ' ในรายการ';
+    if (!cand.length) return 'ไม่เจอ bundle เลข ' + want + ' ในรายการ';
+    const row = cand[0];
+    mark(row, 'data-trw-b');
+    return 'ok|' + txt(row).slice(0, 90);
   }
   if (act === 'read') {
     const rw = rewardBox() || document.body;
     const w = document.createTreeWalker(rw, NodeFilter.SHOW_TEXT, null, false);
     let node;
     while ((node = w.nextNode())) {
-      const t = (node.textContent || '').trim();
-      if (t.indexOf('#') === 0 && t.length > 1) return 'ok|' + t.slice(0, 90);
+      const p = node.parentElement;
+      const t = p ? txt(p) : '';
+      if (t.indexOf('#') === 0 && t.length > 1 && vis(p)) return 'ok|' + t.slice(0, 90);
     }
     return 'ok|';
   }
@@ -2862,6 +3115,65 @@ def wr_name_date(ymd):
     if not ymd:
         return ''
     return '%d %s %d' % (ymd[2], _WR_MONTH[ymd[1] - 1], ymd[0])
+
+
+def wr_parse_dt(s):
+    """'2026-10-01 13:00:00' -> (2026, 10, 1, 13, 0, 0) · อ่านไม่ออก -> None"""
+    m = re.match(r'\s*(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?',
+                 str(s or ''))
+    if not m:
+        return None
+    return tuple(int(x or 0) for x in m.groups())
+
+
+def wr_slug(code, start):
+    """Slug ที่ทีมใช้ = code-<วันที่>-<โค้ด> ตัวพิมพ์เล็กทั้งหมด เช่น code-1-mars8x3p9v2k
+    วันที่ = เลขวันของเวลาเริ่มใช้งาน (ไม่มีเลข 0 นำหน้า)"""
+    dt = wr_parse_dt(start)
+    code = clean_text(code).strip()
+    if not dt or not code:
+        return ''
+    return ('code-%d-%s' % (dt[2], code)).lower()
+
+
+_WR_MONTH_TH = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+                'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม']
+_WR_MONTH_TH_S = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+                  'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
+
+
+def wr_dt_shown_ok(text, dt):
+    """ช่องวันที่บนเว็บ "แสดง" วัน-เวลาตรงกับที่อยากได้ไหม — ไม่ยึดรูปแบบ
+    (01/10/2026 13:00:00 · 1 Oct 2026 13:00 · 2026-10-01T13:00 · ปี พ.ศ. ก็ได้)"""
+    t = str(text or '').strip()
+    if not t or not dt or 'เลือกวัน' in t:
+        return False
+    y, m, d, h, mi = dt[:5]
+    nums = [int(x) for x in re.findall(r'\d+', t)]
+    if d not in nums:
+        return False
+    if not any(n in (y, y + 543) for n in nums):
+        return False
+    low = t.lower()
+    if not (m in nums or _WR_MONTH[m - 1].lower() in low
+            or _WR_MONTH_TH[m - 1] in t or _WR_MONTH_TH_S[m - 1] in t):
+        return False
+    hh = [h]
+    if 'am' in low or 'pm' in low:
+        hh.append(h % 12 or 12)
+    return any(re.search(r'(^|\D)0?%d\s*[:.]\s*%02d(\D|$)' % (x, mi), t) for x in hh)
+
+
+def wr_same(got, want):
+    """ค่าที่อ่านกลับมาจากเว็บ ตรงกับที่ใส่ไหม (ตัวเลขเทียบเป็นเลข · ข้อความตัดช่องว่างหัวท้าย)"""
+    if got is None:
+        return False
+    g_, w_ = str(got).strip().replace('\r\n', '\n'), str(want).strip().replace('\r\n', '\n')
+    if g_ == w_:
+        return True
+    if re.fullmatch(r'-?\d+', g_ or 'x') and re.fullmatch(r'-?\d+', w_ or 'x'):
+        return int(g_) == int(w_)
+    return False
 
 
 def _wr_after(cells, j, want_num=False):
@@ -4793,12 +5105,38 @@ class App:
     # ==================================================================
     #  WR Master — กรอกหน้าสร้าง Item Code
     # ==================================================================
-    async def _w_text(self, page, label, side, value, what=''):
-        r = str(await page.evaluate(JS_CODE_TEXT, [label, side, 'set', str(value)]))
-        if r == 'ok':
-            self.log('   · %s = %s' % (what or label, str(value)[:44]), 'INFO')
-            return True
-        self.log('   ! กรอก “%s” ไม่ได้ (%s)' % (what or label, r), 'WARN')
+    async def _w_text(self, page, label, side, value, what='', quiet=False):
+        """กรอกช่องข้อความด้วยคีย์บอร์ดจริง (Playwright) แล้ว "อ่านกลับ" ทุกครั้ง
+        log จะบอกว่าใส่แล้วก็ต่อเมื่ออ่านกลับมาได้ค่าตรงจริงๆ เท่านั้น"""
+        what = what or label
+        value = str(value)
+        r = str(await page.evaluate(JS_CODE_MARK, [label, side, 'text']))
+        if not r.startswith('ok'):
+            self.log('   ! กรอก “%s” ไม่ได้ (%s)' % (what, r), 'WARN')
+            return False
+        got = None
+        for attempt in range(3):
+            try:
+                loc = page.locator('[data-trw="1"]').first
+                if attempt == 0:
+                    await loc.fill(value, timeout=4000)
+                elif attempt == 1:
+                    await loc.click(timeout=3000)
+                    await loc.press('Control+A')
+                    await loc.press_sequentially(value, delay=15)
+                else:
+                    await page.evaluate(JS_CODE_TEXT, [label, side, 'set', value])
+            except Exception:
+                pass
+            await page.wait_for_timeout(120)
+            got = await self._w_read(page, label, side)
+            if wr_same(got, value):
+                if not quiet:
+                    self.log('   · %s = %s' % (what, value[:44]), 'INFO')
+                return True
+            await page.evaluate(JS_CODE_MARK, [label, side, 'text'])
+        self.log('   ! กรอก “%s” ไม่เข้า — อยากได้ “%s” แต่ในช่องเป็น “%s”'
+                 % (what, value[:44], (got if got is not None else 'อ่านไม่ได้')[:44]), 'WARN')
         return False
 
     async def _w_read(self, page, label, side):
@@ -4813,8 +5151,12 @@ class App:
             return True
         r = str(await page.evaluate(JS_CODE_SELECT, [label, side, 'set', value]))
         if r == 'ok':
-            self.log('   · %s = %s' % (what or label, value), 'INFO')
-            return True
+            await page.wait_for_timeout(150)
+            cur = str(await page.evaluate(JS_CODE_SELECT, [label, side, 'read', '']))
+            if cur.startswith('ok|') and value.lower() in cur.split('|', 1)[1].lower():
+                self.log('   · %s = %s' % (what or label, cur.split('|', 1)[1]), 'INFO')
+                return True
+            r = 'เลือกแล้วแต่ค่าไม่เปลี่ยน'
         self.log('   ! เลือก “%s” เป็น %s ไม่ได้ (%s)' % (what or label, value, r), 'WARN')
         return False
 
@@ -4845,34 +5187,279 @@ class App:
         self.log('   ! ตั้งสวิตช์ “%s” ไม่ได้' % (what or label), 'WARN')
         return False
 
+    # ---------------- ปฏิทินเลือกวัน-เวลา ----------------
+    async def _w_cal(self, page, act, a=0, b=0, c=0):
+        try:
+            return str(await page.evaluate(JS_CODE_CAL, [act, a, b, c]))
+        except Exception as e:
+            return 'error: %s' % e
+
+    async def _w_cal_dump(self, page, what):
+        """ปฏิทินหน้าตาไม่เหมือนที่คาด -> เก็บโครงหน้าไว้ให้ดูทีหลัง (ไม่มีข้อมูลลับ)"""
+        try:
+            html = await self._w_cal(page, 'dump')
+            if not html or html.startswith(('ไม่เจอ', 'error')):
+                return
+            path = os.path.join(DATA_DIR, 'wr_debug_calendar.html')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('<!-- %s -->\n' % what + html)
+            self.log('     (เก็บหน้าตาปฏิทินไว้ที่ %s — ส่งไฟล์นี้มาให้ดูได้)' % path, 'INFO')
+        except Exception:
+            pass
+
+    async def _w_cal_close(self, page):
+        if (await self._w_cal(page, 'okbtn')) == 'ok':
+            try:
+                await page.locator('[data-trw-ok="1"]').first.click(timeout=3000)
+            except Exception:
+                pass
+        for _ in range(3):
+            await page.wait_for_timeout(200)
+            if not (await self._w_cal(page, 'cap')).startswith('ok'):
+                return
+            await page.keyboard.press('Escape')
+
+    async def _w_cal_month(self, page, y, m0):
+        """เลื่อนปฏิทินไปเดือน/ปีที่ต้องการ — ลองดรอปดาวน์ก่อน ไม่ได้ค่อยกดลูกศร"""
+        tried_sel = False
+        for _ in range(40):
+            r = await self._w_cal(page, 'cap', y)
+            if not r.startswith('ok|'):
+                return False
+            p = r.split('|')
+            cm, cy, has_m, has_y, yv = int(p[1]), int(p[2]), p[3] == '1', p[4] == '1', p[5]
+            if cm == m0 and cy == y:
+                return True
+            if not tried_sel and (has_m or has_y):
+                tried_sel = True
+                try:
+                    if has_y and cy != y and yv:
+                        await page.locator('[data-trw-y="1"]').first.select_option(
+                            value=yv, timeout=3000)
+                        await page.wait_for_timeout(200)
+                        await self._w_cal(page, 'cap', y)
+                    if has_m and cm != m0:
+                        await page.locator('[data-trw-m="1"]').first.select_option(
+                            index=m0, timeout=3000)
+                    await page.wait_for_timeout(250)
+                except Exception:
+                    pass
+                continue
+            if cm < 0 or not cy:
+                return False                            # อ่านหัวปฏิทินไม่ออก
+            step = 'next' if (y * 12 + m0) > (cy * 12 + cm) else 'prev'
+            if (await self._w_cal(page, 'nav', step)) != 'ok':
+                return False
+            try:
+                await page.locator('[data-trw-nav="1"]').first.click(timeout=3000)
+            except Exception:
+                return False
+            await page.wait_for_timeout(200)
+        return False
+
+    async def _w_cal_time(self, page, h, mi, se):
+        """ตั้ง ชม. : นาที : วินาที ที่อยู่ใต้ตารางวัน แล้วอ่านกลับ"""
+        r = await self._w_cal(page, 'time')
+        kinds = r.split('|', 1)[1].split(',') if r.startswith('ok|') and r != 'ok|' else []
+        if not kinds:
+            return 'ไม่เจอช่องเวลาในปฏิทิน'
+        if kinds[0] == 'input:time':
+            try:
+                await page.locator('[data-trw-t="0"]').first.fill(
+                    '%02d:%02d:%02d' % (h, mi, se), timeout=3000)
+            except Exception:
+                pass
+            want = ['%02d:%02d' % (h, mi)]
+            got = (await self._w_cal(page, 'timeval')).split('|')[1:]
+            return '' if got and got[0][:5] == want[0] else 'ตั้งเวลาไม่เข้า (%s)' % got
+        want = [h, mi, se][:len(kinds)]
+        for i, num in enumerate(want):
+            await self._w_cal(page, 'time')             # ติดป้ายใหม่ เผื่อเว็บวาดใหม่
+            loc = page.locator('[data-trw-t="%d"]' % i).first
+            k = kinds[i]
+            try:
+                if k == 'select':
+                    o = await self._w_cal(page, 'optval', i, num)
+                    if o.startswith('ok|'):
+                        await loc.select_option(value=o.split('|', 1)[1], timeout=3000)
+                elif k.startswith('input'):
+                    await loc.fill(str(num) if k == 'input:number' else '%02d' % num,
+                                   timeout=3000)
+                    await page.wait_for_timeout(80)
+                    cur = (await self._w_cal(page, 'timeval')).split('|')[1:]
+                    if len(cur) <= i or not wr_same(cur[i], num):
+                        await loc.click(timeout=3000)
+                        await loc.press('Control+A')
+                        await loc.press_sequentially('%02d' % num, delay=20)
+                else:
+                    await loc.click(timeout=3000)
+                    await page.wait_for_timeout(250)
+                    await page.locator('[role=option]').filter(
+                        has_text=re.compile(r'^\s*0?%d\s*$' % num)).first.click(timeout=3000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(120)
+        got = (await self._w_cal(page, 'timeval')).split('|')[1:]
+        if len(got) >= len(want) and all(wr_same(got[i], want[i]) for i in range(len(want))):
+            return ''
+        return 'ตั้งเวลาไม่เข้า (อยากได้ %s แต่เป็น %s)' % (
+            ':'.join('%02d' % x for x in want), ':'.join(got))
+
+    async def _w_date(self, page, label, when, what=''):
+        """เวลาเริ่ม/สิ้นสุด — ช่องนี้พิมพ์ไม่ได้ ต้องกดแล้วเลือกจากปฏิทิน:
+        เดือน/ปี -> คลิกวัน -> ชม./นาที/วินาที -> ปิด แล้วอ่านที่ช่องแสดงว่าตรงจริงไหม"""
+        what = what or label
+        dt = wr_parse_dt(when)
+        if not dt:
+            self.log('   ! %s: ค่าในชีทอ่านไม่ออก (%s) — ต้องเลือกเองบนเว็บ' % (what, when), 'WARN')
+            return False
+        y, m, d, h, mi, se = dt
+        r = str(await page.evaluate(JS_CODE_MARK, [label, 'left', 'trig']))
+        if not r.startswith('ok'):
+            self.log('   ! ไม่เจอช่อง “%s” (%s)' % (what, r), 'WARN')
+            return False
+        if wr_dt_shown_ok(r.split('|', 3)[3], dt):
+            self.log('   · %s = %s  (เป็นค่านี้อยู่แล้ว)' % (what, when), 'INFO')
+            return True
+
+        async def open_cal():
+            await page.evaluate(JS_CODE_MARK, [label, 'left', 'trig'])
+            try:
+                await page.locator('[data-trw="1"]').first.click(timeout=5000)
+            except Exception:
+                return False
+            for _ in range(15):
+                await page.wait_for_timeout(200)
+                if (await self._w_cal(page, 'cap', y)).startswith('ok'):
+                    return True
+            return False
+
+        async def fail(why):
+            self.log('   ! %s: %s — ต้องเลือกเองบนเว็บ' % (what, why), 'WARN')
+            await self._w_cal_dump(page, '%s | %s' % (what, why))
+            await self._w_cal_close(page)
+            return False
+
+        if not await open_cal():
+            self.log('   ! %s: กดช่องแล้วไม่เจอปฏิทินเด้งขึ้นมา — ต้องเลือกเองบนเว็บ' % what,
+                     'WARN')
+            return False
+        if not await self._w_cal_month(page, y, m - 1):
+            return await fail('เลื่อนปฏิทินไป %s %d ไม่ได้' % (_WR_MONTH[m - 1], y))
+        r = await self._w_cal(page, 'day', y, m - 1, d)
+        if r != 'ok':
+            return await fail(r)
+        try:
+            await page.locator('[data-trw-day="1"]').first.click(timeout=4000)
+        except Exception:
+            return await fail('คลิกวันที่ %d ไม่ได้' % d)
+        await page.wait_for_timeout(250)
+        if not (await self._w_cal(page, 'cap', y)).startswith('ok'):
+            if not await open_cal():                   # บางแบบเลือกวันแล้วปิดเอง -> เปิดใหม่ตั้งเวลา
+                return await fail('เลือกวันแล้วปฏิทินปิด เปิดใหม่ไม่ได้')
+        why = await self._w_cal_time(page, h, mi, se)
+        if why:
+            return await fail(why)
+        await self._w_cal_close(page)
+        await page.wait_for_timeout(200)
+        r = str(await page.evaluate(JS_CODE_MARK, [label, 'left', 'trig']))
+        shown = r.split('|', 3)[3] if r.startswith('ok') else ''
+        if wr_dt_shown_ok(shown, dt):
+            self.log('   · %s = %s  (ช่องบนเว็บขึ้น “%s”)' % (what, when, shown[:40]), 'INFO')
+            return True
+        self.log('   ! %s: เลือกแล้วแต่ช่องบนเว็บขึ้น “%s” ไม่ตรงกับ %s — ต้องเช็กเองบนเว็บ'
+                 % (what, shown[:40] or 'ว่าง', when), 'WARN')
+        return False
+
+    async def _w_date_ok(self, page, label, when):
+        r = str(await page.evaluate(JS_CODE_MARK, [label, 'left', 'trig']))
+        shown = r.split('|', 3)[3] if r.startswith('ok') else ''
+        return wr_dt_shown_ok(shown, wr_parse_dt(when)), shown
+
+    # ---------------- Bundle ----------------
+    async def _w_bundle_now(self, page):
+        r = str(await page.evaluate(JS_CODE_BUNDLE, ['read', '']))
+        return r.split('|', 1)[1] if r.startswith('ok|') else ''
+
     async def _w_bundle(self, page, bid):
-        """เลือก Bundle จากเลขในชีท — เปิดป๊อปอัป ค้นด้วยเลข แล้วคลิกแถวที่ตรงเป๊ะ"""
+        """เลือก Bundle จากเลขในชีท — เปิดป๊อปอัป พิมพ์เลข รอโหลด คลิกแถวที่ ID ตรงเป๊ะ
+        แล้วต้องเห็น “#เลข — ชื่อ” บนหน้าเว็บจริงๆ ถึงจะนับว่าเลือกแล้ว"""
         bid = str(bid or '').strip()
         if not bid:
             self.log('   ! ไม่มีเลข Bundle ในชีท — ต้องเลือกเองบนเว็บ', 'WARN')
             return False
+        chosen = lambda t: bool(re.match(r'#\s*%s(\D|$)' % re.escape(bid), t or ''))
+        now = await self._w_bundle_now(page)
+        if chosen(now):
+            self.log('   · Bundle = %s  (เลือกไว้อยู่แล้ว)' % now, 'INFO')
+            return True
         r = str(await page.evaluate(JS_CODE_BUNDLE, ['open', '']))
         if r != 'ok':
             self.log('   ! ' + r, 'WARN')
             return False
+        try:
+            await page.locator('[data-trw-b="1"]').first.click(timeout=5000)
+        except Exception:
+            self.log('   ! กดปุ่ม “เลือก bundle” ไม่ได้', 'WARN')
+            return False
         await page.wait_for_timeout(500)
-        r = str(await page.evaluate(JS_CODE_BUNDLE, ['search', bid]))
+        r = str(await page.evaluate(JS_CODE_BUNDLE, ['search', '']))
         if r != 'ok':
             self.log('   ! ' + r, 'WARN')
             return False
-        for _ in range(10):                       # รอรายการโหลด แล้วค่อยคลิก
-            await page.wait_for_timeout(400)
+        box = page.locator('[data-trw-b="1"]').first
+        try:
+            await box.fill(bid, timeout=4000)
+        except Exception:
+            try:
+                await box.click(timeout=3000)
+                await box.press_sequentially(bid, delay=20)
+            except Exception:
+                pass
+        r = ''
+        for _ in range(30):                     # รอ "กำลังโหลด..." จนแถวผลลัพธ์โผล่ (~9 วิ)
+            await page.wait_for_timeout(300)
             r = str(await page.evaluate(JS_CODE_BUNDLE, ['pick', bid]))
             if r.startswith('ok'):
-                await page.wait_for_timeout(400)
-                self.log('   · Bundle = %s' % (r.split('|', 1)[1] if '|' in r else bid),
-                         'INFO')
+                break
+        if not r.startswith('ok'):
+            if str(await page.evaluate(JS_CODE_BUNDLE, ['loading', ''])) == '1':
+                r = 'รายการ bundle ยังโหลดไม่เสร็จ (เว็บช้า)'
+            self.log('   ! %s — ต้องเลือกเองบนเว็บ' % (r or 'รายการ bundle ไม่โหลด'), 'WARN')
+            await page.keyboard.press('Escape')
+            return False
+        try:
+            await page.locator('[data-trw-b="1"]').first.click(timeout=4000)
+        except Exception:
+            pass
+        for _ in range(12):
+            await page.wait_for_timeout(250)
+            now = await self._w_bundle_now(page)
+            if chosen(now):
+                self.log('   · Bundle = %s' % now, 'INFO')
                 return True
-        self.log('   ! %s' % r, 'WARN')
+        # คลิกแล้วไม่ติด -> ลองคีย์บอร์ด (ลูกศรลง + Enter) อีกทาง
+        if str(await page.evaluate(JS_CODE_BUNDLE, ['search', ''])) == 'ok':
+            try:
+                sb = page.locator('[data-trw-b="1"]').first
+                await sb.press('ArrowDown')
+                await sb.press('Enter')
+            except Exception:
+                pass
+            for _ in range(8):
+                await page.wait_for_timeout(250)
+                now = await self._w_bundle_now(page)
+                if chosen(now):
+                    self.log('   · Bundle = %s' % now, 'INFO')
+                    return True
+        self.log('   ! คลิกแถว Bundle %s แล้ว แต่หน้าเว็บยังไม่ขึ้น “#%s — …” '
+                 '— ต้องเลือกเองบนเว็บ' % (bid, bid), 'WARN')
+        await page.keyboard.press('Escape')
         return False
 
     async def _w_one(self, page, d, do, hold):
-        """กรอก Item Code หนึ่งตัวให้ครบทุกช่องตามที่ทีมใช้จริง"""
+        """กรอก Item Code หนึ่งตัวให้ครบทุกช่องตามที่ทีมใช้จริง
+        ทุกช่องอ่านกลับมาเช็กอีกรอบตอนท้าย — ช่องไหนไม่ตรง จะไม่กดสร้างเด็ดขาด"""
         await page.goto(ITEMCODE_CREATE_URL, wait_until='domcontentloaded', timeout=45000)
         await page.wait_for_timeout(2000)
         if any(k in page.url.lower() for k in ('login', 'signin', 'auth')):
@@ -4881,55 +5468,102 @@ class App:
 
         cap = str(d.get('cap') or '').strip()
         limited = bool(cap)
+        per = str(d.get('per_user') or '1')
+        slug = wr_slug(d['code'], d.get('start'))
+        bad = []
+        texts = []            # (ป้าย, ฝั่ง, ค่า, ชื่อที่โชว์) — ไว้อ่านกลับตอนท้าย
+
+        async def T(key, side, val, what):
+            texts.append((SEL_CODE[key], side, str(val), what))
+            if not await self._w_text(page, SEL_CODE[key], side, val, what):
+                bad.append(what)
 
         # ---------- ฝั่งซ้าย ----------
-        await self._w_text(page, SEL_CODE['name_th'], 'left', d['name'], 'ชื่อ Item Code (ไทย)')
-        await self._w_text(page, SEL_CODE['name_en'], 'left', d['name'], 'ชื่อ Item Code (อังกฤษ)')
-        await self._w_select(page, SEL_CODE['kind'], 'left', SEL_CODE['kind_val'], 'ประเภท')
-        await self._w_text(page, SEL_CODE['per_user'], 'left', d.get('per_user', '1'),
-                           'จำนวนการใช้งานต่อ 1 User (ซ้าย)')
-        if d.get('start'):
-            await self._w_text(page, SEL_CODE['start'], 'left', d['start'], 'เวลาเริ่มใช้งาน')
-        if d.get('end'):
-            await self._w_text(page, SEL_CODE['end'], 'left', d['end'], 'เวลาสิ้นสุด')
-        await self._w_switch(page, SEL_CODE['limit_sw'], 'left', limited, 'จำกัดจำนวน (ซ้าย)')
+        await T('name_th', 'left', d['name'], 'ชื่อ Item Code (ไทย)')
+        await T('name_en', 'left', d['name'], 'ชื่อ Item Code (อังกฤษ)')
+        if slug:
+            await T('slug', 'left', slug, 'Slug')
+        else:
+            self.log('   ! ทำ Slug ไม่ได้ (ไม่มีวันที่เริ่ม) — ต้องใส่เองบนเว็บ', 'WARN')
+            bad.append('Slug')
+        if not await self._w_select(page, SEL_CODE['kind'], 'left', SEL_CODE['kind_val'],
+                                    'ประเภท'):
+            bad.append('ประเภท')
+        await T('per_user', 'left', per, 'จำนวนการใช้งานต่อ 1 User (ซ้าย)')
+        for key, what in (('start', 'เวลาเริ่มใช้งาน'), ('end', 'เวลาสิ้นสุด')):
+            if not d.get(key):
+                self.log('   ! ชีทไม่มี%s — ต้องเลือกเองบนเว็บ' % what, 'WARN')
+                bad.append(what)
+            elif not await self._w_date(page, SEL_CODE[key], d[key], what):
+                bad.append(what)
+        if not await self._w_switch(page, SEL_CODE['limit_sw'], 'left', limited,
+                                    'จำกัดจำนวน (ซ้าย)'):
+            bad.append('จำกัดจำนวน (ซ้าย)')
         if limited:
-            await self._w_text(page, SEL_CODE['limit_max'], 'left', cap,
-                               'จำนวนครั้งที่สามารถใช้งานได้')
-            await self._w_text(page, SEL_CODE['limit_left'], 'left', cap,
-                               'จำนวนคงเหลือ (ซ้าย)')
+            await T('limit_max', 'left', cap, 'จำนวนครั้งที่สามารถใช้งานได้')
+            await T('limit_left', 'left', cap, 'จำนวนคงเหลือ (ซ้าย)')
 
         # ---------- ฝั่งขวา (ของรางวัล) ----------
-        await self._w_text(page, SEL_CODE['rw_th'], 'right', d['code'], 'ชื่อรางวัล (ไทย)')
-        await self._w_text(page, SEL_CODE['rw_en'], 'right', d['code'], 'ชื่อรางวัล (อังกฤษ)')
-        await self._w_text(page, SEL_CODE['per_user'], 'right', d.get('per_user', '1'),
-                           'จำนวนการใช้งานต่อ 1 User (ขวา)')
-        await self._w_switch(page, SEL_CODE['rw_sw'], 'right', limited, 'จำกัดจำนวน Code')
+        await T('rw_th', 'right', d['code'], 'ชื่อรางวัล (ไทย)')
+        await T('rw_en', 'right', d['code'], 'ชื่อรางวัล (อังกฤษ)')
+        await T('per_user', 'right', per, 'จำนวนการใช้งานต่อ 1 User (ขวา)')
+        if not await self._w_switch(page, SEL_CODE['rw_sw'], 'right', limited,
+                                    'จำกัดจำนวน Code'):
+            bad.append('จำกัดจำนวน Code')
         if limited:
-            await self._w_text(page, SEL_CODE['rw_max'], 'right', cap, 'จำนวนซอง')
-            await self._w_text(page, SEL_CODE['rw_left'], 'right', cap, 'จำนวนคงเหลือ (ขวา)')
-        await self._w_select(page, SEL_CODE['code_type'], 'right', SEL_CODE['code_fix'],
-                             'ประเภทของ Code')
-        await self._w_text(page, SEL_CODE['code_list'], 'right', d['code'], 'รายการ Code')
-        await self._w_bundle(page, d.get('bundle'))
+            await T('rw_max', 'right', cap, 'จำนวนรวม')
+            await T('rw_left', 'right', cap, 'จำนวนคงเหลือ (ขวา)')
+        if not await self._w_select(page, SEL_CODE['code_type'], 'right', SEL_CODE['code_fix'],
+                                    'ประเภทของ Code'):
+            bad.append('ประเภทของ Code')
+        await T('code_list', 'right', d['code'], 'รายการ Code')
+        if not await self._w_bundle(page, d.get('bundle')):
+            bad.append('Bundle')
 
-        # ---------- ตรวจว่าค่าเข้าไปจริง ----------
-        bad = []
-        for lbl, side, want, what in (
-                (SEL_CODE['name_th'], 'left', d['name'], 'ชื่อ Item Code'),
-                (SEL_CODE['code_list'], 'right', d['code'], 'รายการ Code')):
+        # ---------- อ่านกลับทั้งใบอีกรอบ (กันช่องหนึ่งไปทับอีกช่อง) ----------
+        for lbl, side, want, what in texts:
+            if what in bad:
+                continue
             got = await self._w_read(page, lbl, side)
-            if (got or '').strip() != str(want).strip():
-                bad.append('%s: อยากได้ “%s” แต่ในฟอร์มเป็น “%s”' % (what, want, got))
-        for b in bad:
-            self.log('   ! ' + b, 'WARN')
+            if not wr_same(got, want):
+                self.log('   ! ตรวจรอบสุดท้าย: %s อยากได้ “%s” แต่ในฟอร์มเป็น “%s”'
+                         % (what, want[:40], (got or '')[:40]), 'WARN')
+                bad.append(what)
+        for key, what in (('start', 'เวลาเริ่มใช้งาน'), ('end', 'เวลาสิ้นสุด')):
+            if what in bad or not d.get(key):
+                continue
+            ok, shown = await self._w_date_ok(page, SEL_CODE[key], d[key])
+            if not ok:
+                self.log('   ! ตรวจรอบสุดท้าย: %s ช่องบนเว็บขึ้น “%s”' % (what, shown[:40]),
+                         'WARN')
+                bad.append(what)
+        if 'Bundle' not in bad:
+            now = await self._w_bundle_now(page)
+            if not re.match(r'#\s*%s(\D|$)' % re.escape(str(d.get('bundle'))), now or ''):
+                self.log('   ! ตรวจรอบสุดท้าย: Bundle บนเว็บเป็น “%s”' % (now or 'ยังไม่เลือก'),
+                         'WARN')
+                bad.append('Bundle')
+
+        if bad:
+            miss = ', '.join(dict.fromkeys(bad))
+            if not do:
+                self.log('   ⚠ กรอกไม่ครบ %d ช่อง: %s  (โหมดทดสอบ — ไม่กดสร้าง)'
+                         % (len(dict.fromkeys(bad)), miss), 'WARN')
+                if hold:
+                    await page.wait_for_timeout(hold * 1000)
+                self.add_made_code(d, '', 'โหมดทดสอบ — กรอกไม่ครบ: ' + miss, ok=False)
+            else:
+                self.log('   ✗ ไม่กดสร้าง เพราะกรอกไม่ครบ: %s — แก้แล้วค่อยสั่งใหม่' % miss,
+                         'ERR')
+                self.add_made_code(d, '', 'ไม่ได้สร้าง — กรอกไม่ครบ: ' + miss, ok=False)
+            return False
 
         if not do:
-            self.log('   ✓ กรอกฟอร์มครบแล้ว (โหมดทดสอบ — ไม่กดสร้าง)', 'OK')
+            self.log('   ✓ กรอกครบ ตรวจแล้วทุกช่อง (โหมดทดสอบ — ไม่กดสร้าง)', 'OK')
             if hold:
                 await page.wait_for_timeout(hold * 1000)
             self.add_made_code(d, '', 'กรอกฟอร์มแล้ว (โหมดทดสอบ — ไม่ได้สร้าง)')
-            return not bad
+            return True
 
         # ---------- กดสร้างจริง + ป๊อปอัปยืนยัน ----------
         btn = page.locator('button:has-text("%s")' % SEL_CODE['submit']).last
