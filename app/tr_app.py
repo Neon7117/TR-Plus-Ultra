@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.9.4 : WR Master — ปุ่ม ⏱ เซ็ตเวลาไว้ทดสอบ (ส้ม) / ↺ รีเซ็ตเวลาเริ่ม (เขียว) สีเด่นขึ้น
+V0.9.5 : WR Master — ชื่อ Item Code = "Master Code (วันที่) Code (ลำดับ) (โค้ด)"
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -3333,6 +3333,14 @@ def wr_same(got, want):
     return False
 
 
+def wr_code_name(ymd, no, code, sheet_name=''):
+    """(2026, 9, 30), 1, 'HYPE2X5M9P1K' -> 'Master Code 30/09/2026 Code 1 HYPE2X5M9P1K'
+    ไม่มีวันเริ่ม -> ใช้ชื่อชีทแทนวันที่"""
+    when = ('%02d/%02d/%04d' % (ymd[2], ymd[1], ymd[0])) if ymd else \
+        (clean_text(sheet_name) or '').strip()
+    return ' '.join(x for x in ('Master Code', when, 'Code %d' % no, code) if x)
+
+
 def _wr_after(cells, j, want_num=False):
     """ค่าถัดไปทางขวาของช่อง j ที่ไม่ว่าง"""
     for k in range(j + 1, len(cells)):
@@ -3385,7 +3393,7 @@ def parse_code_sheet(rows, sheet_name):
                             ymd[0], ymd[1], ymd[2], tm or
                             ('23:59:59' if lab == 'end' else '00:00:00'))
                         if lab == 'start':
-                            d['name'] = code + ' ' + wr_name_date(ymd)
+                            d['ymd'] = ymd
                 elif lab.startswith('limit'):
                     v = clean_text(_wr_after(cells, j))
                     d['limit'] = v
@@ -3398,8 +3406,10 @@ def parse_code_sheet(rows, sheet_name):
                             d['bundle'] = b
                             break
 
-        if not d.get('name'):
-            d['name'] = (code + ' ' + sheet_name).strip()
+        # ชื่อที่ทีมใช้: "Master Code 30/09/2026 Code 1 HYPE2X5M9P1K"
+        #   วันที่ = วันเริ่มในเอกสาร · Code n = ลำดับโค้ดในชีทนี้ (บนลงล่าง)
+        d['no'] = len(out) + 1
+        d['name'] = wr_code_name(d.pop('ymd', None), d['no'], code, sheet_name)
         cap = src_int(d['limit'])
         d['cap'] = str(int(cap) + WR_SPARE) if cap else ''      # '' = ไม่จำกัด
         d['unlimited'] = not cap
@@ -7606,7 +7616,7 @@ class App:
         self.w_tree = ttk.Treeview(tw, columns=wc, show='headings', height=7,
                                    style='TR.Treeview', selectmode='extended')
         for c, t, w in (('n', '#', 38), ('code', 'CODE', 120),
-                        ('wname', 'ชื่อ Item Code', 220), ('start', 'เริ่มใช้งาน', 140),
+                        ('wname', 'ชื่อ Item Code', 320), ('start', 'เริ่มใช้งาน', 140),
                         ('end', 'สิ้นสุด', 140), ('cap', 'จำกัดจำนวน', 90),
                         ('bundle', 'Bundle', 80)):
             self.w_tree.heading(c, text=t)
