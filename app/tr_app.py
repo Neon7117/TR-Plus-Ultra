@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.9.5 : WR Master — ชื่อ Item Code = "Master Code (วันที่) Code (ลำดับ) (โค้ด)"
+V0.9.6 : WR Master — จำคิว/ประวัติข้ามการปิดโปรแกรม + เตือนก่อนปิดถ้ายังไม่รีเซ็ตเวลาเริ่ม
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -127,6 +127,7 @@ ITEMCODE_LIST_URL = BASE + '/hof/talesrunner/itemcodes'      # หน้าแ�
 # ปุ่มยืนยันในป๊อปอัป "ปลดล็อก" / "บันทึก" (เทียบชื่อปุ่มตรงๆ ห้ามโดนปุ่มยกเลิก)
 UNLOCK_YES = CONFIRM_YES + ['ปลดล็อก', 'ปลดล็อค', 'ยืนยันปลดล็อก', 'ยืนยันปลดล็อค', 'Unlock']
 SAVE_YES = CONFIRM_YES + ['บันทึก', 'ยืนยันการบันทึก', 'บันทึกการเปลี่ยนแปลง', 'Save']
+WR_KEEP = 500              # เก็บประวัติ “สร้างแล้ว” ไว้กี่แถวล่าสุด
 WR_SPARE = 2               # ชีทบอก 550 -> ใส่ 552 เผื่อไว้เทสเอง
 SEL_CODE = {
     # ฝั่งซ้าย
@@ -1529,7 +1530,7 @@ _JS_CODE_LIB = """
   };
   const selText = s => s.tagName === 'SELECT'
       ? (s.selectedIndex >= 0 ? s.options[s.selectedIndex].text.trim() : '')
-      : (s.textContent || '').replace(/\s+/g, ' ').trim();
+      : (s.textContent || '').replace(/\\s+/g, ' ').trim();
   const pickSw = box => {
     if (!box) return null;
     const q = 'input[type=checkbox],[role=checkbox],[role=switch]';
@@ -4500,6 +4501,8 @@ class App:
         load_local_log_dir()
         load_central_dir()
         self._build_ui()
+        self._w_load_state()               # กู้คิว/ตาราง WR Master จากครั้งก่อน
+        self.root.protocol('WM_DELETE_WINDOW', self.on_close)
         trim_history()
         log_event('app_open', launcher=globals().get('TRPU_LAUNCHER', ''))
         for t in pending_items():
@@ -7677,6 +7680,8 @@ class App:
         self.w_btn_reset = self._btn(ib, '↺  รีเซ็ตเวลาเริ่ม', self.w_reset,
                                      color=(C['green'], C['green_on']))
         self.w_btn_reset.pack(side='right', padx=(0, 8), ipadx=12, ipady=3)
+        self._btn(ib, '🗑  ล้างประวัติ', self.w_clear_made).pack(
+            side='right', padx=(0, 8), ipadx=6, ipady=2)
         tk.Label(ib, text='(เลือกแถวที่ต้องการก่อน · ไม่เลือก = เอาทั้งหมด)',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8)).pack(side='right', padx=8)
         mc = ('no', 'code', 'cid', 'cname', 'at', 'note')
@@ -7684,7 +7689,7 @@ class App:
                                       style='TR.Treeview', selectmode='extended')
         for c, t, w in (('no', '#', 42), ('code', 'CODE', 130),
                         ('cid', 'Item Code Id', 100), ('cname', 'ชื่อ Item Code', 230),
-                        ('at', 'เวลา', 78), ('note', 'หมายเหตุ', 150)):
+                        ('at', 'เวลา', 92), ('note', 'หมายเหตุ', 150)):
             self.tree_code.heading(c, text=t)
             self.tree_code.column(c, width=w, anchor='w')
         self.tree_code.tag_configure('bad', background='#3a1f1e', foreground='#f0736a')
@@ -7702,7 +7707,9 @@ class App:
         else:
             self.w_mode.config(text='โหมดทดสอบ — กรอกฟอร์มให้ดูเฉยๆ ไม่กดสร้าง', fg=C['ok'])
 
-    def _w_refresh(self):
+    def _w_refresh(self, save=True):
+        if save:
+            self._w_save_state()
         self.w_tree.delete(*self.w_tree.get_children())
         nobd = 0
         for i, d in enumerate(self.wq, 1):
@@ -7832,22 +7839,179 @@ class App:
             notes = (notes + ' · ' if notes else '') + 'เวลาทดสอบ (เริ่ม %s)' % d.get('start', '')
         row = {'code': d.get('code', ''), 'name': d.get('name', ''),
                'id': str(cid or '').strip() or '-', 'notes': notes, 'ok': bool(ok),
-               'at': datetime.now().strftime('%H:%M:%S'), 'd': dict(d)}
+               'at': datetime.now().strftime('%d/%m %H:%M'), 'd': dict(d)}
         self.made_codes.append(row)
         row['no'] = len(self.made_codes)
 
         def _do():
-            self.tree_code.insert('', 'end', tags=() if row['ok'] else ('bad',),
-                                  values=(row['no'], row['code'], row['id'],
-                                          row['name'], row['at'], row['notes']))
-            self.tree_code.yview_moveto(1)
-            got = sum(1 for m in self.made_codes if m['id'] != '-')
-            self.lbl_wmade.config(
-                text='สร้างแล้ว %d โค้ด%s' % (
-                    len(self.made_codes),
-                    '' if got == len(self.made_codes) else ' (ได้เลข %d)' % got),
-                fg=C['ok'])
+            self._w_show_made(row)
+            self._w_save_state()
         self.root.after(0, _do)
+
+    def _w_show_made(self, row):
+        """ใส่แถวลงตาราง “Item Code ที่สร้างแล้ว” (ใช้ทั้งตอนสร้างใหม่และตอนกู้ประวัติ)"""
+        self.tree_code.insert('', 'end', iid='mc%d' % row['no'],
+                              tags=() if row['ok'] else ('bad',),
+                              values=(row['no'], row['code'], row['id'],
+                                      row['name'], row['at'], row['notes']))
+        self.tree_code.yview_moveto(1)
+        self._w_made_label()
+
+    def _w_made_label(self):
+        if not self.made_codes:
+            self.lbl_wmade.config(text='ยังไม่ได้สร้าง', fg=C['dim'])
+            return
+        got = sum(1 for m in self.made_codes if m['id'] != '-')
+        pend = len(self._w_pending())
+        txt = 'สร้างแล้ว %d โค้ด%s' % (
+            len(self.made_codes),
+            '' if got == len(self.made_codes) else ' (ได้เลข %d)' % got)
+        if pend:
+            txt += '  ·  ⏱ เวลาทดสอบยังไม่รีเซ็ต %d' % pend
+        self.lbl_wmade.config(text=txt, fg=C['warn'] if pend else C['ok'])
+
+    # ---------------- เก็บประวัติ WR Master ลงเครื่อง ----------------
+    #  ปิดโปรแกรมไปแล้วเปิดใหม่ คิว + ตาราง “สร้างแล้ว” ต้องกลับมาครบ
+    #  (จะได้กด ↺ รีเซ็ตเวลาเริ่ม ต่อได้ ไม่ต้องไปแก้ด้วยมือ) — เก็บแค่เครื่องนี้
+    def _w_state_path(self):
+        return os.path.join(DATA_DIR, 'wr_state.json')
+
+    def _w_pending(self):
+        """โค้ดที่สร้างจริงแบบเวลาทดสอบ แต่ยังไม่ได้รีเซ็ตเวลาเริ่มกลับ"""
+        return [m for m in self.made_codes
+                if m.get('ok') and m.get('id', '-') != '-'
+                and (m.get('d') or {}).get('test_time')
+                and not (m.get('d') or {}).get('reset_done')]
+
+    def _w_save_state(self):
+        if not getattr(self, '_w_loaded', False):
+            return                      # ยังไม่ได้โหลดของเก่า ห้ามเขียนทับ
+        path = self._w_state_path()
+        try:
+            made = [{k: m.get(k) for k in ('code', 'name', 'id', 'notes', 'ok', 'at', 'd')}
+                    for m in self.made_codes[-WR_KEEP:]]
+            data = {'v': 1, 'saved': datetime.now().isoformat(timespec='seconds'),
+                    'queue': self.wq, 'made': made}
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = path + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=1, default=str)
+            os.replace(tmp, path)
+        except Exception as ex:
+            if not getattr(self, '_w_save_warned', False):
+                self._w_save_warned = True
+                self.log('⚠  บันทึกประวัติ WR Master ไม่ได้: %s' % str(ex)[:120], 'WARN')
+
+    def _w_load_state(self):
+        path = self._w_state_path()
+        self._w_loaded = True
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception as ex:
+            try:
+                os.replace(path, path + '.bad')
+            except Exception:
+                pass
+            self.log('⚠  ไฟล์ประวัติ WR Master เสีย อ่านไม่ได้ (%s) — เก็บไว้เป็น .bad แล้ว'
+                     % str(ex)[:80], 'WARN')
+            return
+        self.wq = [d for d in (data.get('queue') or [])
+                   if isinstance(d, dict) and d.get('code')]
+        self.made_codes = []
+        self.tree_code.delete(*self.tree_code.get_children())
+        for m in (data.get('made') or []):
+            if not isinstance(m, dict) or not m.get('code'):
+                continue
+            row = {'code': m['code'], 'name': m.get('name', ''), 'id': m.get('id') or '-',
+                   'notes': m.get('notes', ''), 'ok': bool(m.get('ok')),
+                   'at': m.get('at', ''), 'd': m.get('d') or {}}
+            self.made_codes.append(row)
+            row['no'] = len(self.made_codes)
+            self._w_show_made(row)
+        self._w_refresh(save=False)
+        self._w_made_label()
+        if self.wq or self.made_codes:
+            self.log('กู้ข้อมูล WR Master จากครั้งก่อน: คิว %d โค้ด · สร้างแล้ว %d แถว (บันทึกเมื่อ %s)'
+                     % (len(self.wq), len(self.made_codes),
+                        str(data.get('saved', '?')).replace('T', ' ')), 'OK')
+        pend = self._w_pending()
+        if pend:
+            self.log('⏱  มี %d โค้ดที่ยังเป็นเวลาทดสอบ (ยังไม่รีเซ็ต): %s — ไปแท็บ WR Master '
+                     'แล้วกด ↺ รีเซ็ตเวลาเริ่ม ได้เลย'
+                     % (len(pend), ', '.join(m['code'] for m in pend[:6])
+                        + (' …' if len(pend) > 6 else '')), 'WARN')
+
+    def _w_after_reset(self, d):
+        """รีเซ็ตสำเร็จ -> จดว่าตัวนี้กลับเป็นเวลาตามเอกสารแล้ว (ตัวที่ตรงกันในตาราง)"""
+        want = d.get('doc_start') or d.get('start')
+        hit = []
+        for m in self.made_codes:
+            md = m.get('d') or {}
+            if md.get('code') == d.get('code') and \
+                    (md.get('doc_start') or md.get('start')) == want and md.get('test_time') \
+                    and not md.get('reset_done'):
+                md['reset_done'] = True
+                m['notes'] = (m.get('notes') or '') + ' · รีเซ็ตแล้ว'
+                hit.append(m)
+        d['reset_done'] = True
+
+        def _do():
+            for m in hit:
+                iid = 'mc%d' % m['no']
+                if self.tree_code.exists(iid):
+                    self.tree_code.item(iid, values=(m['no'], m['code'], m['id'], m['name'],
+                                                     m['at'], m['notes']))
+            self._w_made_label()
+            self._w_save_state()
+        self.root.after(0, _do)
+
+    def w_clear_made(self):
+        if self.w_running or not self.made_codes:
+            return
+        pend = self._w_pending()
+        msg = 'ลบประวัติ “Item Code ที่สร้างแล้ว” ทั้ง %d แถว?\n(ของบนเว็บไม่โดนลบ)' % len(self.made_codes)
+        if pend:
+            msg += ('\n\n⚠  ในนี้มี %d โค้ดที่ยังเป็นเวลาทดสอบ ยังไม่รีเซ็ต — ลบแล้วต้องนำเข้าชีทใหม่ '
+                    'ถึงจะกดรีเซ็ตได้' % len(pend))
+        if not messagebox.askyesno('ล้างประวัติ', msg):
+            return
+        self.made_codes = []
+        self.tree_code.delete(*self.tree_code.get_children())
+        self._w_made_label()
+        self._w_save_state()
+
+    def on_close(self):
+        """กดปิดหน้าต่าง — ถ้ายังมีโค้ดเวลาทดสอบค้าง หรือกำลังทำงานอยู่ ต้องถามก่อน"""
+        busy = self.w_running or self.running or getattr(self, 'c_running', False) \
+            or getattr(self, 'b_running', False)
+        pend = self._w_pending() if hasattr(self, 'made_codes') else []
+        if busy or pend:
+            msg = ''
+            if pend:
+                msg += ('⏱  ยังมี %d โค้ดที่สร้างแบบเวลาทดสอบ แต่ยังไม่ได้รีเซ็ตเวลาเริ่ม:\n   %s\n\n'
+                        'ประวัติเก็บไว้ในเครื่องแล้ว เปิดโปรแกรมใหม่กด “↺ รีเซ็ตเวลาเริ่ม” ต่อได้\n\n'
+                        % (len(pend), ', '.join(m['code'] for m in pend[:8])
+                           + (' …' if len(pend) > 8 else '')))
+            if busy:
+                msg += '⚠  โปรแกรมกำลังทำงานอยู่ ปิดตอนนี้งานจะค้างครึ่งทาง\n\n'
+            msg += 'ปิดโปรแกรมเลยไหม?'
+            if not messagebox.askyesno('ยังไม่ได้รีเซ็ตเวลาเริ่ม' if pend else 'ปิดโปรแกรม',
+                                       msg, icon='warning', default='no'):
+                return
+        try:
+            self.save_now()
+        except Exception:
+            pass
+        try:
+            self._w_save_state()
+        except Exception:
+            pass
+        if pend:
+            log_event('close_with_pending_test_time', count=len(pend))
+        self.root.destroy()
 
     def copy_made_codes(self):
         """คัดลอกเฉพาะ CODE ของแถวที่เลือกไว้ — ไม่เลือกก็เอาทั้งหมด"""
@@ -7933,8 +8097,7 @@ class App:
                 sel.append(m['d'])
         if sel:
             return sel, 'แถวที่เลือกในตาราง “Item Code ที่สร้างแล้ว”'
-        made = [m['d'] for m in self.made_codes
-                if m.get('ok') and m.get('d', {}).get('test_time') and m['id'] != '-']
+        made = [m['d'] for m in self._w_pending()]
         if made:
             return made, 'โค้ดที่สร้างแบบเวลาทดสอบในรอบนี้'
         qsel = [self.wq[self.w_tree.index(w)] for w in self.w_tree.selection()
@@ -8012,6 +8175,8 @@ class App:
                     try:
                         if mode == 'reset':
                             good = await self._w_reset_one(page, d, do)
+                            if good and do:
+                                self._w_after_reset(d)
                         else:
                             good = await self._w_one(page, d, do, hold)
                         if good:
