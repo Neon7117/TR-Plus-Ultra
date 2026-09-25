@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.9.2 : WR Master — ดรอปดาวน์ ประเภท / ประเภทของ Code เลือกได้จริง (แบบปุ่ม combobox ของเว็บ)
+V0.9.3 : WR Master — ปุ่ม ⏱ เซ็ตเวลาไว้ทดสอบ + ↺ รีเซ็ตเวลาเริ่ม (ปลดล็อกแล้วแก้ของเดิม ไม่สร้างใหม่)
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -123,6 +123,10 @@ CONFIRM_YES = BUNDLE_YES
 CONFIRM_NO = BUNDLE_NO
 # ---- หน้าสร้าง Item Code (แถบ WR Master) ----
 ITEMCODE_CREATE_URL = BASE + '/hof/talesrunner/itemcodes/create'
+ITEMCODE_LIST_URL = BASE + '/hof/talesrunner/itemcodes'      # หน้าแก้ไข = LIST + '/' + slug
+# ปุ่มยืนยันในป๊อปอัป "ปลดล็อก" / "บันทึก" (เทียบชื่อปุ่มตรงๆ ห้ามโดนปุ่มยกเลิก)
+UNLOCK_YES = CONFIRM_YES + ['ปลดล็อก', 'ปลดล็อค', 'ยืนยันปลดล็อก', 'ยืนยันปลดล็อค', 'Unlock']
+SAVE_YES = CONFIRM_YES + ['บันทึก', 'ยืนยันการบันทึก', 'บันทึกการเปลี่ยนแปลง', 'Save']
 WR_SPARE = 2               # ชีทบอก 550 -> ใส่ 552 เผื่อไว้เทสเอง
 SEL_CODE = {
     # ฝั่งซ้าย
@@ -1898,6 +1902,113 @@ JS_CODE_BUNDLE = r"""
   return 'ไม่รู้จักคำสั่ง';
 }"""
 
+# ============================================================================
+#  หน้ารายการ Item Code / หน้าแก้ไข — ใช้กับปุ่ม "รีเซ็ตเวลาเริ่ม"
+#  โค้ดที่สร้างแล้วจะถูกล็อกเสมอ -> ต้องไปกด Actions > ปลดล็อก ที่หน้ารายการก่อน
+#  แล้วค่อยเข้าหน้าแก้ไข (ลิงก์ = /itemcodes/<slug>) ไปแก้เวลาเริ่ม
+# ============================================================================
+JS_IC_LIST = r"""
+([act, slug]) => {
+  const vis = el => { if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const txt = e => (e.textContent || '').replace(/\s+/g, ' ').trim();
+  const clear = k => document.querySelectorAll('[' + k + ']').forEach(e => e.removeAttribute(k));
+  if (act === 'row') {
+    // แถวที่มี slug ตรงเป๊ะ (ข้อความใต้ชื่อ) แล้วหาปุ่ม Actions ในแถวนั้น
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+    let n;
+    while ((n = w.nextNode())) {
+      if ((n.textContent || '').trim().toLowerCase() !== String(slug).toLowerCase()) continue;
+      if (!vis(n.parentElement)) continue;
+      let row = n.parentElement;
+      for (let i = 0; i < 10 && row && row !== document.body; i++) {
+        const b = [...row.querySelectorAll('button,[role=button]')].filter(vis)
+            .find(x => /^actions?$|^จัดการ$/i.test(txt(x)));
+        if (b) {
+          let locked = false;
+          const w2 = document.createTreeWalker(row, NodeFilter.SHOW_TEXT, null, false);
+          let m;
+          while ((m = w2.nextNode())) {       // ป้าย "🔒 ล็อก" (ตัดไอคอน/ช่องว่างทิ้งก่อนเทียบ)
+            const t = (m.textContent || '').replace(/[^\u0E00-\u0E7Fa-zA-Z]/g, '');
+            if (/^(ล็อก|ล็อค|locked)$/i.test(t) && vis(m.parentElement)) locked = true;
+          }
+          clear('data-trw-act');
+          b.setAttribute('data-trw-act', '1');
+          b.scrollIntoView({block: 'center'});
+          return 'ok|' + (locked ? '1' : '0');
+        }
+        row = row.parentElement;
+      }
+    }
+    return 'none';
+  }
+  if (act === 'search') {
+    const ins = [...document.querySelectorAll('input[type=text],input[type=search],input:not([type])')]
+        .filter(vis).filter(i => /ค้นหา|search/i.test(i.getAttribute('placeholder') || ''));
+    if (!ins.length) return 'none';
+    clear('data-trw-q');
+    ins[0].setAttribute('data-trw-q', '1');
+    return 'ok';
+  }
+  if (act === 'next') {
+    const b = [...document.querySelectorAll('button,a')].filter(vis)
+        .find(x => /^(next|ถัดไป)$/i.test(txt(x).replace(/[›»>]/g, '').trim()));
+    if (!b || b.disabled || b.getAttribute('aria-disabled') === 'true') return 'none';
+    clear('data-trw-nx');
+    b.setAttribute('data-trw-nx', '1');
+    return 'ok';
+  }
+  if (act === 'menu') {
+    // เมนูที่เด้งหลังกด Actions — เลือกได้แค่ "ปลดล็อก" เท่านั้น (ห้ามโดน ลบ/แก้ไข)
+    const items = [...document.querySelectorAll('[role=menuitem],[role=menu] button,[role=menu] a,' +
+                                                '[role=option]')].filter(vis);
+    if (!items.length) return 'none';
+    const hit = items.find(x => /ปลดล็อ|unlock/i.test(txt(x)));
+    if (!hit) return 'ไม่มีเมนูปลดล็อก (มี: ' + items.map(txt).join(', ') + ')';
+    clear('data-trw-mi');
+    hit.setAttribute('data-trw-mi', '1');
+    return 'ok|' + txt(hit);
+  }
+  return 'ไม่รู้จักคำสั่ง';
+}"""
+
+JS_IC_EDIT = r"""
+([act]) => {
+  const vis = el => { if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const txt = e => (e.textContent || '').replace(/\s+/g, ' ').trim();
+  // innerText = เฉพาะข้อความที่โชว์จริง (textContent จะติดข้อความใน <script> มาด้วย)
+  const body = String(document.body.innerText || '').replace(/\s+/g, ' ');
+  if (act === 'state') {
+    if (/ไม่พบ Item Code|not found|404/i.test(body) && !/เวลาเริ่มใช้งาน/.test(body))
+      return 'notfound';
+    if (/รายการนี้ถูกล็อ/.test(body)) return 'locked';
+    if (!/เวลาเริ่มใช้งาน/.test(body)) return 'loading';
+    return 'open';
+  }
+  if (act === 'save') {
+    // ปุ่มบันทึกหลักของหน้าแก้ไข (ตัวขวาสุด) — ไม่เอา ยกเลิก / …และอยู่ต่อ / ฉบับร่าง
+    const bs = [...document.querySelectorAll('button')].filter(vis);
+    const ok = bs.filter(b => {
+      const t = txt(b);
+      return /^(บันทึก|อัปเดต|อัพเดต|save|update)/i.test(t) &&
+             !/ยกเลิก|อยู่ต่อ|สร้างต่อ|ฉบับร่าง|draft/i.test(t) && !b.disabled;
+    });
+    if (!ok.length)
+      return 'ไม่เจอปุ่มบันทึก (มี: ' + bs.map(txt).filter(t => /บันทึก|save|update/i.test(t)).join(', ') + ')';
+    const b = ok[ok.length - 1];
+    document.querySelectorAll('[data-trw-save]').forEach(e => e.removeAttribute('data-trw-save'));
+    b.setAttribute('data-trw-save', '1');
+    return 'ok|' + txt(b);
+  }
+  return 'ไม่รู้จักคำสั่ง';
+}"""
+
+
 JS_ITEM_MADE_ID = """
 () => {
   function digitsAfter(t, key) {
@@ -3192,6 +3303,20 @@ def wr_dt_shown_ok(text, dt):
     if 'am' in low or 'pm' in low:
         hh.append(h % 12 or 12)
     return any(re.search(r'(^|\D)0?%d\s*[:.]\s*%02d(\D|$)' % (x, mi), t) for x in hh)
+
+
+def wr_test_rows(rows, now=None):
+    """ปุ่ม “เซ็ตเวลาไว้ทดสอบ”: ก๊อปคิวมา แล้วเปลี่ยนแค่เวลาเริ่ม = วันนี้ 00:00:00
+    เก็บเวลาเริ่มตามเอกสารไว้ใน doc_start (ไว้ทำ Slug และไว้รีเซ็ตกลับทีหลัง)"""
+    today = (now or datetime.now()).strftime('%Y-%m-%d') + ' 00:00:00'
+    out = []
+    for d in rows:
+        x = dict(d)
+        x['doc_start'] = d.get('doc_start') or d.get('start')
+        x['start'] = today
+        x['test_time'] = True
+        out.append(x)
+    return out
 
 
 def wr_same(got, want):
@@ -4697,6 +4822,11 @@ class App:
 
         run = tk.Frame(s3, bg=C['bg'])
         run.grid(row=2, column=0, columnspan=3, sticky='w', pady=(12, 0))
+        tk.Label(s3, text='⏱ เซ็ตเวลาไว้ทดสอบ = สร้างเหมือนปกติ แต่เวลาเริ่มใช้งานเป็น “วันนี้ 00:00:00” '
+                          '(เวลาสิ้นสุด/ชื่อ/Slug ตามเอกสาร)  ·  ทดสอบเสร็จกด “↺ รีเซ็ตเวลาเริ่ม” '
+                          'ด้านล่าง เพื่อแก้เวลาเริ่มกลับตามเอกสาร (ไม่สร้างใหม่)',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w', justify='left',
+                 wraplength=900).grid(row=3, column=0, columnspan=3, sticky='w', pady=(8, 0))
         self.c_btn_run = self._btn(run, '▶  เริ่มทำงาน', self.c_start, primary=True)
         self.c_btn_run.pack(side='left', ipadx=18, ipady=5)
         self.c_btn_stop = self._btn(run, '■  ยกเลิก', self.c_stop)
@@ -5524,6 +5654,180 @@ class App:
         await page.keyboard.press('Escape')
         return False
 
+    # ==================================================================
+    #  WR Master — รีเซ็ตเวลาเริ่ม (แก้ของที่สร้างไว้แล้ว ห้ามสร้างใหม่)
+    # ==================================================================
+    async def _w_edit_state(self, page, wait_ms=8000):
+        st = 'loading'
+        for _ in range(max(1, wait_ms // 250)):
+            st = str(await page.evaluate(JS_IC_EDIT, ['state']))
+            if st != 'loading':
+                return st
+            await page.wait_for_timeout(250)
+        return st
+
+    async def _w_unlock(self, page, d, slug):
+        """หน้ารายการ -> หาแถวของโค้ดนี้ -> Actions -> ปลดล็อก -> กดยืนยันในป๊อปอัป
+        แล้วต้องเห็นแถวนั้นไม่มีป้าย “ล็อก” แล้วจริงๆ ถึงจะนับว่าปลดแล้ว"""
+        await page.goto(ITEMCODE_LIST_URL, wait_until='domcontentloaded', timeout=45000)
+        await page.wait_for_timeout(1500)
+
+        async def find_row():
+            for _ in range(12):
+                r = str(await page.evaluate(JS_IC_LIST, ['row', slug]))
+                if r.startswith('ok|'):
+                    return r
+                await page.wait_for_timeout(250)
+            return 'none'
+
+        r = await find_row()
+        if r == 'none' and str(await page.evaluate(JS_IC_LIST, ['search', ''])) == 'ok':
+            try:
+                q = page.locator('[data-trw-q="1"]').first
+                await q.fill(d['code'], timeout=4000)
+                await q.press('Enter')
+                await page.wait_for_timeout(1200)
+            except Exception:
+                pass
+            r = await find_row()
+        pages = 1
+        while r == 'none' and pages < 40:              # ไม่มีช่องค้นหา -> ไล่หน้าถัดไป
+            if str(await page.evaluate(JS_IC_LIST, ['next', ''])) != 'ok':
+                break
+            await page.locator('[data-trw-nx="1"]').first.click(timeout=4000)
+            await page.wait_for_timeout(900)
+            pages += 1
+            r = await find_row()
+        if r == 'none':
+            self.log('   ! หาแถว “%s” ในหน้ารายการ Item Code ไม่เจอ — ปลดล็อกไม่ได้' % slug, 'WARN')
+            return False
+        if r == 'ok|0':
+            self.log('   · ปลดล็อกอยู่แล้ว', 'INFO')
+            return True
+        await page.locator('[data-trw-act="1"]').first.click(timeout=5000)
+        m = 'none'
+        for _ in range(12):
+            await page.wait_for_timeout(200)
+            m = str(await page.evaluate(JS_IC_LIST, ['menu', '']))
+            if m != 'none':
+                break
+        if not m.startswith('ok'):
+            self.log('   ! %s' % ('กด Actions แล้วเมนูไม่เด้ง' if m == 'none' else m), 'WARN')
+            await page.keyboard.press('Escape')
+            return False
+        await page.locator('[data-trw-mi="1"]').first.click(timeout=4000)
+        await page.wait_for_timeout(400)
+        last = ''
+        for _ in range(16):
+            r2 = str(await page.evaluate(JS_CONFIRM_POPUP, [UNLOCK_YES, CONFIRM_NO]))
+            if r2.startswith('ok'):
+                self.log('   · กดยืนยันปลดล็อกแล้ว (%s)' % r2.split('|', 1)[1], 'INFO')
+                break
+            last = r2
+            await page.wait_for_timeout(250)
+        else:
+            if last and last != 'ไม่มีป๊อปอัป':
+                self.log('   ! ' + last, 'WARN')
+        for _ in range(24):                              # รอป้าย "ล็อก" หาย
+            await page.wait_for_timeout(250)
+            r = str(await page.evaluate(JS_IC_LIST, ['row', slug]))
+            if r == 'ok|0':
+                self.log('   · ปลดล็อกแล้ว', 'INFO')
+                return True
+        self.log('   ! กดปลดล็อกแล้ว แต่แถวนี้ยังขึ้น “ล็อก” อยู่ — ต้องปลดเองบนเว็บ', 'WARN')
+        return False
+
+    async def _w_reset_one(self, page, d, do):
+        """เข้าไปแก้ "เวลาเริ่มใช้งาน" ของโค้ดที่สร้างไว้แล้ว ให้กลับเป็นเวลาตามเอกสาร
+        ไม่สร้างใหม่เด็ดขาด — ถ้าหาหน้าแก้ไขไม่เจอก็แค่เตือน"""
+        want = d.get('doc_start') or d.get('start')
+        slug = wr_slug(d['code'], want)
+        if not want or not slug:
+            self.log('   ! ไม่มีเวลาเริ่มในเอกสาร — ข้าม', 'WARN')
+            return False
+        url = ITEMCODE_LIST_URL + '/' + slug
+        await page.goto(url, wait_until='domcontentloaded', timeout=45000)
+        await page.wait_for_timeout(1200)
+        if any(k in page.url.lower() for k in ('login', 'signin', 'auth')):
+            self.log('   ✗ ยังไม่ได้ล็อกอิน — กด “เปิดหน้า Login” ด้านบนก่อน', 'ERR')
+            return False
+        st = await self._w_edit_state(page)
+        if st == 'notfound' or st == 'loading':
+            self.log('   ! เปิดหน้า %s ไม่เจอ Item Code นี้ (ยังไม่ได้สร้าง?) — ข้าม' % slug, 'WARN')
+            return False
+        same, shown = await self._w_date_ok(page, SEL_CODE['start'], want)
+        if same:
+            self.log('   · เวลาเริ่มบนเว็บ = “%s” ตรงเอกสารอยู่แล้ว ไม่ต้องแก้' % shown, 'OK')
+            return True
+        self.log('   · ตอนนี้เวลาเริ่มบนเว็บ = “%s” -> จะแก้เป็น %s' % (shown or '?', want), 'INFO')
+        if not do:
+            self.log('   ✓ โหมดทดสอบ — ดูเฉยๆ ไม่ได้ปลดล็อก/ไม่ได้แก้', 'OK')
+            return True
+        if st == 'locked':
+            if not await self._w_unlock(page, d, slug):
+                return False
+            await page.goto(url, wait_until='domcontentloaded', timeout=45000)
+            await page.wait_for_timeout(1200)
+            st = await self._w_edit_state(page)
+            if st == 'locked':
+                self.log('   ! ปลดล็อกแล้วแต่หน้าแก้ไขยังขึ้นว่าล็อก — ไม่แก้ต่อ', 'WARN')
+                return False
+        if not await self._w_date(page, SEL_CODE['start'], want, 'เวลาเริ่มใช้งาน'):
+            return False
+        r = str(await page.evaluate(JS_IC_EDIT, ['save']))
+        if not r.startswith('ok'):
+            self.log('   ! ' + r, 'WARN')
+            return False
+        hits = []
+
+        def _grab(resp):
+            try:
+                if resp.request.method in ('POST', 'PUT', 'PATCH') \
+                        and 'code' in resp.url.lower():
+                    hits.append(resp)
+            except Exception:
+                pass
+        page.on('response', _grab)
+        try:
+            await page.locator('[data-trw-save="1"]').first.click(timeout=5000)
+            await page.wait_for_timeout(500)
+            for _ in range(12):
+                if hits:
+                    break
+                r2 = str(await page.evaluate(JS_CONFIRM_POPUP, [SAVE_YES, CONFIRM_NO]))
+                if r2.startswith('ok'):
+                    self.log('   · กดยืนยันในป๊อปอัปแล้ว (%s)' % r2.split('|', 1)[1], 'INFO')
+                    break
+                await page.wait_for_timeout(250)
+            waited = 0
+            while waited < 15000 and not hits:
+                await page.wait_for_timeout(300)
+                waited += 300
+            await page.wait_for_timeout(800)
+        finally:
+            try:
+                page.remove_listener('response', _grab)
+            except Exception:
+                pass
+        code_http = hits[-1].status if hits else 0
+        if code_http and not (200 <= code_http < 300):
+            self.log('   ✗ เว็บตอบ HTTP %d — ยังไม่ได้แก้' % code_http, 'ERR')
+            return False
+        # เปิดหน้าใหม่แล้วอ่านจริง — ไม่เชื่อแค่ว่ากดปุ่มแล้ว
+        await page.goto(url, wait_until='domcontentloaded', timeout=45000)
+        await page.wait_for_timeout(1200)
+        await self._w_edit_state(page)
+        same, shown = await self._w_date_ok(page, SEL_CODE['start'], want)
+        if same:
+            self.log('   ✓ แก้เวลาเริ่มแล้ว — เปิดหน้าใหม่เช็กแล้วขึ้น “%s”' % shown, 'OK')
+            log_event('reset_itemcode_start', code=d['code'], start=want, ok=True)
+            return True
+        self.log('   ✗ กดบันทึกแล้ว แต่เปิดหน้าใหม่เวลาเริ่มยังเป็น “%s” (ไม่ใช่ %s)'
+                 % (shown or '?', want), 'ERR')
+        log_event('reset_itemcode_start', code=d['code'], start=want, ok=False)
+        return False
+
+
     async def _w_one(self, page, d, do, hold):
         """กรอก Item Code หนึ่งตัวให้ครบทุกช่องตามที่ทีมใช้จริง
         ทุกช่องอ่านกลับมาเช็กอีกรอบตอนท้าย — ช่องไหนไม่ตรง จะไม่กดสร้างเด็ดขาด"""
@@ -5536,7 +5840,7 @@ class App:
         cap = str(d.get('cap') or '').strip()
         limited = bool(cap)
         per = str(d.get('per_user') or '1')
-        slug = wr_slug(d['code'], d.get('start'))
+        slug = wr_slug(d['code'], d.get('doc_start') or d.get('start'))   # Slug ยึดวันในเอกสารเสมอ
         bad = []
         texts = []            # (ป้าย, ฝั่ง, ค่า, ชื่อที่โชว์) — ไว้อ่านกลับตอนท้าย
 
@@ -7329,6 +7633,9 @@ class App:
         run.grid(row=2, column=0, columnspan=3, sticky='w', pady=(12, 0))
         self.w_btn_run = self._btn(run, '▶  เริ่มทำงาน', self.w_start, primary=True)
         self.w_btn_run.pack(side='left', ipadx=18, ipady=5)
+        self.w_btn_test = self._btn(run, '⏱  เซ็ตเวลาไว้ทดสอบ',
+                                    lambda: self.w_start(test_time=True))
+        self.w_btn_test.pack(side='left', padx=(8, 0), ipadx=10, ipady=5)
         self.w_btn_stop = self._btn(run, '■  ยกเลิก', self.w_stop)
         self.w_btn_stop.config(state='disabled')
         self.w_btn_stop.pack(side='left', padx=(8, 0), ipadx=12, ipady=5)
@@ -7346,6 +7653,8 @@ class App:
         self.lbl_wmade.pack(side='left', padx=10)
         self._btn(ib, '📋  คัดลอก CODE', self.copy_made_codes).pack(
             side='right', ipadx=8, ipady=2)
+        self.w_btn_reset = self._btn(ib, '↺  รีเซ็ตเวลาเริ่ม', self.w_reset)
+        self.w_btn_reset.pack(side='right', padx=(0, 8), ipadx=8, ipady=2)
         tk.Label(ib, text='(เลือกแถวที่ต้องการก่อน · ไม่เลือก = เอาทั้งหมด)',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8)).pack(side='right', padx=8)
         mc = ('no', 'code', 'cid', 'cname', 'at', 'note')
@@ -7497,9 +7806,11 @@ class App:
         return ok['v']
 
     def add_made_code(self, d, cid, notes='', ok=True):
+        if d.get('test_time') and 'เวลาทดสอบ' not in notes:
+            notes = (notes + ' · ' if notes else '') + 'เวลาทดสอบ (เริ่ม %s)' % d.get('start', '')
         row = {'code': d.get('code', ''), 'name': d.get('name', ''),
                'id': str(cid or '').strip() or '-', 'notes': notes, 'ok': bool(ok),
-               'at': datetime.now().strftime('%H:%M:%S')}
+               'at': datetime.now().strftime('%H:%M:%S'), 'd': dict(d)}
         self.made_codes.append(row)
         row['no'] = len(self.made_codes)
 
@@ -7542,16 +7853,27 @@ class App:
         self.w_cancel = True
         self.log('กำลังยกเลิกการสร้าง Item Code...', 'WARN')
 
-    def w_start(self):
+    def w_start(self, test_time=False):
         if self.w_running or self.running or self.c_running or self.b_running:
             return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
         if not self.wq:
             return messagebox.showwarning('คิวว่าง',
                                           'ยังไม่มีโค้ดในคิว — นำเข้าไฟล์ต้นฉบับก่อน')
         do = self.wv_do.get()
+        rows = wr_test_rows(self.wq) if test_time else [dict(d) for d in self.wq]
         nobd = sum(1 for d in self.wq if not d.get('bundle'))
+        if test_time:
+            late = [d['code'] for d in rows if d.get('end') and d['end'] <= d['start']]
+            if late:
+                messagebox.showwarning(
+                    'เวลาสิ้นสุดผ่านไปแล้ว',
+                    'โค้ดเหล่านี้เวลาสิ้นสุดในเอกสารไม่ได้อยู่หลังวันนี้ 00:00 '
+                    '— เว็บอาจไม่ยอมให้สร้าง:\n\n' + '\n'.join(late[:15]))
         if do:
             msg = 'จะสร้าง Item Code จริงบนเว็บ %d โค้ด\n' % len(self.wq)
+            if test_time:
+                msg += ('\n⏱  แบบเวลาทดสอบ: เวลาเริ่มใช้งาน = %s (วันนี้)\n'
+                        '   เวลาสิ้นสุด/ชื่อ/Slug ยังตามเอกสาร\n' % rows[0]['start'])
             if nobd:
                 msg += ('\n⚠  มี %d โค้ดที่ยังไม่มีเลข Bundle — ตัวนั้นจะเลือก Bundle '
                         'ไม่ได้\n' % nobd)
@@ -7567,13 +7889,73 @@ class App:
         self.log('=' * 46, 'STEP')
         self.log(('เริ่มสร้าง Item Code จริง ' if do else 'เริ่มทดสอบกรอกฟอร์ม ')
                  + '%d โค้ด' % len(self.wq), 'STEP')
-        log_event('wr_start', count=len(self.wq), commit=bool(do), no_bundle=nobd)
-        threading.Thread(target=self._w_thread, args=(list(self.wq), do),
+        if test_time:
+            self.log('⏱ เวลาทดสอบ: เวลาเริ่มใช้งานทุกโค้ด = %s (เวลาสิ้นสุดตามเอกสาร)'
+                     % rows[0]['start'], 'STEP')
+        log_event('wr_start', count=len(self.wq), commit=bool(do), no_bundle=nobd,
+                  test_time=bool(test_time))
+        threading.Thread(target=self._w_thread, args=(rows, do),
                          daemon=True).start()
 
-    def _w_thread(self, rows, do):
+    def _w_reset_targets(self):
+        """โค้ดที่จะรีเซ็ตเวลาเริ่ม: แถวที่เลือกในตาราง “สร้างแล้ว” > ตัวที่สร้างแบบเวลาทดสอบ
+        ทั้งหมดในรอบนี้ > (ปิดโปรแกรมไปแล้ว) โค้ดในคิวที่เลือก/ทั้งคิว — คืน (รายการ, ที่มา)"""
+        sel = []
+        for w in self.tree_code.selection():
+            v = self.tree_code.item(w, 'values')
+            try:
+                m = self.made_codes[int(v[0]) - 1]
+            except Exception:
+                continue
+            if m.get('ok') and m.get('d'):
+                sel.append(m['d'])
+        if sel:
+            return sel, 'แถวที่เลือกในตาราง “Item Code ที่สร้างแล้ว”'
+        made = [m['d'] for m in self.made_codes
+                if m.get('ok') and m.get('d', {}).get('test_time') and m['id'] != '-']
+        if made:
+            return made, 'โค้ดที่สร้างแบบเวลาทดสอบในรอบนี้'
+        qsel = [self.wq[self.w_tree.index(w)] for w in self.w_tree.selection()
+                if self.w_tree.index(w) < len(self.wq)]
+        if qsel:
+            return [dict(d) for d in qsel], 'โค้ดที่เลือกในคิว'
+        return [dict(d) for d in self.wq], 'โค้ดทั้งหมดในคิว'
+
+    def w_reset(self):
+        """ปุ่ม ↺ รีเซ็ตเวลาเริ่ม — เข้าไปแก้ของเดิม ไม่สร้างใหม่"""
+        if self.w_running or self.running or self.c_running or self.b_running:
+            return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
+        rows, src = self._w_reset_targets()
+        rows = [d for d in rows if d.get('doc_start') or d.get('start')]
+        if not rows:
+            return messagebox.showwarning('ไม่มีโค้ด', 'ยังไม่มีโค้ดให้รีเซ็ต — นำเข้าไฟล์ '
+                                                       'หรือสร้างก่อน')
+        do = self.wv_do.get()
+        msg = ('รีเซ็ตเวลาเริ่มใช้งานกลับเป็นเวลาตามเอกสาร %d โค้ด\n(%s)\n\n'
+               'จะเข้าไปแก้ของที่สร้างไว้แล้วเท่านั้น ไม่สร้างใหม่\n' % (len(rows), src))
+        if do:
+            msg += ('ตัวที่ล็อกอยู่จะกด Actions > ปลดล็อก ให้ก่อน แล้วค่อยแก้เวลา\n\n'
+                    'ยืนยันแก้จริงบนเว็บ?')
+        else:
+            msg += ('\nตอนนี้เป็นโหมดทดสอบ — แค่เปิดดูว่าเวลาบนเว็บเป็นเท่าไหร่ '
+                    'ไม่ปลดล็อก ไม่แก้\n(ติ๊ก “กดปุ่ม สร้าง Item Code จริง” ก่อน ถ้าจะแก้จริง)\n\nไปต่อ?')
+        if not messagebox.askyesno('รีเซ็ตเวลาเริ่ม', msg):
+            return
+        self.w_running = True
+        self.w_cancel = False
+        self.w_btn_run.config(state='disabled')
+        self.w_btn_stop.config(state='normal')
+        self.nb.select(self.tab_log)
+        self.log('=' * 46, 'STEP')
+        self.log('↺ รีเซ็ตเวลาเริ่ม %d โค้ด (%s)%s'
+                 % (len(rows), src, '' if do else ' — โหมดทดสอบ ดูอย่างเดียว'), 'STEP')
+        log_event('wr_reset_start', count=len(rows), commit=bool(do))
+        threading.Thread(target=self._w_thread, args=(rows, do, 'reset'),
+                         daemon=True).start()
+
+    def _w_thread(self, rows, do, mode='create'):
         try:
-            asyncio.run(self._w_work(rows, do))
+            asyncio.run(self._w_work(rows, do, mode))
         except Exception as ex:
             log_event('error', where='wr', message=str(ex)[:300])
             self.log('ผิดพลาด: ' + str(ex), 'ERR')
@@ -7588,7 +7970,7 @@ class App:
                     self.nb.select(self.tab_wr)
             self.root.after(0, _rst)
 
-    async def _w_work(self, rows, do):
+    async def _w_work(self, rows, do, mode='create'):
         async with async_playwright() as pw:
             browser = await pw.chromium.launch_persistent_context(**launch_kwargs(False))
             page = browser.pages[0] if browser.pages else await browser.new_page()
@@ -7606,7 +7988,11 @@ class App:
                     self.log('[%d/%d] %s  (%s)' % (i, len(rows), d['code'], d['name']),
                              'STEP')
                     try:
-                        if await self._w_one(page, d, do, hold):
+                        if mode == 'reset':
+                            good = await self._w_reset_one(page, d, do)
+                        else:
+                            good = await self._w_one(page, d, do, hold)
+                        if good:
                             okc += 1
                         else:
                             errc += 1
