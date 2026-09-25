@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.9.3 : WR Master — ปุ่ม ⏱ เซ็ตเวลาไว้ทดสอบ + ↺ รีเซ็ตเวลาเริ่ม (ปลดล็อกแล้วแก้ของเดิม ไม่สร้างใหม่)
+V0.9.4 : WR Master — ปุ่ม ⏱ เซ็ตเวลาไว้ทดสอบ (ส้ม) / ↺ รีเซ็ตเวลาเริ่ม (เขียว) สีเด่นขึ้น
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -202,6 +202,8 @@ BUG_SHEET_URL = ('https://docs.google.com/spreadsheets/d/'
 
 C = {
     'bg': '#11161f', 'card': '#151c28', 'line': '#263041', 'input': '#0c1119',
+    'orange': '#d9700c', 'orange_on': '#b85d08',     # ปุ่ม ⏱ เซ็ตเวลาไว้ทดสอบ
+    'green': '#1f9656', 'green_on': '#187a45',       # ปุ่ม ↺ รีเซ็ตเวลาเริ่ม
     'fg': '#dfe6f2', 'dim': '#8b98ad', 'accent': '#4f6bed',
     'ok': '#5ed09a', 'warn': '#e3b341', 'err': '#f0736a',
 }
@@ -4571,7 +4573,15 @@ class App:
                      highlightcolor=C['accent'])
         return e
 
-    def _btn(self, parent, text, cmd, primary=False, width=None):
+    def _btn(self, parent, text, cmd, primary=False, width=None, color=None):
+        """color = ('#พื้น', '#ตอนกด') — ปุ่มสำคัญที่ต้องเด่นกว่าปุ่มอื่น"""
+        if color:
+            b = tk.Button(parent, text=text, command=cmd, bd=0, cursor='hand2', font=FB,
+                          bg=color[0], fg='white', activebackground=color[1],
+                          activeforeground='white', disabledforeground='#dfe6f2')
+            if width:
+                b.config(width=width)
+            return b
         b = tk.Button(parent, text=text, command=cmd, bd=0, cursor='hand2', font=FB if primary else FM,
                       bg=C['accent'] if primary else C['input'],
                       fg='white' if primary else C['fg'],
@@ -7634,8 +7644,9 @@ class App:
         self.w_btn_run = self._btn(run, '▶  เริ่มทำงาน', self.w_start, primary=True)
         self.w_btn_run.pack(side='left', ipadx=18, ipady=5)
         self.w_btn_test = self._btn(run, '⏱  เซ็ตเวลาไว้ทดสอบ',
-                                    lambda: self.w_start(test_time=True))
-        self.w_btn_test.pack(side='left', padx=(8, 0), ipadx=10, ipady=5)
+                                    lambda: self.w_start(test_time=True),
+                                    color=(C['orange'], C['orange_on']))
+        self.w_btn_test.pack(side='left', padx=(8, 0), ipadx=14, ipady=5)
         self.w_btn_stop = self._btn(run, '■  ยกเลิก', self.w_stop)
         self.w_btn_stop.config(state='disabled')
         self.w_btn_stop.pack(side='left', padx=(8, 0), ipadx=12, ipady=5)
@@ -7653,8 +7664,9 @@ class App:
         self.lbl_wmade.pack(side='left', padx=10)
         self._btn(ib, '📋  คัดลอก CODE', self.copy_made_codes).pack(
             side='right', ipadx=8, ipady=2)
-        self.w_btn_reset = self._btn(ib, '↺  รีเซ็ตเวลาเริ่ม', self.w_reset)
-        self.w_btn_reset.pack(side='right', padx=(0, 8), ipadx=8, ipady=2)
+        self.w_btn_reset = self._btn(ib, '↺  รีเซ็ตเวลาเริ่ม', self.w_reset,
+                                     color=(C['green'], C['green_on']))
+        self.w_btn_reset.pack(side='right', padx=(0, 8), ipadx=12, ipady=3)
         tk.Label(ib, text='(เลือกแถวที่ต้องการก่อน · ไม่เลือก = เอาทั้งหมด)',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8)).pack(side='right', padx=8)
         mc = ('no', 'code', 'cid', 'cname', 'at', 'note')
