@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.9.6 : WR Master — จำคิว/ประวัติข้ามการปิดโปรแกรม + เตือนก่อนปิดถ้ายังไม่รีเซ็ตเวลาเริ่ม
+V0.9.7 : WR Master — เตือน CODE ซ้ำในคิว (แถวแดง) + ข้ามตัวซ้ำ/ตัวที่เคยสร้างตอนกดสร้างจริง
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -3322,6 +3322,28 @@ def wr_test_rows(rows, now=None):
     return out
 
 
+def wr_is_created(m):
+    """แถวในตาราง “สร้างแล้ว” นี้ สร้างจริงบนเว็บสำเร็จไหม (ไม่ใช่โหมดทดสอบ/ไม่ใช่ตัวพัง)"""
+    if 'created' in m and m['created'] is not None:
+        return bool(m['created'])
+    return bool(m.get('ok')) and str(m.get('notes') or '').startswith('สร้างแล้ว')
+
+
+def wr_queue_flags(queue, made=()):
+    """หาโค้ดที่มีปัญหาในคิวก่อนสร้าง — เว็บไม่ยอมให้ CODE ซ้ำกัน (ตอบ HTTP 422)
+    คืน (dup, done):
+      dup  = {CODE: [ลำดับแถวในคิว (เริ่ม 0), ...]}  โค้ดเดียวกันอยู่ในคิวมากกว่า 1 แถว
+      done = {CODE ที่เคยสร้างจริงสำเร็จไปแล้ว}"""
+    seen = {}
+    for i, d in enumerate(queue):
+        k = str(d.get('code') or '').strip().upper()
+        if k:
+            seen.setdefault(k, []).append(i)
+    dup = {k: v for k, v in seen.items() if len(v) > 1}
+    done = {str(m.get('code') or '').strip().upper() for m in made if wr_is_created(m)}
+    return dup, done & set(seen)
+
+
 def wr_same(got, want):
     """ค่าที่อ่านกลับมาจากเว็บ ตรงกับที่ใส่ไหม (ตัวเลขเทียบเป็นเลข · ข้อความตัดช่องว่างหัวท้าย)"""
     if got is None:
@@ -6007,7 +6029,7 @@ class App:
             self.log('   ✗ เว็บตอบ HTTP %d — ยังไม่ได้สร้าง' % code_http, 'ERR')
         self.add_made_code(d, cid if good else '',
                            'สร้างแล้ว' if good else 'ไม่สำเร็จ (HTTP %d)' % code_http,
-                           ok=good)
+                           ok=good, created=good)
         log_event('create_itemcode', code=d['code'], name=d['name'],
                   bundle=d.get('bundle'), ok=bool(good), http=code_http)
         return good
@@ -7625,6 +7647,8 @@ class App:
             self.w_tree.heading(c, text=t)
             self.w_tree.column(c, width=w, anchor='w')
         self.w_tree.tag_configure('warn', background='#3a3018', foreground='#e3b341')
+        self.w_tree.tag_configure('dup', background='#4a1c1c', foreground='#ff8a80')
+        self.w_tree.tag_configure('done', background='#1b2a44', foreground='#8fb3ff')
         wsb = ttk.Scrollbar(tw, orient='vertical', command=self.w_tree.yview)
         self.w_tree.configure(yscrollcommand=wsb.set)
         self.w_tree.pack(side='left', fill='both', expand=True)
@@ -7711,20 +7735,58 @@ class App:
         if save:
             self._w_save_state()
         self.w_tree.delete(*self.w_tree.get_children())
-        nobd = 0
         for i, d in enumerate(self.wq, 1):
-            bad = not d.get('bundle')
-            if bad:
-                nobd += 1
-            self.w_tree.insert('', 'end', tags=('warn',) if bad else (), values=(
+            self.w_tree.insert('', 'end', iid='wq%d' % i, values=(
                 i, d['code'], d['name'], d.get('start', '—'), d.get('end', '—'),
                 d.get('cap') or 'ไม่จำกัด', d.get('bundle') or '⚠ ไม่มี'))
         self.w_count.config(text='คิวว่าง' if not self.wq
                             else 'ในคิว %d โค้ด' % len(self.wq))
-        self.w_warn.config(
-            text=('⚠  มี %d โค้ดที่ยังไม่มีเลข Bundle ในชีท (แถวเหลือง) — '
-                  'ดับเบิลคลิกใส่เองก่อน ไม่งั้นตัวนั้นจะเลือก Bundle ไม่ได้' % nobd)
-            if nobd else '', fg=C['warn'])
+        self._w_tag_queue()
+
+    def _w_tag_queue(self):
+        """ระบายสีแถวในคิว + ข้อความเตือนใต้ตาราง
+        แดง = CODE ซ้ำกันในคิว (เว็บไม่ให้สร้างซ้ำ) · ฟ้า = เคยสร้างจริงไปแล้ว
+        เหลือง = ชีทไม่มีเลข Bundle"""
+        dup, done = wr_queue_flags(self.wq, self.made_codes)
+        nobd = 0
+        for i, d in enumerate(self.wq, 1):
+            iid = 'wq%d' % i
+            if not self.w_tree.exists(iid):
+                continue
+            k = str(d.get('code') or '').strip().upper()
+            v = list(self.w_tree.item(iid, 'values'))
+            code_txt = d['code']
+            if k in dup:
+                tag = 'dup'
+                code_txt = '⛔ ' + d['code']
+            elif k in done:
+                tag = 'done'
+                code_txt = '✔ ' + d['code']
+            elif not d.get('bundle'):
+                tag = 'warn'
+            else:
+                tag = ''
+            if not d.get('bundle'):
+                nobd += 1
+            if len(v) > 1:
+                v[1] = code_txt
+            self.w_tree.item(iid, tags=(tag,) if tag else (), values=v)
+        msgs = []
+        if dup:
+            msgs.append('⛔  CODE ซ้ำในคิว %d ตัว (แถวแดง): %s — เว็บไม่ให้สร้างโค้ดซ้ำ '
+                        'ต้องเช็กชีทแล้วลบ/แก้ให้เหลือแถวเดียว' % (
+                            len(dup), ' · '.join('%s (แถว %s)' % (
+                                k, ', '.join(str(x + 1) for x in v))
+                                for k, v in list(dup.items())[:4])
+                            + (' …' if len(dup) > 4 else '')))
+        if done:
+            msgs.append('✔  %d โค้ดในคิวเคยสร้างจริงไปแล้ว (แถวฟ้า) — กดสร้างซ้ำเว็บจะไม่ยอม '
+                        '(กด ↺ รีเซ็ตเวลาเริ่ม ได้ปกติ)' % len(done))
+        if nobd:
+            msgs.append('⚠  มี %d โค้ดที่ยังไม่มีเลข Bundle ในชีท (แถวเหลือง) — '
+                        'ดับเบิลคลิกใส่เองก่อน ไม่งั้นตัวนั้นจะเลือก Bundle ไม่ได้' % nobd)
+        self.w_warn.config(text='\n'.join(msgs),
+                           fg=C['err'] if dup else C['warn'])
 
     def _w_sel(self):
         s = self.w_tree.selection()
@@ -7741,8 +7803,11 @@ class App:
         dlg = CodeImportDialog(self.root, path)
         if not dlg.result:
             return
-        have = {d['code'] for d in self.wq}
-        add = [d for d in dlg.result if d['code'] not in have]
+        # ข้ามเฉพาะ "แถวเดิมเป๊ะ" (โค้ด+วันเริ่มเดียวกัน = นำเข้าชีทเดิมซ้ำ)
+        # โค้ดเดียวกันแต่คนละวัน = ชีทพิมพ์โค้ดซ้ำ -> ต้องเอาเข้ามาให้เห็นเป็นแถวแดง ไม่ใช่ซ่อน
+        have = {(d['code'].strip().upper(), d.get('start')) for d in self.wq}
+        add = [d for d in dlg.result
+               if (d['code'].strip().upper(), d.get('start')) not in have]
         self.wq.extend(add)
         self._w_refresh()
         self.log('นำเข้า Item Code %d โค้ด (รวม %d)' % (len(add), len(self.wq)), 'OK')
@@ -7751,8 +7816,19 @@ class App:
         if len(add) < len(dlg.result):
             self.log('  ข้ามโค้ดที่อยู่ในคิวอยู่แล้ว %d' % (len(dlg.result) - len(add)),
                      'INFO')
+        dup, _ = wr_queue_flags(self.wq)
+        if dup:
+            self.log('  ⛔ CODE ซ้ำในคิว %d ตัว: %s — เว็บไม่ให้สร้างซ้ำ เช็กชีทก่อนนะ'
+                     % (len(dup), ', '.join(dup)), 'ERR')
+            self.nb.select(self.tab_wr)
+            messagebox.showwarning(
+                'เจอ CODE ซ้ำ',
+                'ในคิวมี CODE ซ้ำกัน %d ตัว (แถวแดง):\n\n%s\n\n'
+                'เว็บไม่ยอมให้สร้างโค้ดซ้ำ — เช็กในชีทว่าตัวไหนถูก แล้วลบ/แก้แถวที่ผิดในคิว'
+                % (len(dup), '\n'.join('•  %s  (แถว %s)' % (
+                    k, ', '.join(str(x + 1) for x in v)) for k, v in list(dup.items())[:10])))
         log_event('wr_import', count=len(add), total=len(self.wq),
-                  file=os.path.basename(path))
+                  file=os.path.basename(path), dup=len(dup))
 
     def w_edit(self):
         if self.w_running:
@@ -7834,17 +7910,21 @@ class App:
         self.root.wait_window(top)
         return ok['v']
 
-    def add_made_code(self, d, cid, notes='', ok=True):
+    def add_made_code(self, d, cid, notes='', ok=True, created=False):
+        """created=True = กดสร้างจริงบนเว็บสำเร็จแล้ว (บางทีเว็บไม่ตอบเลข Id กลับมา
+        เลยใช้เลข Id ตัดสินไม่ได้ว่าสร้างแล้วหรือยัง)"""
         if d.get('test_time') and 'เวลาทดสอบ' not in notes:
             notes = (notes + ' · ' if notes else '') + 'เวลาทดสอบ (เริ่ม %s)' % d.get('start', '')
         row = {'code': d.get('code', ''), 'name': d.get('name', ''),
                'id': str(cid or '').strip() or '-', 'notes': notes, 'ok': bool(ok),
-               'at': datetime.now().strftime('%d/%m %H:%M'), 'd': dict(d)}
+               'at': datetime.now().strftime('%d/%m %H:%M'), 'd': dict(d),
+               'created': bool(created and ok)}
         self.made_codes.append(row)
         row['no'] = len(self.made_codes)
 
         def _do():
             self._w_show_made(row)
+            self._w_tag_queue()
             self._w_save_state()
         self.root.after(0, _do)
 
@@ -7861,7 +7941,7 @@ class App:
         if not self.made_codes:
             self.lbl_wmade.config(text='ยังไม่ได้สร้าง', fg=C['dim'])
             return
-        got = sum(1 for m in self.made_codes if m['id'] != '-')
+        got = sum(1 for m in self.made_codes if m['id'] not in ('-', ''))
         pend = len(self._w_pending())
         txt = 'สร้างแล้ว %d โค้ด%s' % (
             len(self.made_codes),
@@ -7879,7 +7959,7 @@ class App:
     def _w_pending(self):
         """โค้ดที่สร้างจริงแบบเวลาทดสอบ แต่ยังไม่ได้รีเซ็ตเวลาเริ่มกลับ"""
         return [m for m in self.made_codes
-                if m.get('ok') and m.get('id', '-') != '-'
+                if wr_is_created(m)
                 and (m.get('d') or {}).get('test_time')
                 and not (m.get('d') or {}).get('reset_done')]
 
@@ -7888,7 +7968,8 @@ class App:
             return                      # ยังไม่ได้โหลดของเก่า ห้ามเขียนทับ
         path = self._w_state_path()
         try:
-            made = [{k: m.get(k) for k in ('code', 'name', 'id', 'notes', 'ok', 'at', 'd')}
+            made = [{k: m.get(k) for k in ('code', 'name', 'id', 'notes', 'ok', 'at', 'd',
+                                           'created')}
                     for m in self.made_codes[-WR_KEEP:]]
             data = {'v': 1, 'saved': datetime.now().isoformat(timespec='seconds'),
                     'queue': self.wq, 'made': made}
@@ -7928,6 +8009,7 @@ class App:
             row = {'code': m['code'], 'name': m.get('name', ''), 'id': m.get('id') or '-',
                    'notes': m.get('notes', ''), 'ok': bool(m.get('ok')),
                    'at': m.get('at', ''), 'd': m.get('d') or {}}
+            row['created'] = wr_is_created(m)       # ไฟล์จาก v0.9.6 ยังไม่มีช่องนี้ -> เดาจากหมายเหตุ
             self.made_codes.append(row)
             row['no'] = len(self.made_codes)
             self._w_show_made(row)
@@ -8047,7 +8129,29 @@ class App:
                                           'ยังไม่มีโค้ดในคิว — นำเข้าไฟล์ต้นฉบับก่อน')
         do = self.wv_do.get()
         rows = wr_test_rows(self.wq) if test_time else [dict(d) for d in self.wq]
-        nobd = sum(1 for d in self.wq if not d.get('bundle'))
+        dup, done = wr_queue_flags(self.wq, self.made_codes)
+        if do and (dup or done):
+            bad = set(dup) | done
+            keep = [d for d in rows if d['code'].strip().upper() not in bad]
+            msg = ''
+            if dup:
+                msg += ('⛔  CODE ซ้ำในคิว %d ตัว: %s\n   (ไม่รู้ว่าแถวไหนถูก เลยข้ามทุกแถวของโค้ดนี้ '
+                        '— แก้ในคิวก่อนแล้วค่อยสร้างทีหลัง)\n\n' % (len(dup), ', '.join(dup)))
+            if done:
+                msg += ('✔  เคยสร้างจริงไปแล้ว %d ตัว: %s\n\n'
+                        % (len(done), ', '.join(sorted(done)[:8]) + (' …' if len(done) > 8 else '')))
+            if not keep:
+                return messagebox.showwarning('ไม่มีโค้ดให้สร้าง',
+                                              msg + 'ทุกโค้ดในคิวติดปัญหาข้างบน — ไม่มีอะไรให้สร้าง')
+            if not messagebox.askyesno('ข้ามโค้ดที่มีปัญหา',
+                                       msg + 'ข้ามพวกนี้ แล้วสร้างที่เหลือ %d โค้ดไหม?\n'
+                                       '(“ไม่” = ยกเลิก กลับไปแก้คิวก่อน)' % len(keep)):
+                return
+            skipped = len(rows) - len(keep)
+            rows = keep
+            self.log('ข้ามโค้ดที่มีปัญหา %d แถว (ซ้ำ %d · เคยสร้างแล้ว %d)'
+                     % (skipped, len(dup), len(done)), 'WARN')
+        nobd = sum(1 for d in rows if not d.get('bundle'))
         if test_time:
             late = [d['code'] for d in rows if d.get('end') and d['end'] <= d['start']]
             if late:
@@ -8056,7 +8160,7 @@ class App:
                     'โค้ดเหล่านี้เวลาสิ้นสุดในเอกสารไม่ได้อยู่หลังวันนี้ 00:00 '
                     '— เว็บอาจไม่ยอมให้สร้าง:\n\n' + '\n'.join(late[:15]))
         if do:
-            msg = 'จะสร้าง Item Code จริงบนเว็บ %d โค้ด\n' % len(self.wq)
+            msg = 'จะสร้าง Item Code จริงบนเว็บ %d โค้ด\n' % len(rows)
             if test_time:
                 msg += ('\n⏱  แบบเวลาทดสอบ: เวลาเริ่มใช้งาน = %s (วันนี้)\n'
                         '   เวลาสิ้นสุด/ชื่อ/Slug ยังตามเอกสาร\n' % rows[0]['start'])
@@ -8074,11 +8178,11 @@ class App:
         self.nb.select(self.tab_log)
         self.log('=' * 46, 'STEP')
         self.log(('เริ่มสร้าง Item Code จริง ' if do else 'เริ่มทดสอบกรอกฟอร์ม ')
-                 + '%d โค้ด' % len(self.wq), 'STEP')
+                 + '%d โค้ด' % len(rows), 'STEP')
         if test_time:
             self.log('⏱ เวลาทดสอบ: เวลาเริ่มใช้งานทุกโค้ด = %s (เวลาสิ้นสุดตามเอกสาร)'
                      % rows[0]['start'], 'STEP')
-        log_event('wr_start', count=len(self.wq), commit=bool(do), no_bundle=nobd,
+        log_event('wr_start', count=len(rows), commit=bool(do), no_bundle=nobd,
                   test_time=bool(test_time))
         threading.Thread(target=self._w_thread, args=(rows, do),
                          daemon=True).start()
