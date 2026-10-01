@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.9.8 : สร้าง Bundle — หาคอลัมน์ Aztek Item Id ใหม่ ไม่หยิบเลขลำดับคน (NO.) มาแทน
+V0.9.9 : สร้าง Bundle — อ่านชีทแพทเทิร์น Mini Tournament ได้ + เลือกคอลัมน์ Aztek Item Id เองได้
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -2906,6 +2906,10 @@ def parse_master_rows(rows, seen=None):
 _SRC_TIER = {t.lower(): t for t in TIERS}
 _SRC_STOP = {'start', 'end', 'limit', 'reset', 'category', 'product name', 'bundle',
              'date', 'announce', 'channel', 'detail', 'reward', 'fditemnum'}
+# หัวคอลัมน์ที่ "ไม่ใช่ Aztek Item Id แน่ๆ" — เลขในคอลัมน์พวกนี้ห้ามเอามาเป็น Id
+_SRC_NOT_ID = re.compile(
+    r'^\s*(no\.?|ลำดับ(ที่)?|อันดับ(ที่)?|day|วัน(ที่)?|step|ครั้งที่|bundle\s*no\.?|เลข\s*bundle|'
+    r'จำนวน.*|qty|quantity|uid|fd\w+|user\s*num.*|price|thb|point|famepoint|exp)\s*$')
 _SRC_KNOWN = ('fditemnum', 'fdposition', 'fditemkind', 'rank', 'display name', 'item des',
               'status', 'ระยะเวลา', 'ของขวัญ', 'amount', 'amt', 'จำนวน', 'ราคา', 'price',
               'thb', 'รวม', 'duration')
@@ -2969,8 +2973,32 @@ def bundle_rewards(rows, hr):
     return out
 
 
-def parse_bundle_sheet(rows, sheet_name):
-    """คืน (bundles, warnings) — แต่ละ bundle พร้อมเอาไปกรอกหน้าเว็บได้เลย"""
+def col_letter(c):
+    """0 -> A, 25 -> Z, 26 -> AA"""
+    s = ''
+    c += 1
+    while c:
+        c, r = divmod(c - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def col_index(letter):
+    """'A' -> 0, 'AA' -> 26 · ไม่ใช่ตัวอักษรคอลัมน์ -> None"""
+    t = str(letter or '').strip().upper()
+    if not re.fullmatch(r'[A-Z]{1,3}', t):
+        return None
+    n = 0
+    for ch in t:
+        n = n * 26 + (ord(ch) - 64)
+    return n - 1
+
+
+def parse_bundle_sheet(rows, sheet_name, force_col=None):
+    """คืน (bundles, warnings) — แต่ละ bundle พร้อมเอาไปกรอกหน้าเว็บได้เลย
+
+    force_col = เลขคอลัมน์ (0 = A) ที่ผู้ใช้ "ชี้เอง" ว่าเป็น Aztek Item Id
+    ใช้ตอนเจอชีทแพทเทิร์นใหม่ที่โปรแกรมเดาไม่ถูก — ข้ามการเดาทั้งหมด"""
     # ชื่อชีทเองก็มีอีโมจิ (✅ 💛) และติดไปกับชื่อบันเดิลสำรอง/คำเตือน — ล้างตั้งแต่ต้นทาง
     sheet_name = clean_text(sheet_name) or str(sheet_name or '')
     bundles = []
@@ -3040,22 +3068,40 @@ def parse_bundle_sheet(rows, sheet_name):
 
         # เดาเอง: คอลัมน์ตัวเลขที่ "ไม่มีหัวตารางที่รู้จัก"
         labeled = set(j for j, h in enumerate(low) if any(k in h for k in _SRC_KNOWN))
-        # กฎเดิมของทีม: Aztek Item Id = คอลัมน์ตัวเลขที่ "ไม่มีหัวตาราง"
-        # คอลัมน์ไหนมีหัวเป็นข้อความอื่น (Day / Bundle No. / NO. / จำนวนที่ได้ ...) ไม่ใช่ Id แน่ๆ
-        _idish = ('bundle', 'aztek', 'aztek item id', 'item id', 'itemid', 'id')
-        labeled |= set(j for j, h in enumerate(low)
-                       if h and src_int(h) is None and h not in _idish and 'aztek' not in h)
+        # คอลัมน์ที่หัวบอกชัดว่าเป็นอย่างอื่น (Day / Bundle No. / NO. / ลำดับ / จำนวน ...) ไม่ใช่ Id แน่ๆ
+        # แต่หัวที่เป็นแค่ป้ายหัวข้อ เช่น "1200บาท" ยังเป็นคอลัมน์ Id ได้ (ชีท Mini Tournament)
+        labeled |= set(j for j, h in enumerate(low) if h and _SRC_NOT_ID.match(h))
+        # ทีมวางคอลัมน์ Id ไว้ "ข้างหน้า" fdItemNum เสมอ -> ฝั่งซ้ายยอมให้มีป้ายหัวข้อได้
+        # ฝั่งขวาของตาราง (หลัง Amt/ราคา) มักเป็นโน้ต/ตัวคำนวณ -> ต้องไม่มีหัวเป็นข้อความ (กฎเดิม)
+        if kindc is not None:
+            labeled |= set(j for j, h in enumerate(low)
+                           if h and j > kindc and src_int(h) is None and h != 'bundle'
+                           and 'aztek' not in h and h not in ('item id', 'itemid', 'id'))
         for c in (kindc, posc, ikc, amtc, rankc, namec):
             if c is not None:
                 labeled.add(c)
         ncols = max(len(rows[r] or []) for r in drows)
-        cand = [c for c in range(ncols) if c not in labeled and
+        # คอลัมน์ที่ในแถวไอเทมมีป้าย "Bundle" ปนอยู่ แล้วเลขอยู่ใต้ป้าย
+        # = เลขพวกนั้นคือเลข Bundle ที่สร้างไว้แล้ว ไม่ใช่ Aztek Item Id ของแต่ละแถว
+        def has_text(c):
+            return any(c < len(rows[r] or []) and
+                       clean_text((rows[r] or [])[c]).lower().rstrip(':') in
+                       ('bundle', 'bundle id', 'bundle no', 'bundle no.') for r in drows)
+        cand = [c for c in range(ncols) if c not in labeled and not has_text(c) and
                 sum(1 for r in drows
                     if c < len(rows[r] or []) and src_int((rows[r] or [])[c]) is not None)
                 >= max(1, int(len(drows) * 0.6))]
 
         idcol = bid = None
         above = hdr[bi - 1] + 1 if bi > 0 else 0
+        if force_col is not None:
+            if any(force_col < len(rows[r] or []) and
+                   src_int((rows[r] or [])[force_col]) is not None for r in drows):
+                idcol = force_col
+            else:
+                warns.append('%s บล็อก %d (หัวตารางแถว %d): คอลัมน์ %s ที่เลือกไว้ไม่มีเลขเลย -> ข้าม'
+                             % (sheet_name, bi + 1, hr + 1, col_letter(force_col)))
+                continue
 
         def has_ids(c):
             return sum(1 for r in drows
@@ -3082,7 +3128,7 @@ def parse_bundle_sheet(rows, sheet_name):
 
         # (1) มีป้ายบอก ("Bundle" / Aztek / Item Id) ในหัวตาราง หรือเหนือหัวตาราง 1-2 แถว
         #     บางชีทป้าย Bundle อยู่แถวเดียวกับชื่อหัวข้อรางวัล ไม่ได้อยู่แถว fdItemNum
-        if idc_named is not None and any(
+        if idcol is None and idc_named is not None and any(
                 idc_named < len(rows[r] or []) and
                 src_int((rows[r] or [])[idc_named]) is not None for r in drows):
             idcol = idc_named
@@ -3128,8 +3174,18 @@ def parse_bundle_sheet(rows, sheet_name):
                     bid = b
                     break
         if idcol is None:
-            warns.append('%s บล็อก %d: หาคอลัมน์ Aztek Item Id ไม่เจอ -> ข้าม'
-                         % (sheet_name, bi + 1))
+            # บอกให้ไปดูตรงไหนในชีทได้เลย (แถวของหัวตาราง fdItemNum)
+            why = ''
+            for c in range(ncols):
+                if has_text(c):
+                    nums = [src_int((rows[r] or [])[c]) for r in drows
+                            if c < len(rows[r] or []) and src_int((rows[r] or [])[c])]
+                    if nums:
+                        why = ' — คอลัมน์ %s มีแต่เลข Bundle %s (สร้างไว้แล้ว?) ไม่มี Id รายไอเทม' % (
+                            col_letter(c), nums[0])
+                        break
+            warns.append('%s บล็อก %d (หัวตารางแถว %d): หาคอลัมน์ Aztek Item Id ไม่เจอ -> ข้าม%s'
+                         % (sheet_name, bi + 1, hr + 1, why))
             continue
 
         # ช่วงคอลัมน์ของตารางนี้ — ใช้กันไปหยิบของบล็อกที่วางคู่กันอยู่คนละฝั่ง
@@ -3207,6 +3263,12 @@ def parse_bundle_sheet(rows, sheet_name):
                 name = clean_text(h0)
         if not name:
             name = '%s #%d' % (sheet_name, bi + 1)
+        # หัวคอลัมน์ Id เป็นป้ายหัวข้อของบล็อกนี้เอง (เช่น "1200บาท") -> ต่อท้ายชื่อให้แยกกันออก
+        h0 = clean_text(header[idcol]) if idcol < len(header) else ''
+        if h0 and src_int(h0) is None and h0.lower() not in _SRC_STOP and \
+                not _SRC_NOT_ID.match(h0.lower()) and h0 not in name and \
+                'aztek' not in h0.lower() and h0.lower() not in ('item id', 'itemid', 'id'):
+            name = (name + ' ' + h0).strip()
 
         items = []
         for r in drows:
@@ -3539,10 +3601,10 @@ def scan_code_sheets_wb(wb, progress=None):
     return out
 
 
-def read_bundles_wb(wb, sheet):
+def read_bundles_wb(wb, sheet, force_col=None):
     rows = [list(r) if r else [] for r in
             wb[sheet].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True)]
-    return parse_bundle_sheet(rows, sheet)
+    return parse_bundle_sheet(rows, sheet, force_col)
 
 # ============================================================================
 #  [5.5] หน้าต่างนำเข้า Excel — เลือกชีท แล้วอ่านให้อัตโนมัติ
@@ -3883,15 +3945,18 @@ class BundleImportDialog:
     # ข้อความบนหน้าต่าง — คลาสลูก (CodeImportDialog) เปลี่ยนได้โดยไม่ต้องก๊อปโค้ดทั้งก้อน
     TITLE = 'นำเข้าบันเดิลจาก Excel'
     PICK_ALL = 'เลือกชีทที่มีบันเดิลทั้งหมด'
-    HINT = ('อ่านให้อัตโนมัติ — Aztek Item Id เอาจากคอลัมน์ Bundle ของตาราง · '
+    HINT = ('อ่านให้อัตโนมัติ — Aztek Item Id เอาจากคอลัมน์ข้างตารางไอเทม (ป้าย Bundle / คอลัมน์เลขหน้า fdItemNum) · '
             'จำนวนเอาจาก Amt/Amount · Tier เอาจาก Rank · '
             'famepoint/exp เอาจากกล่อง “ได้รับ famepoint กับ exp”')
     TREE_TITLE = 'บันเดิลที่เจอ'
     TREE_HEAD = 'บันเดิล / ไอเทม'
     scan_fn = staticmethod(lambda wb, progress=None: scan_bundle_sheets_wb(wb, progress))
-    read_fn = staticmethod(lambda wb, nm: read_bundles_wb(wb, nm))
+    read_fn = staticmethod(lambda wb, nm, col=None: read_bundles_wb(wb, nm, col))
+    ALLOW_COL = True           # มีช่อง "ชี้คอลัมน์ Aztek Item Id เอง" ไว้ใช้กับชีทแพทเทิร์นใหม่
+    AUTO = 'อัตโนมัติ'
 
     def __init__(self, parent, path):
+        self.force_col = None
         self.path = path
         self.result = None
         self.warns = []
@@ -3974,6 +4039,21 @@ class BundleImportDialog:
                                  font=('Segoe UI', 9), anchor='w', justify='left',
                                  wraplength=690)
         self.warn_lbl.pack(fill='x', pady=(6, 0))
+        if self.ALLOW_COL:
+            # ทางหนีไฟ: เจอชีทแพทเทิร์นที่โปรแกรมเดาไม่ถูก ชี้คอลัมน์เองได้เลย ไม่ต้องรอแก้โปรแกรม
+            cf = tk.Frame(right, bg=C['bg'])
+            cf.pack(fill='x', pady=(8, 0))
+            tk.Label(cf, text='คอลัมน์ Aztek Item Id', bg=C['bg'], fg=C['fg'],
+                     font=('Segoe UI', 9, 'bold')).pack(side='left')
+            self.col_var = tk.StringVar(value=self.AUTO)
+            self.col_box = ttk.Combobox(
+                cf, textvariable=self.col_var, width=10, state='readonly',
+                values=[self.AUTO] + [col_letter(i) for i in range(52)])
+            self.col_box.pack(side='left', padx=(8, 0))
+            self.col_box.bind('<<ComboboxSelected>>', lambda e: self._col_changed())
+            tk.Label(cf, text='ปกติปล่อย “อัตโนมัติ” · ถ้าโปรแกรมหาเลขไม่เจอ/หยิบผิด '
+                              'ให้เลือกตัวอักษรคอลัมน์ในชีท (A, B, H…) ที่มีเลข Id เอง',
+                     bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8)).pack(side='left', padx=(8, 0))
 
         tk.Label(right, text=self.TREE_TITLE, bg=C['bg'], fg=C['dim'],
                  font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(10, 4))
@@ -4059,7 +4139,15 @@ class BundleImportDialog:
                 if 0 <= i < len(self.sheets)]
 
     def _key(self):
-        return '\x00'.join(self._selected())
+        k = '\x00'.join(self._selected())
+        if k and self.force_col is not None:
+            k += '\x01' + str(self.force_col)
+        return k
+
+    def _col_changed(self):
+        v = self.col_var.get()
+        self.force_col = None if v == self.AUTO else col_index(v)
+        self._on_sheet()
 
     def _pick_all(self):
         self.lb.selection_clear(0, tk.END)
@@ -4110,7 +4198,10 @@ class BundleImportDialog:
         try:
             with self.lock:
                 for nm in names:
-                    b, w = self.read_fn(self.wb, nm)
+                    if self.ALLOW_COL and self.force_col is not None:
+                        b, w = self.read_fn(self.wb, nm, self.force_col)
+                    else:
+                        b, w = self.read_fn(self.wb, nm)
                     bs.extend(b)
                     ws.extend(w)
         except Exception as ex:
@@ -4144,7 +4235,9 @@ class BundleImportDialog:
                 self.tree.insert(pid, 'end', text='      ⭐ ' + nm, tags=('rw',),
                                  values=(r['qty'], DEFAULT_TIER,
                                          'เครดิตเรียลไทม์' if r['type'] == 'CREDIT' else 'exp'))
-        self.info.config(text='%s · พบ %d บันเดิล' % (note, len(bs)))
+        self.info.config(text='%s · พบ %d บันเดิล%s' % (
+            note, len(bs), '  (คอลัมน์ Id = %s ตามที่เลือก)' % col_letter(self.force_col)
+            if self.force_col is not None else ''))
         self.warn_lbl.config(text=('⚠  %d จุดที่ต้องดู เช่น %s' % (len(ws), ws[0][:90]))
                              if ws else '')
         self.count_lbl.config(text='จะนำเข้า %d บันเดิล' % len(bs) if bs else '')
@@ -4182,6 +4275,7 @@ class CodeImportDialog(BundleImportDialog):
     TREE_HEAD = 'CODE / ชื่อ Item Code'
     scan_fn = staticmethod(lambda wb, progress=None: scan_code_sheets_wb(wb, progress))
     read_fn = staticmethod(lambda wb, nm: read_codes_wb(wb, nm))
+    ALLOW_COL = False
 
     def _show(self, bs, ws, note):
         self.bundles = bs
