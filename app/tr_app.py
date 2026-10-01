@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.9.7 : WR Master — เตือน CODE ซ้ำในคิว (แถวแดง) + ข้ามตัวซ้ำ/ตัวที่เคยสร้างตอนกดสร้างจริง
+V0.9.8 : สร้าง Bundle — หาคอลัมน์ Aztek Item Id ใหม่ ไม่หยิบเลขลำดับคน (NO.) มาแทน
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -3040,6 +3040,11 @@ def parse_bundle_sheet(rows, sheet_name):
 
         # เดาเอง: คอลัมน์ตัวเลขที่ "ไม่มีหัวตารางที่รู้จัก"
         labeled = set(j for j, h in enumerate(low) if any(k in h for k in _SRC_KNOWN))
+        # กฎเดิมของทีม: Aztek Item Id = คอลัมน์ตัวเลขที่ "ไม่มีหัวตาราง"
+        # คอลัมน์ไหนมีหัวเป็นข้อความอื่น (Day / Bundle No. / NO. / จำนวนที่ได้ ...) ไม่ใช่ Id แน่ๆ
+        _idish = ('bundle', 'aztek', 'aztek item id', 'item id', 'itemid', 'id')
+        labeled |= set(j for j, h in enumerate(low)
+                       if h and src_int(h) is None and h not in _idish and 'aztek' not in h)
         for c in (kindc, posc, ikc, amtc, rankc, namec):
             if c is not None:
                 labeled.add(c)
@@ -3050,15 +3055,59 @@ def parse_bundle_sheet(rows, sheet_name):
                 >= max(1, int(len(drows) * 0.6))]
 
         idcol = bid = None
+        above = hdr[bi - 1] + 1 if bi > 0 else 0
+
+        def has_ids(c):
+            return sum(1 for r in drows
+                       if c < len(rows[r] or []) and src_int((rows[r] or [])[c]) is not None) \
+                >= max(1, int(len(drows) * 0.6))
+
+        # "ก้อนตาราง" ของบล็อกนี้ = คอลัมน์ที่ติดกันต่อจาก fdItemNum ไปจนเจอคอลัมน์ว่างทั้งแท่ง
+        # ชีทประกาศผลมีตารางรายชื่อคน (NO. 1,2,3...) วางอยู่ข้างๆ คั่นด้วยคอลัมน์ว่าง
+        # -> เลขลำดับคนพวกนั้นต้องไม่ถูกเอามาเป็น Aztek Item Id (เคยพลาดในชีท Pet Contest)
+        def col_used(c):
+            # ใช้งานอยู่ = มีค่าในแถวไอเทม หรือมีหัวคอลัมน์ (คอลัมน์หัวข้อที่ข้างล่างว่าง ก็ยังนับเป็นตารางเดียวกัน)
+            return (c < len(header) and header[c] != '') or \
+                any(c < len(rows[r] or []) and clean_text((rows[r] or [])[c]) for r in drows)
+        block = set()
+        if kindc is not None:
+            c = kindc
+            while c >= 0 and col_used(c):
+                block.add(c)
+                c -= 1
+            c = kindc + 1
+            while c < ncols and col_used(c):
+                block.add(c)
+                c += 1
+
+        # (1) มีป้ายบอก ("Bundle" / Aztek / Item Id) ในหัวตาราง หรือเหนือหัวตาราง 1-2 แถว
+        #     บางชีทป้าย Bundle อยู่แถวเดียวกับชื่อหัวข้อรางวัล ไม่ได้อยู่แถว fdItemNum
         if idc_named is not None and any(
                 idc_named < len(rows[r] or []) and
                 src_int((rows[r] or [])[idc_named]) is not None for r in drows):
             idcol = idc_named
-        else:
+        if idcol is None:
+            for r in range(hr - 1, max(hr - 3, above) - 1, -1):
+                rl = [clean_text(x).lower() for x in (rows[r] or [])]
+                hits = [j for j, h in enumerate(rl)
+                        if (h == 'bundle' or 'aztek' in h or
+                            h in ('item id', 'itemid', 'bundle id', 'bundleid'))
+                        and j not in labeled and has_ids(j)]
+                if hits:
+                    anchor = kindc if kindc is not None else 0
+                    idcol = min(hits, key=lambda j: (j not in block, abs(j - anchor)))
+                    break
+        if idcol is None:
+            pool = [c for c in cand if c in block] if block else list(cand)
+            anchor = kindc if kindc is not None else 0
+            def cover(c):
+                return sum(1 for r in drows
+                           if c < len(rows[r] or []) and src_int((rows[r] or [])[c]) is not None)
+            # คอลัมน์ที่มีเลขครบทุกแถวไอเทมมาก่อน (เลขโดดๆ แถวเดียวมักเป็นเลข Bundle) แล้วค่อยดูว่าใกล้ตาราง
+            pool = sorted(pool, key=lambda c: (-cover(c), abs(c - anchor), c))
             # เลข Bundle: ดูแค่ 1-2 แถวเหนือหัวตาราง (กันไปหยิบเลขของบล็อกก่อนหน้า)
-            above = hdr[bi - 1] + 1 if bi > 0 else 0
             bid_top = max(hr - 2, above)
-            for c in cand:
+            for c in pool:
                 for r in range(hr - 1, bid_top - 1, -1):
                     row = rows[r] or []
                     b = src_int(row[c]) if c < len(row) else None
@@ -3067,11 +3116,17 @@ def parse_bundle_sheet(rows, sheet_name):
                         break
                 if idcol is not None:
                     break
-            if idcol is None and cand:
+            if idcol is None and pool:
                 # เอาคอลัมน์ที่ "อยู่ติดกับตารางไอเทม" ที่สุด ไม่ใช่ตัวซ้ายสุดของทั้งแผ่น
-                # (ชีทที่มีตารางรายชื่อคนอยู่ข้างๆ จะมีคอลัมน์ลำดับ 1,2,3 หลอกอยู่)
-                anchor = kindc if kindc is not None else 0
-                idcol = min(cand, key=lambda c: (abs(c - anchor), c))
+                idcol = pool[0]
+        if idcol is not None and bid is None:
+            # เลข Bundle ที่เขียนไว้เหนือหัวตาราง ในคอลัมน์เดียวกับ Aztek Item Id (ถ้ามี)
+            for r in range(hr - 1, max(hr - 3, above) - 1, -1):
+                row = rows[r] or []
+                b = src_int(row[idcol]) if idcol < len(row) else None
+                if b is not None:
+                    bid = b
+                    break
         if idcol is None:
             warns.append('%s บล็อก %d: หาคอลัมน์ Aztek Item Id ไม่เจอ -> ข้าม'
                          % (sheet_name, bi + 1))
@@ -3122,11 +3177,16 @@ def parse_bundle_sheet(rows, sheet_name):
             # ต้องดูเฉพาะช่วงคอลัมน์นั้น เพราะบางชีทมีตารางรายชื่อคนอยู่ข้างๆ
             # เรียงกันแบบ  ชื่อเรื่อง -> คำอธิบาย -> หัวตาราง  เลยเอา "บรรทัดบนสุด"
             picks = []
+            gap = 0
             for r in range(hr - 1, max(hr - 7, 0) - 1, -1):
                 rl = [('' if c is None else str(c)).strip() for c in (rows[r] or [])]
                 seg = [rl[j] for j in range(bl, min(br + 1, len(rl))) if rl[j]]
                 if not seg:
-                    break
+                    # บางชีทเว้นบรรทัดว่าง 1 แถวระหว่างหัวข้อรางวัลกับหัวตาราง — ข้ามได้แถวเดียว
+                    if picks or gap:
+                        break
+                    gap += 1
+                    continue
                 nz = [t for t in seg
                       if src_int(t) is None and t.lower() not in _SRC_STOP]
                 if len(nz) != 1:
@@ -3179,6 +3239,18 @@ def parse_bundle_sheet(rows, sheet_name):
             warns.append('%s "%s": ตารางมี %d แถว แต่อ่านมาได้ %d — '
                          'ไปดูคอลัมน์ Aztek Item Id ในชีทด้วย'
                          % (sheet_name, name, len(drows), len(items)))
+        # คอลัมน์ที่เลขวิ่งต่อเนื่องทะลุขอบตารางทั้งบนและล่าง (…2,3,4,5…) = คอลัมน์ลำดับ
+        # ของตารางอื่น ไม่ใช่ Aztek Item Id (Id จริงหยุดอยู่ในตารางไอเทม)
+        def _num(r):
+            row = rows[r] if 0 <= r < len(rows) else None
+            v = src_int((row or [])[idcol]) if row and idcol < len(row) else None
+            return int(v) if v is not None else None
+        a, b = _num(drows[0] - 1), _num(drows[-1] + 1)
+        f, l = _num(drows[0]), _num(drows[-1])
+        if None not in (a, b, f, l) and f - a == 1 and b - l == 1 and \
+                l - f == drows[-1] - drows[0]:
+            warns.append('%s "%s": คอลัมน์ที่ได้เป็นเลขลำดับวิ่งต่อจากตารางอื่น (%d, %d …) — '
+                         'น่าจะหยิบผิดคอลัมน์ ตรวจก่อนสร้าง' % (sheet_name, name, f, f + 1))
         # เลขเรียง 1,2,3... ทั้งชุด = น่าจะไปหยิบคอลัมน์ "ลำดับ" มาแทน Aztek Item Id
         if idc_named is None and len(items) >= 3:
             nums = [int(i['id']) for i in items]
