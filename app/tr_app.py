@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V1.0.1 : แยกแท็บ “🎲 Item Code” (โค้ดสุ่ม Server Generate) ออกจาก WR Master
+V1.0.2 : แท็บ Item Code — โค้ดสุ่มไม่มีช่อง CODE (เว็บเจนเอง) · รองรับ Fix Codes เมื่อชีทมีช่อง CODE
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -3466,6 +3466,44 @@ def wr_is_created(m):
     return bool(m.get('ok')) and str(m.get('notes') or '').startswith('สร้างแล้ว')
 
 
+def wr_ident(d):
+    """ตัวตนของโค้ดหนึ่งตัว: CODE (ถ้ามี) — โค้ดสุ่มไม่มี CODE (เว็บเจนให้เอง) ใช้ Slug แทน"""
+    c = str(d.get('code') or '').strip()
+    return c if c else str(d.get('slug') or '').strip()
+
+
+def wr_key(d):
+    c = str(d.get('code') or '').strip()
+    return c.upper() if c else str(d.get('slug') or '').strip().lower()
+
+
+def wr_is_random(d):
+    """โค้ดสุ่ม (Server Generate) = ไม่มี CODE ในชีท ระบบเว็บเจนเอง"""
+    return (d.get('kind') == 'gen' and not str(d.get('code') or '').strip()
+            and d.get('code_type') != 'Fix Codes')
+
+
+def wr_cell(d, col, i=0):
+    """ข้อความในช่องของตารางคิว"""
+    if col == 'n':
+        return i
+    if col == 'code':
+        return str(d.get('code') or '')
+    if col == 'ctype':
+        return '🎲 สุ่ม' if wr_is_random(d) else 'Fix'
+    if col == 'slug':
+        return str(d.get('slug') or '')
+    if col == 'wname':
+        return d.get('name', '')
+    if col in ('start', 'end'):
+        return d.get(col) or '—'
+    if col == 'cap':
+        return d.get('cap') or 'ไม่จำกัด'
+    if col == 'bundle':
+        return d.get('bundle') or '⚠ ไม่มี'
+    return ''
+
+
 def wr_queue_flags(queue, made=()):
     """หาโค้ดที่มีปัญหาในคิวก่อนสร้าง — เว็บไม่ยอมให้ CODE ซ้ำกัน (ตอบ HTTP 422)
     คืน (dup, done):
@@ -3473,11 +3511,11 @@ def wr_queue_flags(queue, made=()):
       done = {CODE ที่เคยสร้างจริงสำเร็จไปแล้ว}"""
     seen = {}
     for i, d in enumerate(queue):
-        k = str(d.get('code') or '').strip().upper()
+        k = wr_key(d)
         if k:
             seen.setdefault(k, []).append(i)
     dup = {k: v for k, v in seen.items() if len(v) > 1}
-    done = {str(m.get('code') or '').strip().upper() for m in made if wr_is_created(m)}
+    done = {wr_key(m.get('d') or m) for m in made if wr_is_created(m)}
     return dup, done & set(seen)
 
 
@@ -3655,8 +3693,21 @@ def parse_gen_sheet(rows, sheet_name):
             continue                                   # ไม่ใช่แพทเทิร์นนี้
         low = ' | '.join(t.lower() for _, _, t in texts)
         repeat = False if 'เติมซ้ำไม่ได้' in low else (True if 'เติมซ้ำได้' in low else None)
-        if 'unique' in low:
-            ctype = 'Server Generate'
+        # มีช่อง CODE (ป้าย "CODE" + โค้ดข้างๆ/ข้างล่าง) = Fix Codes ใช้โค้ดนั้น
+        # ไม่มี = โค้ดสุ่ม เว็บเจนให้เอง (unique code)
+        fixcode = ''
+        for r, c, t in texts + [(r, c, clean_text(cell(r, c))) for r in range(r0, hr)
+                                 for c in range(len(rows[r] or []))]:
+            if t.lower().rstrip(':') in ('code', 'master code', 'โค้ด'):
+                for rr, cc in ((r, c + 1), (r, c + 2), (r + 1, c)):
+                    v = clean_text(cell(rr, cc))
+                    if v and src_int(v) is None and re.fullmatch(r'[A-Za-z0-9_\-]{4,40}', v):
+                        fixcode = v
+                        break
+            if fixcode:
+                break
+        if fixcode:
+            ctype = 'Fix Codes'
         elif 'fix' in low or 'ส่ง code เอง' in low:
             ctype = 'Fix Codes'
         else:
@@ -3721,7 +3772,7 @@ def parse_gen_sheet(rows, sheet_name):
         name = (sheet_name + (' ' + title if title else ' #%d' % n)).strip()
         slug = gen_slug(sheet_name, sy, n)
         cap = str(cnt + GEN_SPARE)
-        d = {'kind': 'gen', 'code': slug, 'slug': slug, 'name': name, 'title': title,
+        d = {'kind': 'gen', 'code': fixcode, 'slug': slug, 'name': name, 'title': title,
              'sheet': sheet_name, 'row': hr + 1, 'start': start, 'end': end,
              'limit': str(cnt), 'cap': cap, 'unlimited': False, 'gen_count': cap,
              'per_user': cap if repeat else '1', 'repeat': repeat, 'code_type': ctype,
@@ -3729,9 +3780,8 @@ def parse_gen_sheet(rows, sheet_name):
         where = '%s "%s" (หัวตารางแถว %d)' % (sheet_name, title or '#%d' % n, hr + 1)
         if repeat is None:
             warns.append(where + ': ไม่เจอ “เติมซ้ำได้/ไม่ได้” -> ใส่ต่อ 1 User = 1')
-        if ctype != 'Server Generate':
-            warns.append(where + ': ไม่ใช่ unique code (แบบ %s) — ยังไม่รองรับ ข้าม' % ctype)
-            continue
+        if ctype == 'Fix Codes' and not fixcode:
+            warns.append(where + ': ชีทบอกว่าเป็น Fix code แต่ไม่เจอช่อง CODE — ต้องใส่ CODE เอง')
         if not start or not end:
             warns.append(where + ': ไม่เจอวันเริ่ม/หมดอายุ — ต้องใส่เอง')
         if not bid:
@@ -4465,7 +4515,8 @@ class CodeImportDialog(BundleImportDialog):
         self.tree.delete(*self.tree.get_children())
         for d in bs:
             pid = self.tree.insert(
-                '', 'end', text='🎟  ' + d['code'], open=False,
+                '', 'end', text=('🎲  สุ่ม · ' + d.get('slug', '')) if wr_is_random(d)
+                else '🎟  ' + d['code'], open=False,
                 values=(d.get('cap') or 'ไม่จำกัด',
                         ('Bundle ' + d['bundle']) if d.get('bundle') else '⚠ ไม่มี Bundle',
                         d['name']))
@@ -4800,7 +4851,7 @@ class GenImportDialog(CodeImportDialog):
             'ชื่อ = ชื่อชีท + หัวรางวัล · Slug = ชื่อกิจกรรม-เดือน-ลำดับ · '
             'จำนวนเผื่อให้อีก %d · Bundle เอาจากเลขเหนือหัวตาราง' % GEN_SPARE)
     TREE_TITLE = 'Item Code ที่เจอ'
-    TREE_HEAD = 'Slug / ชื่อ Item Code'
+    TREE_HEAD = 'CODE (หรือ 🎲 สุ่ม · Slug) / ชื่อ Item Code'
     scan_fn = staticmethod(lambda wb, progress=None: scan_gen_sheets_wb(wb, progress))
     read_fn = staticmethod(lambda wb, nm: read_gen_wb(wb, nm))
 
@@ -4869,6 +4920,14 @@ class App:
     # แท็บ WR Master ใช้ค่าพวกนี้ · แท็บ Item Code (โค้ดสุ่ม) ใช้ชุดของตัวเองผ่าน WRCtx
     W_STATE = 'wr_state.json'
     W_NAME = 'WR Master'
+    W_COLS = (('n', '#', 38), ('code', 'CODE', 120), ('wname', 'ชื่อ Item Code', 320),
+              ('start', 'เริ่มใช้งาน', 140), ('end', 'สิ้นสุด', 140),
+              ('cap', 'จำกัดจำนวน', 90), ('bundle', 'Bundle', 80))
+    W_FORM = (('CODE', 'code', 26), ('ชื่อ Item Code (ไทย/อังกฤษ)', 'name', 44),
+              ('เวลาเริ่มใช้งาน', 'start', 26), ('เวลาสิ้นสุด', 'end', 26),
+              ('จำนวนการใช้งานต่อ 1 User', 'per_user', 10),
+              ('จำกัดจำนวน (เว้นว่าง = ไม่จำกัด)', 'cap', 12),
+              ('เลข Bundle', 'bundle', 12))
 
     def __init__(self):
         self.root = tk.Tk()
@@ -4960,6 +5019,17 @@ class App:
         # แท็บ Item Code (โค้ดสุ่ม) — หน้าตา/ปุ่มเหมือน WR Master แต่คิว ประวัติ ไฟล์ แยกกันหมด
         self.gen = WRCtx(self, self.tab_gen, state='gen_state.json', dialog=GenImportDialog,
                          name='Item Code',
+                         cols=(('n', '#', 34), ('ctype', 'ประเภท', 74), ('code', 'CODE', 110),
+                               ('slug', 'Slug', 170), ('wname', 'ชื่อ Item Code', 270),
+                               ('start', 'เริ่มใช้งาน', 130), ('end', 'สิ้นสุด', 130),
+                               ('cap', 'จำนวน', 56), ('bundle', 'Bundle', 60)),
+                         form=(('CODE (เว้นว่าง = โค้ดสุ่ม เว็บเจนเอง)', 'code', 26),
+                               ('Slug', 'slug', 32),
+                               ('ชื่อ Item Code (ไทย/อังกฤษ)', 'name', 44),
+                               ('เวลาเริ่มใช้งาน', 'start', 26), ('เวลาสิ้นสุด', 'end', 26),
+                               ('จำนวนการใช้งานต่อ 1 User', 'per_user', 10),
+                               ('จำนวนโค้ด (เผื่อ +%d แล้ว)' % GEN_SPARE, 'cap', 12),
+                               ('เลข Bundle', 'bundle', 12)),
                          hint=('อ่านชีทรางวัลโค้ดสุ่ม 🎲 (มีกล่อง “โค้ดจำนวน N โค้ด” · unique code) — '
                                'จำนวนเผื่อให้อีก %d เสมอ  ·  เลข Bundle เอาจากเลขเหนือหัวตาราง  ·  '
                                'ดับเบิลคลิกเพื่อแก้รายตัว' % GEN_SPARE))
@@ -6104,7 +6174,7 @@ class App:
         if r == 'none' and str(await page.evaluate(JS_IC_LIST, ['search', ''])) == 'ok':
             try:
                 q = page.locator('[data-trw-q="1"]').first
-                await q.fill(d['code'], timeout=4000)
+                await q.fill(wr_ident(d), timeout=4000)
                 await q.press('Enter')
                 await page.wait_for_timeout(1200)
             except Exception:
@@ -6240,11 +6310,11 @@ class App:
         same, shown = await self._w_date_ok(page, SEL_CODE['start'], want)
         if same:
             self.log('   ✓ แก้เวลาเริ่มแล้ว — เปิดหน้าใหม่เช็กแล้วขึ้น “%s”' % shown, 'OK')
-            log_event('reset_itemcode_start', code=d['code'], start=want, ok=True)
+            log_event('reset_itemcode_start', code=wr_ident(d), start=want, ok=True)
             return True
         self.log('   ✗ กดบันทึกแล้ว แต่เปิดหน้าใหม่เวลาเริ่มยังเป็น “%s” (ไม่ใช่ %s)'
                  % (shown or '?', want), 'ERR')
-        log_event('reset_itemcode_start', code=d['code'], start=want, ok=False)
+        log_event('reset_itemcode_start', code=wr_ident(d), start=want, ok=False)
         return False
 
 
@@ -6263,9 +6333,10 @@ class App:
         gen = d.get('kind') == 'gen'            # โค้ดสุ่ม (Server Generate) จากชีทรางวัล
         # Slug ยึดวันในเอกสารเสมอ (โค้ดสุ่มทำ Slug ไว้แล้วตอนอ่านชีท)
         slug = d.get('slug') or wr_slug(d['code'], d.get('doc_start') or d.get('start'))
+        rnd = wr_is_random(d)                   # โค้ดสุ่ม: ไม่มี CODE เว็บเจนเอง
         rw_name = d['name'] if gen else d['code']
         rw_per = '1' if gen else per            # ฝั่งของรางวัล: ต่อ 1 User = 1 เสมอ
-        rw_cap = '' if gen else cap             # โค้ดสุ่ม: ไม่เปิด "จำกัดจำนวน Code" ฝั่งขวา
+        rw_cap = '' if rnd else cap             # โค้ดสุ่ม: ไม่เปิด "จำกัดจำนวน Code" ฝั่งขวา
         bad = []
         texts = []            # (ป้าย, ฝั่ง, ค่า, ชื่อที่โชว์) — ไว้อ่านกลับตอนท้าย
 
@@ -6309,11 +6380,14 @@ class App:
         if rw_cap:
             await T('rw_max', 'right', rw_cap, 'จำนวนรวม')
             await T('rw_left', 'right', rw_cap, 'จำนวนคงเหลือ (ขวา)')
-        ctype = SEL_CODE['code_gen'] if gen else SEL_CODE['code_fix']
+        ctype = SEL_CODE['code_gen'] if rnd else SEL_CODE['code_fix']
         if not await self._w_select(page, SEL_CODE['code_type'], 'right', ctype,
                                     'ประเภทของ Code'):
             bad.append('ประเภทของ Code')
-        if gen:
+        if not rnd and not str(d.get('code') or '').strip():
+            self.log('   ! ไม่มี CODE ในคิว (แบบ Fix Codes) — ใส่ CODE ก่อนนะ', 'WARN')
+            bad.append('รายการ Code')
+        elif rnd:
             await page.wait_for_timeout(200)          # ช่องจำนวน Code โผล่หลังเลือกประเภท
             await T('gen_count', 'right', d.get('gen_count') or cap, 'จำนวน Code ที่ต้องการ')
         else:
@@ -6415,7 +6489,7 @@ class App:
         self.add_made_code(d, cid if good else '',
                            'สร้างแล้ว' if good else 'ไม่สำเร็จ (HTTP %d)' % code_http,
                            ok=good, created=good)
-        log_event('create_itemcode', code=d['code'], name=d['name'],
+        log_event('create_itemcode', code=wr_ident(d), name=d['name'],
                   bundle=d.get('bundle'), ok=bool(good), http=code_http)
         return good
 
@@ -8023,13 +8097,10 @@ class App:
         s2 = self._card(p, 'คิว Item Code ที่จะสร้าง', grow=True)
         tw = tk.Frame(s2, bg=C['bg'])
         tw.pack(fill='both', expand=True)
-        wc = ('n', 'code', 'wname', 'start', 'end', 'cap', 'bundle')
+        wc = tuple(c for c, _, _ in self.W_COLS)
         self.w_tree = ttk.Treeview(tw, columns=wc, show='headings', height=7,
                                    style='TR.Treeview', selectmode='extended')
-        for c, t, w in (('n', '#', 38), ('code', 'CODE', 120),
-                        ('wname', 'ชื่อ Item Code', 320), ('start', 'เริ่มใช้งาน', 140),
-                        ('end', 'สิ้นสุด', 140), ('cap', 'จำกัดจำนวน', 90),
-                        ('bundle', 'Bundle', 80)):
+        for c, t, w in self.W_COLS:
             self.w_tree.heading(c, text=t)
             self.w_tree.column(c, width=w, anchor='w')
         self.w_tree.tag_configure('warn', background='#3a3018', foreground='#e3b341')
@@ -8122,10 +8193,8 @@ class App:
             self._w_save_state()
         self.w_tree.delete(*self.w_tree.get_children())
         for i, d in enumerate(self.wq, 1):
-            self.w_tree.insert('', 'end', iid='wq%d' % i, values=(
-                i, d['code'], d['name'], d.get('start', '—'), d.get('end', '—'),
-                (d.get('cap') + ' · สุ่ม') if d.get('kind') == 'gen' else (d.get('cap') or 'ไม่จำกัด'),
-                d.get('bundle') or '⚠ ไม่มี'))
+            self.w_tree.insert('', 'end', iid='wq%d' % i,
+                               values=tuple(wr_cell(d, c, i) for c, _, _ in self.W_COLS))
         self.w_count.config(text='คิวว่าง' if not self.wq
                             else 'ในคิว %d โค้ด' % len(self.wq))
         self._w_tag_queue()
@@ -8140,27 +8209,31 @@ class App:
             iid = 'wq%d' % i
             if not self.w_tree.exists(iid):
                 continue
-            k = str(d.get('code') or '').strip().upper()
+            k = wr_key(d)
             v = list(self.w_tree.item(iid, 'values'))
-            code_txt = ('🎲 ' if d.get('kind') == 'gen' else '') + d['code']
+            cols = [c for c, _, _ in self.W_COLS]
+            # ⛔/✔ ติดที่ช่อง CODE · โค้ดสุ่มไม่มี CODE เลยติดที่ช่อง Slug แทน
+            mc = 'code' if (str(d.get('code') or '').strip() or 'slug' not in cols) else 'slug'
+            mi = cols.index(mc) if mc in cols else 1
+            code_txt = wr_cell(d, mc, i)
             if k in dup:
                 tag = 'dup'
-                code_txt = '⛔ ' + d['code']
+                code_txt = '⛔ ' + code_txt
             elif k in done:
                 tag = 'done'
-                code_txt = '✔ ' + d['code']
+                code_txt = '✔ ' + code_txt
             elif not d.get('bundle'):
                 tag = 'warn'
             else:
                 tag = ''
             if not d.get('bundle'):
                 nobd += 1
-            if len(v) > 1:
-                v[1] = code_txt
+            if len(v) > mi:
+                v[mi] = code_txt
             self.w_tree.item(iid, tags=(tag,) if tag else (), values=v)
         msgs = []
         if dup:
-            msgs.append('⛔  CODE ซ้ำในคิว %d ตัว (แถวแดง): %s — เว็บไม่ให้สร้างโค้ดซ้ำ '
+            msgs.append('⛔  CODE/Slug ซ้ำในคิว %d ตัว (แถวแดง): %s — เว็บไม่ให้สร้างซ้ำ '
                         'ต้องเช็กชีทแล้วลบ/แก้ให้เหลือแถวเดียว' % (
                             len(dup), ' · '.join('%s (แถว %s)' % (
                                 k, ', '.join(str(x + 1) for x in v))
@@ -8192,9 +8265,8 @@ class App:
             return
         # ข้ามเฉพาะ "แถวเดิมเป๊ะ" (โค้ด+วันเริ่มเดียวกัน = นำเข้าชีทเดิมซ้ำ)
         # โค้ดเดียวกันแต่คนละวัน = ชีทพิมพ์โค้ดซ้ำ -> ต้องเอาเข้ามาให้เห็นเป็นแถวแดง ไม่ใช่ซ่อน
-        have = {(d['code'].strip().upper(), d.get('start')) for d in self.wq}
-        add = [d for d in dlg.result
-               if (d['code'].strip().upper(), d.get('start')) not in have]
+        have = {(wr_key(d), d.get('start')) for d in self.wq}
+        add = [d for d in dlg.result if (wr_key(d), d.get('start')) not in have]
         self.wq.extend(add)
         self._w_refresh()
         self.log('นำเข้า Item Code %d โค้ด (รวม %d)' % (len(add), len(self.wq)), 'OK')
@@ -8259,11 +8331,7 @@ class App:
         ok = {'v': False}
         body = tk.Frame(top, bg=C['bg'])
         body.pack(fill='both', expand=True, padx=18, pady=14)
-        fields = (('CODE / Slug (โค้ดสุ่ม)', 'code', 26), ('ชื่อ Item Code (ไทย/อังกฤษ)', 'name', 44),
-                  ('เวลาเริ่มใช้งาน', 'start', 26), ('เวลาสิ้นสุด', 'end', 26),
-                  ('จำนวนการใช้งานต่อ 1 User', 'per_user', 10),
-                  ('จำกัดจำนวน (เว้นว่าง = ไม่จำกัด)', 'cap', 12),
-                  ('เลข Bundle', 'bundle', 12))
+        fields = self.W_FORM
         vs = {}
         for r, (lbl, key, w) in enumerate(fields):
             tk.Label(body, text=lbl, bg=C['bg'], fg=C['dim'],
@@ -8285,10 +8353,12 @@ class App:
             for key, v in vs.items():
                 d[key] = v.get().strip()
             d['unlimited'] = not d.get('cap')
-            if d.get('kind') == 'gen':          # โค้ดสุ่ม: CODE = Slug · จำนวน Code ตามจำกัดจำนวน
-                d['slug'] = d['code'] = d['code'].lower()
+            if d.get('kind') == 'gen':
+                # ใส่ CODE = Fix Codes ใช้โค้ดนั้น · เว้นว่าง = โค้ดสุ่ม เว็บเจนเอง
+                d['slug'] = str(d.get('slug') or '').lower()
+                d['code_type'] = 'Fix Codes' if d.get('code') else 'Server Generate'
                 d['gen_count'] = d.get('cap') or d.get('gen_count', '')
-            if not d['code'] or not d['name']:
+            if not wr_ident(d) or not d['name']:
                 return messagebox.showwarning('กรอกไม่ครบ', 'ต้องมี CODE และชื่อ Item Code',
                                               parent=top)
             ok['v'] = True
@@ -8305,7 +8375,7 @@ class App:
         เลยใช้เลข Id ตัดสินไม่ได้ว่าสร้างแล้วหรือยัง)"""
         if d.get('test_time') and 'เวลาทดสอบ' not in notes:
             notes = (notes + ' · ' if notes else '') + 'เวลาทดสอบ (เริ่ม %s)' % d.get('start', '')
-        row = {'code': d.get('code', ''), 'name': d.get('name', ''),
+        row = {'code': wr_ident(d), 'name': d.get('name', ''),
                'id': str(cid or '').strip() or '-', 'notes': notes, 'ok': bool(ok),
                'at': datetime.now().strftime('%d/%m %H:%M'), 'd': dict(d),
                'created': bool(created and ok)}
@@ -8322,7 +8392,8 @@ class App:
         """ใส่แถวลงตาราง “Item Code ที่สร้างแล้ว” (ใช้ทั้งตอนสร้างใหม่และตอนกู้ประวัติ)"""
         self.tree_code.insert('', 'end', iid='mc%d' % row['no'],
                               tags=() if row['ok'] else ('bad',),
-                              values=(row['no'], row['code'], row['id'],
+                              values=(row['no'], ('🎲 ' if wr_is_random(row.get('d') or {}) else '')
+                                      + row['code'], row['id'],
                                       row['name'], row['at'], row['notes']))
         self.tree_code.yview_moveto(1)
         self._w_made_label()
@@ -8389,8 +8460,17 @@ class App:
             self.log('⚠  ไฟล์ประวัติ WR Master เสีย อ่านไม่ได้ (%s) — เก็บไว้เป็น .bad แล้ว'
                      % str(ex)[:80], 'WARN')
             return
-        self.wq = [d for d in (data.get('queue') or [])
-                   if isinstance(d, dict) and d.get('code')]
+        def _fix_old(d):
+            # v1.0.1 เคยเอา Slug ไปใส่ช่อง CODE ของโค้ดสุ่ม — ล้างออก (โค้ดสุ่มไม่มี CODE)
+            if isinstance(d, dict) and d.get('kind') == 'gen' and \
+                    d.get('code_type') == 'Server Generate' and d.get('code') == d.get('slug'):
+                d['code'] = ''
+            return d
+        for m in (data.get('made') or []):
+            if isinstance(m, dict):
+                _fix_old(m.get('d'))
+        self.wq = [_fix_old(d) for d in (data.get('queue') or [])
+                   if isinstance(d, dict) and wr_ident(d)]
         self.made_codes = []
         self.tree_code.delete(*self.tree_code.get_children())
         for m in (data.get('made') or []):
@@ -8417,12 +8497,13 @@ class App:
                         + (' …' if len(pend) > 6 else '')), 'WARN')
 
     def _w_after_reset(self, d):
+        md_of = lambda m: m.get('d') or {}
         """รีเซ็ตสำเร็จ -> จดว่าตัวนี้กลับเป็นเวลาตามเอกสารแล้ว (ตัวที่ตรงกันในตาราง)"""
         want = d.get('doc_start') or d.get('start')
         hit = []
         for m in self.made_codes:
             md = m.get('d') or {}
-            if md.get('code') == d.get('code') and \
+            if wr_key(md) == wr_key(d) and \
                     (md.get('doc_start') or md.get('start')) == want and md.get('test_time') \
                     and not md.get('reset_done'):
                 md['reset_done'] = True
@@ -8434,7 +8515,8 @@ class App:
             for m in hit:
                 iid = 'mc%d' % m['no']
                 if self.tree_code.exists(iid):
-                    self.tree_code.item(iid, values=(m['no'], m['code'], m['id'], m['name'],
+                    self.tree_code.item(iid, values=(m['no'], ('🎲 ' if wr_is_random(md_of(m)) else '')
+                                                     + m['code'], m['id'], m['name'],
                                                      m['at'], m['notes']))
             self._w_made_label()
             self._w_save_state()
@@ -8501,10 +8583,16 @@ class App:
         out = []
         for w in rows:
             v = self.tree_code.item(w, 'values')
-            if len(v) > 1 and str(v[1]).strip():
-                out.append(str(v[1]).strip())
+            try:
+                m = self.made_codes[int(v[0]) - 1]
+            except Exception:
+                m = {'d': {'code': v[1] if len(v) > 1 else ''}}
+            c = str((m.get('d') or {}).get('code') or '').strip()
+            if c:
+                out.append(c)
         if not out:
-            messagebox.showinfo('ไม่มีโค้ด', 'แถวที่เลือกไม่มี CODE')
+            messagebox.showinfo('ไม่มีโค้ด', 'แถวที่เลือกไม่มี CODE '
+                                             '(โค้ดสุ่ม เว็บเจนให้เอง ดูได้ในหน้าเว็บ)')
             return
         self.root.clipboard_clear()
         self.root.clipboard_append('\n'.join(out))
@@ -8533,7 +8621,7 @@ class App:
         dup, done = wr_queue_flags(self.wq, self.made_codes)
         if do and (dup or done):
             bad = set(dup) | done
-            keep = [d for d in rows if d['code'].strip().upper() not in bad]
+            keep = [d for d in rows if wr_key(d) not in bad]
             msg = ''
             if dup:
                 msg += ('⛔  CODE ซ้ำในคิว %d ตัว: %s\n   (ไม่รู้ว่าแถวไหนถูก เลยข้ามทุกแถวของโค้ดนี้ '
@@ -8554,7 +8642,7 @@ class App:
                      % (skipped, len(dup), len(done)), 'WARN')
         nobd = sum(1 for d in rows if not d.get('bundle'))
         if test_time:
-            late = [d['code'] for d in rows if d.get('end') and d['end'] <= d['start']]
+            late = [wr_ident(d) for d in rows if d.get('end') and d['end'] <= d['start']]
             if late:
                 messagebox.showwarning(
                     'เวลาสิ้นสุดผ่านไปแล้ว',
@@ -8674,8 +8762,8 @@ class App:
                     if self.w_cancel:
                         self.log('ยกเลิกแล้ว', 'WARN')
                         break
-                    self.set_progress(i - 1, len(rows), d['code'])
-                    self.log('[%d/%d] %s  (%s)' % (i, len(rows), d['code'], d['name']),
+                    self.set_progress(i - 1, len(rows), wr_ident(d))
+                    self.log('[%d/%d] %s  (%s)' % (i, len(rows), wr_ident(d), d['name']),
                              'STEP')
                     try:
                         if mode == 'reset':
@@ -9424,8 +9512,10 @@ class WRCtx:
               'running', 'c_running', 'b_running', 'save_now', 'tab_log', '_card', '_btn',
               '_entry', 'gen'}
 
-    def __init__(self, app, tab, state, dialog, name, hint):
+    def __init__(self, app, tab, state, dialog, name, hint, cols=None, form=None):
         object.__setattr__(self, '_app', app)
+        self.W_COLS = cols or App.W_COLS
+        self.W_FORM = form or App.W_FORM
         self.tab_wr = tab
         self.W_STATE = state
         self.W_DIALOG = dialog
