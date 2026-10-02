@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V1.0.2 : แท็บ Item Code — โค้ดสุ่มไม่มีช่อง CODE (เว็บเจนเอง) · รองรับ Fix Codes เมื่อชีทมีช่อง CODE
+V1.0.3 : แท็บ Item Code — ช่องประเภทใช้คำเดียวกับเว็บ “Server Generate (ระบบสุ่ม Code)” / “Fix Codes (ส่ง Code เอง)”
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -3466,6 +3466,10 @@ def wr_is_created(m):
     return bool(m.get('ok')) and str(m.get('notes') or '').startswith('สร้างแล้ว')
 
 
+CTYPE_GEN_TXT = 'Server Generate (ระบบสุ่ม Code)'
+CTYPE_FIX_TXT = 'Fix Codes (ส่ง Code เอง)'
+
+
 def wr_ident(d):
     """ตัวตนของโค้ดหนึ่งตัว: CODE (ถ้ามี) — โค้ดสุ่มไม่มี CODE (เว็บเจนให้เอง) ใช้ Slug แทน"""
     c = str(d.get('code') or '').strip()
@@ -3490,7 +3494,8 @@ def wr_cell(d, col, i=0):
     if col == 'code':
         return str(d.get('code') or '')
     if col == 'ctype':
-        return '🎲 สุ่ม' if wr_is_random(d) else 'Fix'
+        # ใช้คำเดียวกับดรอปดาวน์บนเว็บเป๊ะๆ คนใช้จะได้ไม่เข้าใจผิดว่าโปรแกรมสุ่มเอง
+        return CTYPE_GEN_TXT if wr_is_random(d) else CTYPE_FIX_TXT
     if col == 'slug':
         return str(d.get('slug') or '')
     if col == 'wname':
@@ -4515,7 +4520,7 @@ class CodeImportDialog(BundleImportDialog):
         self.tree.delete(*self.tree.get_children())
         for d in bs:
             pid = self.tree.insert(
-                '', 'end', text=('🎲  สุ่ม · ' + d.get('slug', '')) if wr_is_random(d)
+                '', 'end', text=('🎲  Server Generate · ' + d.get('slug', '')) if wr_is_random(d)
                 else '🎟  ' + d['code'], open=False,
                 values=(d.get('cap') or 'ไม่จำกัด',
                         ('Bundle ' + d['bundle']) if d.get('bundle') else '⚠ ไม่มี Bundle',
@@ -4845,13 +4850,14 @@ async def run_web_tests(page, log=None):
 # ============================================================================
 class GenImportDialog(CodeImportDialog):
     """หน้าต่างนำเข้าของแท็บ Item Code (โค้ดสุ่ม) — แยกจาก WR Master"""
-    TITLE = 'นำเข้า Item Code โค้ดสุ่ม จาก Excel'
+    TITLE = 'นำเข้า Item Code จาก Excel'
     PICK_ALL = 'เลือกชีทที่มีโค้ดทั้งหมด'
-    HINT = ('อ่านชีทรางวัลที่มีกล่อง “โค้ดจำนวน N โค้ด” (unique code = Server Generate) — '
+    HINT = ('อ่านชีทรางวัลที่มีกล่อง “โค้ดจำนวน N โค้ด” · unique code = Server Generate (ระบบสุ่ม Code) · '
+            'มีช่อง CODE = Fix Codes (ส่ง Code เอง) — '
             'ชื่อ = ชื่อชีท + หัวรางวัล · Slug = ชื่อกิจกรรม-เดือน-ลำดับ · '
             'จำนวนเผื่อให้อีก %d · Bundle เอาจากเลขเหนือหัวตาราง' % GEN_SPARE)
     TREE_TITLE = 'Item Code ที่เจอ'
-    TREE_HEAD = 'CODE (หรือ 🎲 สุ่ม · Slug) / ชื่อ Item Code'
+    TREE_HEAD = 'CODE (หรือ 🎲 Server Generate · Slug) / ชื่อ Item Code'
     scan_fn = staticmethod(lambda wb, progress=None: scan_gen_sheets_wb(wb, progress))
     read_fn = staticmethod(lambda wb, nm: read_gen_wb(wb, nm))
 
@@ -5019,18 +5025,20 @@ class App:
         # แท็บ Item Code (โค้ดสุ่ม) — หน้าตา/ปุ่มเหมือน WR Master แต่คิว ประวัติ ไฟล์ แยกกันหมด
         self.gen = WRCtx(self, self.tab_gen, state='gen_state.json', dialog=GenImportDialog,
                          name='Item Code',
-                         cols=(('n', '#', 34), ('ctype', 'ประเภท', 74), ('code', 'CODE', 110),
-                               ('slug', 'Slug', 170), ('wname', 'ชื่อ Item Code', 270),
+                         cols=(('n', '#', 34), ('ctype', 'ประเภทของ Code', 200),
+                               ('code', 'CODE', 100), ('slug', 'Slug', 160),
+                               ('wname', 'ชื่อ Item Code', 250),
                                ('start', 'เริ่มใช้งาน', 130), ('end', 'สิ้นสุด', 130),
                                ('cap', 'จำนวน', 56), ('bundle', 'Bundle', 60)),
-                         form=(('CODE (เว้นว่าง = โค้ดสุ่ม เว็บเจนเอง)', 'code', 26),
+                         form=(('CODE (เว้นว่าง = Server Generate ระบบสุ่ม Code ให้)', 'code', 26),
                                ('Slug', 'slug', 32),
                                ('ชื่อ Item Code (ไทย/อังกฤษ)', 'name', 44),
                                ('เวลาเริ่มใช้งาน', 'start', 26), ('เวลาสิ้นสุด', 'end', 26),
                                ('จำนวนการใช้งานต่อ 1 User', 'per_user', 10),
                                ('จำนวนโค้ด (เผื่อ +%d แล้ว)' % GEN_SPARE, 'cap', 12),
                                ('เลข Bundle', 'bundle', 12)),
-                         hint=('อ่านชีทรางวัลโค้ดสุ่ม 🎲 (มีกล่อง “โค้ดจำนวน N โค้ด” · unique code) — '
+                         hint=('อ่านชีทรางวัลที่มีกล่อง “โค้ดจำนวน N โค้ด” — unique code = '
+                               'Server Generate (ระบบสุ่ม Code) · มีช่อง CODE ในชีท = Fix Codes (ส่ง Code เอง) — '
                                'จำนวนเผื่อให้อีก %d เสมอ  ·  เลข Bundle เอาจากเลขเหนือหัวตาราง  ·  '
                                'ดับเบิลคลิกเพื่อแก้รายตัว' % GEN_SPARE))
         App._build_wr(self.gen)
@@ -8592,7 +8600,7 @@ class App:
                 out.append(c)
         if not out:
             messagebox.showinfo('ไม่มีโค้ด', 'แถวที่เลือกไม่มี CODE '
-                                             '(โค้ดสุ่ม เว็บเจนให้เอง ดูได้ในหน้าเว็บ)')
+                                             '(Server Generate — ระบบเว็บสุ่ม Code ให้ ดูได้ในหน้าเว็บ)')
             return
         self.root.clipboard_clear()
         self.root.clipboard_append('\n'.join(out))
