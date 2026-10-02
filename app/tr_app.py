@@ -3,7 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V0.9.9 : สร้าง Bundle — อ่านชีทแพทเทิร์น Mini Tournament ได้ + เลือกคอลัมน์ Aztek Item Id เองได้
+V1.0.0 : WR Master — รองรับ Item Code โค้ดสุ่ม (Server Generate) จากชีทรางวัล เช่น Mini Tournament
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
@@ -151,6 +151,8 @@ SEL_CODE = {
     'rw_left':   'จำนวนคงเหลือ',
     'code_type': 'ประเภทของ Code',
     'code_fix':  'Fix Codes',
+    'code_gen':  'Server Generate',
+    'gen_count': 'จำนวน Code ที่ต้องการ',
     'code_list': 'รายการ Code',
     'bundle':    'Bundle',
     'bundle_btn': 'เลือก bundle',
@@ -3580,10 +3582,170 @@ def parse_code_sheet(rows, sheet_name):
     return out, warns
 
 
+# ============================================================================
+#  Item Code แบบ "โค้ดสุ่ม" (Server Generate) — ชีทรางวัล เช่น Mini Tournament
+#  ไม่ยึดตำแหน่ง: ต่อหนึ่งตาราง fdItemNum ดูกล่องข้างๆ ว่ามี
+#     "โค้ดจำนวน N โค้ด"  (= ตัวบอกว่าเป็นแพทเทิร์นนี้)
+#     วันเริ่ม / หมดอายุ (+เวลา ถ้าชีทมี)  · เติมซ้ำได้/ไม่ได้ · unique code
+#  เลข Bundle = เลขที่ผู้ใช้ใส่ไว้เหนือหัวตาราง (ฝั่งซ้าย) หรือใต้ป้าย "Bundle"
+# ============================================================================
+GEN_SPARE = 1                       # ชีทบอก 10 โค้ด -> ใส่ 11 เผื่อไว้เทสเอง
+_GEN_COUNT = re.compile(r'(?:โค้ด|code)\s*จำนวน\s*([\d,]+)|จำนวน\s*([\d,]+)\s*(?:โค้ด|code)',
+                        re.I)
+_GEN_START = ('วันเริ่ม', 'วันที่เริ่ม', 'เริ่ม', 'start', 'start date', 'เริ่มใช้งาน')
+_GEN_END = ('หมดอายุ', 'วันหมดอายุ', 'สิ้นสุด', 'วันสิ้นสุด', 'end', 'end date', 'expire')
+_MONTH_WORDS = {m.lower() for m in _WR_MONTH} | {
+    'january', 'february', 'march', 'april', 'june', 'july', 'august', 'september',
+    'october', 'november', 'december', 'sept'}
+
+
+def gen_slug(sheet_name, ymd, n):
+    """ชื่อกิจกรรม-เดือน-ลำดับ เช่น 'รางวัล Mini Tournament (oct)' -> mini-tournament-oct-1
+    (ไม่ใส่ราคา · ลำดับต่อท้ายกันชนกันในชีทเดียวที่มีหลายรางวัล)"""
+    s = re.sub(r'\([^)]*\)', ' ', clean_text(sheet_name))
+    words = [w.lower() for w in re.findall(r'[A-Za-z0-9]+', s)]
+    words = [w for w in words if w not in _MONTH_WORDS]
+    base = '-'.join(words) or 'itemcode'
+    mon = _WR_MONTH[ymd[1] - 1].lower() if ymd else ''
+    return '-'.join(x for x in (base, mon, str(n)) if x)
+
+
+def _gen_time(v, end):
+    """เวลาในเซลล์ (time / '23:59' / '23.59') -> 'HH:MM:SS' · ปลายทาง 23:59 -> 23:59:59"""
+    if v is None:
+        return None
+    if hasattr(v, 'hour') and not isinstance(v, datetime):
+        if end and v.second == 0:
+            return '%02d:%02d:59' % (v.hour, v.minute)
+        return '%02d:%02d:%02d' % (v.hour, v.minute, v.second)
+    s = clean_text(v)
+    m = re.match(r'^(\d{1,2})[.:](\d{2})(?:[.:](\d{2}))?$', s.replace('น.', '').strip())
+    if m and end and m.group(3) == '00':
+        s = '%s:%s' % (m.group(1), m.group(2))
+    return wr_time(s, end=end)
+
+
+def parse_gen_sheet(rows, sheet_name):
+    """คืน (codes, warnings) — โค้ดแบบ Server Generate หนึ่งตัวต่อหนึ่งตารางรางวัล"""
+    sheet_name = clean_text(sheet_name) or str(sheet_name or '')
+    out, warns = [], []
+    hdr = [i for i, row in enumerate(rows)
+           if any('fditemnum' in str(c).lower() for c in (row or []))]
+    cell = lambda r, c: (rows[r][c] if 0 <= r < len(rows) and rows[r] and c < len(rows[r])
+                         else None)
+    for bi, hr in enumerate(hdr):
+        kindc = next(j for j, c in enumerate(rows[hr]) if 'fditemnum' in str(c).lower())
+        top = hdr[bi - 1] + 1 if bi > 0 else 0
+        r0 = max(top, hr - 3)
+        r1 = (hdr[bi + 1] - 2) if bi + 1 < len(hdr) else min(len(rows), hr + 25)
+        texts = []                                    # (r, c, ข้อความ) ในพื้นที่ของตารางนี้
+        for r in range(max(r0, hr - 1), r1):
+            for c, v in enumerate(rows[r] or []):
+                t = clean_text(v)
+                if t and src_int(t) is None:
+                    texts.append((r, c, t))
+        cnt = None
+        for _, _, t in texts:
+            m = _GEN_COUNT.search(t)
+            if m:
+                cnt = int((m.group(1) or m.group(2)).replace(',', ''))
+                break
+        if cnt is None:
+            continue                                   # ไม่ใช่แพทเทิร์นนี้
+        low = ' | '.join(t.lower() for _, _, t in texts)
+        repeat = False if 'เติมซ้ำไม่ได้' in low else (True if 'เติมซ้ำได้' in low else None)
+        if 'unique' in low:
+            ctype = 'Server Generate'
+        elif 'fix' in low or 'ส่ง code เอง' in low:
+            ctype = 'Fix Codes'
+        else:
+            ctype = 'Server Generate'
+
+        # ---- วันเริ่ม / หมดอายุ: ค่าอยู่ใต้ป้าย (หรือติดกันทางขวา) ----
+        def find(labels):
+            for r, c, t in texts:
+                if t.lower().rstrip(':') in labels:
+                    for rr, cc in ((r + 1, c), (r + 2, c), (r, c + 1), (r, c + 2)):
+                        ymd = wr_date(cell(rr, cc))
+                        if ymd:
+                            return ymd, rr, cc
+            return None, None, None
+        sy, sr, sc = find(_GEN_START)
+        ey, er, ec = find(_GEN_END)
+        st = en = None
+        if sy:
+            stop = ec if (er == sr and ec is not None and ec > sc) else sc + 2
+            for cc in range(sc + 1, stop):
+                st = _gen_time(cell(sr, cc), False)
+                if st:
+                    break
+        if ey:
+            for rr, cc in ((er, ec + 1), (er, ec + 2), (er + 1, ec)):
+                en = _gen_time(cell(rr, cc), True)
+                if en:
+                    break
+        start = '%04d-%02d-%02d %s' % (sy[0], sy[1], sy[2], st or '00:00:00') if sy else ''
+        end = '%04d-%02d-%02d %s' % (ey[0], ey[1], ey[2], en or '23:59:59') if ey else ''
+
+        # ---- เลข Bundle ----
+        bid = None
+        for r, c, t in texts + [(r, c, clean_text(cell(r, c))) for r in range(r0, hr)
+                                 for c in range(len(rows[r] or []))]:
+            if t.lower().rstrip(':') == 'bundle':
+                for rr, cc in ((r + 1, c), (r + 2, c), (r, c + 1)):
+                    if src_int(cell(rr, cc)):
+                        bid = src_int(cell(rr, cc))
+                        break
+            if bid:
+                break
+        if not bid:                                    # เลขที่ใส่ไว้เหนือหัวตาราง ฝั่งซ้าย
+            best = None
+            for r in range(r0, hr):
+                for c in range(0, kindc + 1):
+                    b = src_int(cell(r, c))
+                    if b:
+                        k = (hr - r, abs(c - (kindc - 1)))
+                        if best is None or k < best[0]:
+                            best = (k, b)
+            bid = best[1] if best else ''
+
+        # ---- หัวรางวัล (เช่น "1200บาท") = ช่องหัวตารางหน้า fdItemNum ----
+        title = ''
+        for c in range(kindc - 1, -1, -1):
+            t = clean_text(cell(hr, c))
+            if t and src_int(t) is None:
+                title = t
+                break
+        n = len(out) + 1
+        name = (sheet_name + (' ' + title if title else ' #%d' % n)).strip()
+        slug = gen_slug(sheet_name, sy, n)
+        cap = str(cnt + GEN_SPARE)
+        d = {'kind': 'gen', 'code': slug, 'slug': slug, 'name': name, 'title': title,
+             'sheet': sheet_name, 'row': hr + 1, 'start': start, 'end': end,
+             'limit': str(cnt), 'cap': cap, 'unlimited': False, 'gen_count': cap,
+             'per_user': cap if repeat else '1', 'repeat': repeat, 'code_type': ctype,
+             'bundle': bid or ''}
+        where = '%s "%s" (หัวตารางแถว %d)' % (sheet_name, title or '#%d' % n, hr + 1)
+        if repeat is None:
+            warns.append(where + ': ไม่เจอ “เติมซ้ำได้/ไม่ได้” -> ใส่ต่อ 1 User = 1')
+        if ctype != 'Server Generate':
+            warns.append(where + ': ไม่ใช่ unique code (แบบ %s) — ยังไม่รองรับ ข้าม' % ctype)
+            continue
+        if not start or not end:
+            warns.append(where + ': ไม่เจอวันเริ่ม/หมดอายุ — ต้องใส่เอง')
+        if not bid:
+            warns.append(where + ': ไม่เจอเลข Bundle (ใส่ไว้เหนือหัวตาราง) — ต้องใส่เอง')
+        out.append(d)
+    return out, warns
+
+
 def read_codes_wb(wb, sheet):
+    """อ่านชีทหาโค้ดทุกแพทเทิร์นที่รู้จัก: Master Code (CODE ตายตัว) + โค้ดสุ่ม (Server Generate)"""
     rows = [list(r) if r else [] for r in
             wb[sheet].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True)]
-    return parse_code_sheet(rows, sheet)
+    a, wa = parse_code_sheet(rows, sheet)
+    b, wb_ = parse_gen_sheet(rows, sheet)
+    return a + b, wa + wb_
 
 
 def scan_code_sheets_wb(wb, progress=None):
@@ -4268,7 +4430,7 @@ class CodeImportDialog(BundleImportDialog):
     """หน้าต่างนำเข้า Item Code — โครงเดียวกับนำเข้าบันเดิล เปลี่ยนแค่สิ่งที่อ่านกับที่โชว์"""
     TITLE = 'นำเข้า Item Code จาก Excel (WR Master)'
     PICK_ALL = 'เลือกชีทที่มีโค้ดทั้งหมด'
-    HINT = ('อ่านเฉพาะชีทแบบ Master Code (มีแถว CODE) — '
+    HINT = ('อ่านชีทแบบ Master Code (มีแถว CODE) และชีทรางวัลโค้ดสุ่ม (มี “โค้ดจำนวน N โค้ด” · unique code) — '
             'ชื่อ Item Code = โค้ด + วันที่เริ่ม · เวลาเอาจากช่อง Start/End ในชีท · '
             'Limit ที่ชีทบอกจะเผื่อให้อีก %d · Bundle เอาจากเลขใต้ป้าย Bundle' % WR_SPARE)
     TREE_TITLE = 'Item Code ที่เจอ'
@@ -5952,7 +6114,7 @@ class App:
         """เข้าไปแก้ "เวลาเริ่มใช้งาน" ของโค้ดที่สร้างไว้แล้ว ให้กลับเป็นเวลาตามเอกสาร
         ไม่สร้างใหม่เด็ดขาด — ถ้าหาหน้าแก้ไขไม่เจอก็แค่เตือน"""
         want = d.get('doc_start') or d.get('start')
-        slug = wr_slug(d['code'], want)
+        slug = d.get('slug') or wr_slug(d['code'], want)
         if not want or not slug:
             self.log('   ! ไม่มีเวลาเริ่มในเอกสาร — ข้าม', 'WARN')
             return False
@@ -6051,7 +6213,12 @@ class App:
         cap = str(d.get('cap') or '').strip()
         limited = bool(cap)
         per = str(d.get('per_user') or '1')
-        slug = wr_slug(d['code'], d.get('doc_start') or d.get('start'))   # Slug ยึดวันในเอกสารเสมอ
+        gen = d.get('kind') == 'gen'            # โค้ดสุ่ม (Server Generate) จากชีทรางวัล
+        # Slug ยึดวันในเอกสารเสมอ (โค้ดสุ่มทำ Slug ไว้แล้วตอนอ่านชีท)
+        slug = d.get('slug') or wr_slug(d['code'], d.get('doc_start') or d.get('start'))
+        rw_name = d['name'] if gen else d['code']
+        rw_per = '1' if gen else per            # ฝั่งของรางวัล: ต่อ 1 User = 1 เสมอ
+        rw_cap = '' if gen else cap             # โค้ดสุ่ม: ไม่เปิด "จำกัดจำนวน Code" ฝั่งขวา
         bad = []
         texts = []            # (ป้าย, ฝั่ง, ค่า, ชื่อที่โชว์) — ไว้อ่านกลับตอนท้าย
 
@@ -6086,19 +6253,24 @@ class App:
             await T('limit_left', 'left', cap, 'จำนวนคงเหลือ (ซ้าย)')
 
         # ---------- ฝั่งขวา (ของรางวัล) ----------
-        await T('rw_th', 'right', d['code'], 'ชื่อรางวัล (ไทย)')
-        await T('rw_en', 'right', d['code'], 'ชื่อรางวัล (อังกฤษ)')
-        await T('per_user', 'right', per, 'จำนวนการใช้งานต่อ 1 User (ขวา)')
-        if not await self._w_switch(page, SEL_CODE['rw_sw'], 'right', limited,
+        await T('rw_th', 'right', rw_name, 'ชื่อรางวัล (ไทย)')
+        await T('rw_en', 'right', rw_name, 'ชื่อรางวัล (อังกฤษ)')
+        await T('per_user', 'right', rw_per, 'จำนวนการใช้งานต่อ 1 User (ขวา)')
+        if not await self._w_switch(page, SEL_CODE['rw_sw'], 'right', bool(rw_cap),
                                     'จำกัดจำนวน Code'):
             bad.append('จำกัดจำนวน Code')
-        if limited:
-            await T('rw_max', 'right', cap, 'จำนวนรวม')
-            await T('rw_left', 'right', cap, 'จำนวนคงเหลือ (ขวา)')
-        if not await self._w_select(page, SEL_CODE['code_type'], 'right', SEL_CODE['code_fix'],
+        if rw_cap:
+            await T('rw_max', 'right', rw_cap, 'จำนวนรวม')
+            await T('rw_left', 'right', rw_cap, 'จำนวนคงเหลือ (ขวา)')
+        ctype = SEL_CODE['code_gen'] if gen else SEL_CODE['code_fix']
+        if not await self._w_select(page, SEL_CODE['code_type'], 'right', ctype,
                                     'ประเภทของ Code'):
             bad.append('ประเภทของ Code')
-        await T('code_list', 'right', d['code'], 'รายการ Code')
+        if gen:
+            await page.wait_for_timeout(200)          # ช่องจำนวน Code โผล่หลังเลือกประเภท
+            await T('gen_count', 'right', d.get('gen_count') or cap, 'จำนวน Code ที่ต้องการ')
+        else:
+            await T('code_list', 'right', d['code'], 'รายการ Code')
         if not await self._w_bundle(page, d.get('bundle')):
             bad.append('Bundle')
 
@@ -7794,9 +7966,9 @@ class App:
                                                      ipadx=8, ipady=4)
         self.w_count = tk.Label(bar, text='คิวว่าง', bg=C['bg'], fg=C['dim'], font=FM)
         self.w_count.pack(side='right')
-        tk.Label(s1, text='อ่านเฉพาะชีทแบบ Master Code (มีแถว CODE) — '
-                          'ชีทบอก Limit เท่าไหร่ จะเผื่อให้อีก %d เสมอ  ·  '
-                          'ดับเบิลคลิกเพื่อแก้รายตัว' % WR_SPARE,
+        tk.Label(s1, text=('อ่านชีท Master Code (มีแถว CODE) Limit เผื่อ +%d  ·  '
+                           'ชีทรางวัลโค้ดสุ่ม 🎲 (มี “โค้ดจำนวน N โค้ด” · unique code) เผื่อ +%d  ·  '
+                           'ดับเบิลคลิกเพื่อแก้รายตัว' % (WR_SPARE, GEN_SPARE)),
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w',
                  justify='left').pack(fill='x', pady=(8, 0))
 
@@ -7904,7 +8076,8 @@ class App:
         for i, d in enumerate(self.wq, 1):
             self.w_tree.insert('', 'end', iid='wq%d' % i, values=(
                 i, d['code'], d['name'], d.get('start', '—'), d.get('end', '—'),
-                d.get('cap') or 'ไม่จำกัด', d.get('bundle') or '⚠ ไม่มี'))
+                (d.get('cap') + ' · สุ่ม') if d.get('kind') == 'gen' else (d.get('cap') or 'ไม่จำกัด'),
+                d.get('bundle') or '⚠ ไม่มี'))
         self.w_count.config(text='คิวว่าง' if not self.wq
                             else 'ในคิว %d โค้ด' % len(self.wq))
         self._w_tag_queue()
@@ -7921,7 +8094,7 @@ class App:
                 continue
             k = str(d.get('code') or '').strip().upper()
             v = list(self.w_tree.item(iid, 'values'))
-            code_txt = d['code']
+            code_txt = ('🎲 ' if d.get('kind') == 'gen' else '') + d['code']
             if k in dup:
                 tag = 'dup'
                 code_txt = '⛔ ' + d['code']
@@ -8038,7 +8211,7 @@ class App:
         ok = {'v': False}
         body = tk.Frame(top, bg=C['bg'])
         body.pack(fill='both', expand=True, padx=18, pady=14)
-        fields = (('CODE', 'code', 26), ('ชื่อ Item Code (ไทย/อังกฤษ)', 'name', 44),
+        fields = (('CODE / Slug (โค้ดสุ่ม)', 'code', 26), ('ชื่อ Item Code (ไทย/อังกฤษ)', 'name', 44),
                   ('เวลาเริ่มใช้งาน', 'start', 26), ('เวลาสิ้นสุด', 'end', 26),
                   ('จำนวนการใช้งานต่อ 1 User', 'per_user', 10),
                   ('จำกัดจำนวน (เว้นว่าง = ไม่จำกัด)', 'cap', 12),
@@ -8064,6 +8237,9 @@ class App:
             for key, v in vs.items():
                 d[key] = v.get().strip()
             d['unlimited'] = not d.get('cap')
+            if d.get('kind') == 'gen':          # โค้ดสุ่ม: CODE = Slug · จำนวน Code ตามจำกัดจำนวน
+                d['slug'] = d['code'] = d['code'].lower()
+                d['gen_count'] = d.get('cap') or d.get('gen_count', '')
             if not d['code'] or not d['name']:
                 return messagebox.showwarning('กรอกไม่ครบ', 'ต้องมี CODE และชื่อ Item Code',
                                               parent=top)
