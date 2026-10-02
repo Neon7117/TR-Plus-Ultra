@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.0.4 : แท็บ Item Code — เผื่อ +2 · จำนวนการใช้งานต่อ 1 User ฝั่งของรางวัล = จำนวนโค้ด
 V1.0.3 : แท็บ Item Code — ช่องประเภทใช้คำเดียวกับเว็บ “Server Generate (ระบบสุ่ม Code)” / “Fix Codes (ส่ง Code เอง)”
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
@@ -3633,7 +3634,7 @@ def parse_code_sheet(rows, sheet_name):
 #     วันเริ่ม / หมดอายุ (+เวลา ถ้าชีทมี)  · เติมซ้ำได้/ไม่ได้ · unique code
 #  เลข Bundle = เลขที่ผู้ใช้ใส่ไว้เหนือหัวตาราง (ฝั่งซ้าย) หรือใต้ป้าย "Bundle"
 # ============================================================================
-GEN_SPARE = 1                       # ชีทบอก 10 โค้ด -> ใส่ 11 เผื่อไว้เทสเอง
+GEN_SPARE = 2                       # ชีทบอก 10 โค้ด -> ใส่ 12 เผื่อไว้เทสใช้ซ้ำได้
 _GEN_COUNT = re.compile(r'(?:โค้ด|code)\s*จำนวน\s*([\d,]+)|จำนวน\s*([\d,]+)\s*(?:โค้ด|code)',
                         re.I)
 _GEN_START = ('วันเริ่ม', 'วันที่เริ่ม', 'เริ่ม', 'start', 'start date', 'เริ่มใช้งาน')
@@ -6343,7 +6344,8 @@ class App:
         slug = d.get('slug') or wr_slug(d['code'], d.get('doc_start') or d.get('start'))
         rnd = wr_is_random(d)                   # โค้ดสุ่ม: ไม่มี CODE เว็บเจนเอง
         rw_name = d['name'] if gen else d['code']
-        rw_per = '1' if gen else per            # ฝั่งของรางวัล: ต่อ 1 User = 1 เสมอ
+        # ฝั่งของรางวัล: Item Code ใช้ตามจำนวนโค้ด (12 ก็ 12) · WR Master = ต่อ 1 User เดิม
+        rw_per = (cap or per) if gen else per
         rw_cap = '' if rnd else cap             # โค้ดสุ่ม: ไม่เปิด "จำกัดจำนวน Code" ฝั่งขวา
         bad = []
         texts = []            # (ป้าย, ฝั่ง, ค่า, ชื่อที่โชว์) — ไว้อ่านกลับตอนท้าย
@@ -8474,10 +8476,24 @@ class App:
                     d.get('code_type') == 'Server Generate' and d.get('code') == d.get('slug'):
                 d['code'] = ''
             return d
+
+        def _respare(d):
+            # คิวที่นำเข้าตอนเผื่อ +1 (ก่อน v1.0.4) -> ปรับเป็น +GEN_SPARE ให้เอง (เฉพาะคิวที่ยังไม่สร้าง)
+            if isinstance(d, dict) and d.get('kind') == 'gen':
+                try:
+                    lim, cap = int(d.get('limit') or 0), int(d.get('cap') or 0)
+                except ValueError:
+                    return d
+                if lim > 0 and cap == lim + 1 and GEN_SPARE != 1:
+                    new = str(lim + GEN_SPARE)
+                    if str(d.get('per_user')) == str(cap):
+                        d['per_user'] = new
+                    d['cap'] = d['gen_count'] = new
+            return d
         for m in (data.get('made') or []):
             if isinstance(m, dict):
                 _fix_old(m.get('d'))
-        self.wq = [_fix_old(d) for d in (data.get('queue') or [])
+        self.wq = [_respare(_fix_old(d)) for d in (data.get('queue') or [])
                    if isinstance(d, dict) and wr_ident(d)]
         self.made_codes = []
         self.tree_code.delete(*self.tree_code.get_children())
