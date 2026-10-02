@@ -3,13 +3,14 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
-V1.0.0 : WR Master — รองรับ Item Code โค้ดสุ่ม (Server Generate) จากชีทรางวัล เช่น Mini Tournament
+V1.0.1 : แยกแท็บ “🎲 Item Code” (โค้ดสุ่ม Server Generate) ออกจาก WR Master
 
 ไฟล์นี้อยู่บน GitHub ตัวเปิด (.exe) จะโหลดมารันทุกครั้ง
 แก้ไฟล์นี้แล้ว push = ทุกคนได้ของใหม่ทันที ไม่ต้อง build .exe ใหม่
 """
 import os
 import re
+import types
 import csv
 import shutil
 import json
@@ -3740,12 +3741,31 @@ def parse_gen_sheet(rows, sheet_name):
 
 
 def read_codes_wb(wb, sheet):
-    """อ่านชีทหาโค้ดทุกแพทเทิร์นที่รู้จัก: Master Code (CODE ตายตัว) + โค้ดสุ่ม (Server Generate)"""
+    """แท็บ WR Master: ชีท Master Code (CODE ตายตัว) เท่านั้น"""
     rows = [list(r) if r else [] for r in
             wb[sheet].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True)]
-    a, wa = parse_code_sheet(rows, sheet)
-    b, wb_ = parse_gen_sheet(rows, sheet)
-    return a + b, wa + wb_
+    return parse_code_sheet(rows, sheet)
+
+
+def read_gen_wb(wb, sheet):
+    """แท็บ Item Code: ชีทรางวัลโค้ดสุ่ม (Server Generate) เท่านั้น"""
+    rows = [list(r) if r else [] for r in
+            wb[sheet].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True)]
+    return parse_gen_sheet(rows, sheet)
+
+
+def scan_gen_sheets_wb(wb, progress=None):
+    out = []
+    names = wb.sheetnames
+    for i, s in enumerate(names, 1):
+        if progress:
+            progress(i, len(names), s)
+        try:
+            c, _ = read_gen_wb(wb, s)
+        except Exception:
+            c = []
+        out.append((s, len(c)))
+    return out
 
 
 def scan_code_sheets_wb(wb, progress=None):
@@ -4430,7 +4450,7 @@ class CodeImportDialog(BundleImportDialog):
     """หน้าต่างนำเข้า Item Code — โครงเดียวกับนำเข้าบันเดิล เปลี่ยนแค่สิ่งที่อ่านกับที่โชว์"""
     TITLE = 'นำเข้า Item Code จาก Excel (WR Master)'
     PICK_ALL = 'เลือกชีทที่มีโค้ดทั้งหมด'
-    HINT = ('อ่านชีทแบบ Master Code (มีแถว CODE) และชีทรางวัลโค้ดสุ่ม (มี “โค้ดจำนวน N โค้ด” · unique code) — '
+    HINT = ('อ่านเฉพาะชีทแบบ Master Code (มีแถว CODE) — '
             'ชื่อ Item Code = โค้ด + วันที่เริ่ม · เวลาเอาจากช่อง Start/End ในชีท · '
             'Limit ที่ชีทบอกจะเผื่อให้อีก %d · Bundle เอาจากเลขใต้ป้าย Bundle' % WR_SPARE)
     TREE_TITLE = 'Item Code ที่เจอ'
@@ -4772,6 +4792,19 @@ async def run_web_tests(page, log=None):
 # ============================================================================
 #  [6] หน้าต่างโปรแกรม
 # ============================================================================
+class GenImportDialog(CodeImportDialog):
+    """หน้าต่างนำเข้าของแท็บ Item Code (โค้ดสุ่ม) — แยกจาก WR Master"""
+    TITLE = 'นำเข้า Item Code โค้ดสุ่ม จาก Excel'
+    PICK_ALL = 'เลือกชีทที่มีโค้ดทั้งหมด'
+    HINT = ('อ่านชีทรางวัลที่มีกล่อง “โค้ดจำนวน N โค้ด” (unique code = Server Generate) — '
+            'ชื่อ = ชื่อชีท + หัวรางวัล · Slug = ชื่อกิจกรรม-เดือน-ลำดับ · '
+            'จำนวนเผื่อให้อีก %d · Bundle เอาจากเลขเหนือหัวตาราง' % GEN_SPARE)
+    TREE_TITLE = 'Item Code ที่เจอ'
+    TREE_HEAD = 'Slug / ชื่อ Item Code'
+    scan_fn = staticmethod(lambda wb, progress=None: scan_gen_sheets_wb(wb, progress))
+    read_fn = staticmethod(lambda wb, nm: read_gen_wb(wb, nm))
+
+
 class SideTabs:
     """แถบแท็บทำเอง — กลุ่ม "ใช้งาน" อยู่ซ้าย กลุ่ม "ดูข้อมูล" ไปชิดขวา
 
@@ -4833,6 +4866,10 @@ class SideTabs:
 
 
 class App:
+    # แท็บ WR Master ใช้ค่าพวกนี้ · แท็บ Item Code (โค้ดสุ่ม) ใช้ชุดของตัวเองผ่าน WRCtx
+    W_STATE = 'wr_state.json'
+    W_NAME = 'WR Master'
+
     def __init__(self):
         self.root = tk.Tk()
         self.root.title(f'TR Plus Ultra  —  v{APP_VERSION}')
@@ -4852,6 +4889,7 @@ class App:
         load_central_dir()
         self._build_ui()
         self._w_load_state()               # กู้คิว/ตาราง WR Master จากครั้งก่อน
+        self.gen._w_load_state()           # กู้ของแท็บ Item Code (ไฟล์แยก)
         self.root.protocol('WM_DELETE_WINDOW', self.on_close)
         trim_history()
         log_event('app_open', launcher=globals().get('TRPU_LAUNCHER', ''))
@@ -4903,6 +4941,7 @@ class App:
         self.tab_create = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_bundle = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_wr = tk.Frame(self.nb.body, bg=C['bg'])
+        self.tab_gen = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_log = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_check = tk.Frame(self.nb.body, bg=C['bg'])
         # ซ้าย = แท็บที่ใช้ทำงาน · ขวา = แท็บไว้ดูข้อมูล จะได้ไม่ปนกัน
@@ -4910,6 +4949,7 @@ class App:
         self.nb.add(self.tab_create, '➕  สร้าง Item')
         self.nb.add(self.tab_bundle, '📦  สร้าง Bundle')
         self.nb.add(self.tab_wr, '🎟  WR Master')
+        self.nb.add(self.tab_gen, '🎲  Item Code')
         self.nb.add(self.tab_check, '🩺  ตรวจระบบ', side='right')
         self.nb.add(self.tab_log, '📜  Log', side='right')
 
@@ -4917,6 +4957,13 @@ class App:
         self._build_create()
         self._build_bundle()
         self._build_wr()
+        # แท็บ Item Code (โค้ดสุ่ม) — หน้าตา/ปุ่มเหมือน WR Master แต่คิว ประวัติ ไฟล์ แยกกันหมด
+        self.gen = WRCtx(self, self.tab_gen, state='gen_state.json', dialog=GenImportDialog,
+                         name='Item Code',
+                         hint=('อ่านชีทรางวัลโค้ดสุ่ม 🎲 (มีกล่อง “โค้ดจำนวน N โค้ด” · unique code) — '
+                               'จำนวนเผื่อให้อีก %d เสมอ  ·  เลข Bundle เอาจากเลขเหนือหัวตาราง  ·  '
+                               'ดับเบิลคลิกเพื่อแก้รายตัว' % GEN_SPARE))
+        App._build_wr(self.gen)
         self._build_log()
         self._build_check()
 
@@ -7966,9 +8013,10 @@ class App:
                                                      ipadx=8, ipady=4)
         self.w_count = tk.Label(bar, text='คิวว่าง', bg=C['bg'], fg=C['dim'], font=FM)
         self.w_count.pack(side='right')
-        tk.Label(s1, text=('อ่านชีท Master Code (มีแถว CODE) Limit เผื่อ +%d  ·  '
-                           'ชีทรางวัลโค้ดสุ่ม 🎲 (มี “โค้ดจำนวน N โค้ด” · unique code) เผื่อ +%d  ·  '
-                           'ดับเบิลคลิกเพื่อแก้รายตัว' % (WR_SPARE, GEN_SPARE)),
+        tk.Label(s1, text=getattr(self, 'W_HINT', None) or (
+                     'อ่านเฉพาะชีทแบบ Master Code (มีแถว CODE) — '
+                     'ชีทบอก Limit เท่าไหร่ จะเผื่อให้อีก %d เสมอ  ·  '
+                     'ดับเบิลคลิกเพื่อแก้รายตัว' % WR_SPARE),
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w',
                  justify='left').pack(fill='x', pady=(8, 0))
 
@@ -8139,7 +8187,7 @@ class App:
             filetypes=[('Excel', '*.xlsx *.xlsm'), ('ทุกไฟล์', '*.*')])
         if not path:
             return
-        dlg = CodeImportDialog(self.root, path)
+        dlg = (getattr(self, 'W_DIALOG', None) or CodeImportDialog)(self.root, path)
         if not dlg.result:
             return
         # ข้ามเฉพาะ "แถวเดิมเป๊ะ" (โค้ด+วันเริ่มเดียวกัน = นำเข้าชีทเดิมซ้ำ)
@@ -8296,7 +8344,7 @@ class App:
     #  ปิดโปรแกรมไปแล้วเปิดใหม่ คิว + ตาราง “สร้างแล้ว” ต้องกลับมาครบ
     #  (จะได้กด ↺ รีเซ็ตเวลาเริ่ม ต่อได้ ไม่ต้องไปแก้ด้วยมือ) — เก็บแค่เครื่องนี้
     def _w_state_path(self):
-        return os.path.join(DATA_DIR, 'wr_state.json')
+        return os.path.join(DATA_DIR, self.W_STATE)
 
     def _w_pending(self):
         """โค้ดที่สร้างจริงแบบเวลาทดสอบ แต่ยังไม่ได้รีเซ็ตเวลาเริ่มกลับ"""
@@ -8409,9 +8457,11 @@ class App:
 
     def on_close(self):
         """กดปิดหน้าต่าง — ถ้ายังมีโค้ดเวลาทดสอบค้าง หรือกำลังทำงานอยู่ ต้องถามก่อน"""
-        busy = self.w_running or self.running or getattr(self, 'c_running', False) \
-            or getattr(self, 'b_running', False)
+        busy = self._w_busy()
         pend = self._w_pending() if hasattr(self, 'made_codes') else []
+        gen = getattr(self, 'gen', None)
+        if gen is not None:
+            pend = pend + gen._w_pending()
         if busy or pend:
             msg = ''
             if pend:
@@ -8429,10 +8479,12 @@ class App:
             self.save_now()
         except Exception:
             pass
-        try:
-            self._w_save_state()
-        except Exception:
-            pass
+        for ctx in (self, getattr(self, 'gen', None)):
+            try:
+                if ctx is not None:
+                    ctx._w_save_state()
+            except Exception:
+                pass
         if pend:
             log_event('close_with_pending_test_time', count=len(pend))
         self.root.destroy()
@@ -8459,12 +8511,19 @@ class App:
         self.log('คัดลอก CODE %d รายการแล้ว (%s)'
                  % (len(out), 'เฉพาะที่เลือก' if picked else 'ทั้งหมด'), 'OK')
 
+    def _w_busy(self):
+        """มีงานไหนใช้เบราว์เซอร์อยู่ไหม (ทุกแท็บใช้โปรไฟล์ Chrome เดียวกัน เปิดพร้อมกันไม่ได้)"""
+        app = getattr(self, '_app', None) or self
+        gen = getattr(app, 'gen', None)
+        return bool(app.running or app.c_running or app.b_running or app.w_running
+                    or (gen is not None and gen.w_running))
+
     def w_stop(self):
         self.w_cancel = True
         self.log('กำลังยกเลิกการสร้าง Item Code...', 'WARN')
 
     def w_start(self, test_time=False):
-        if self.w_running or self.running or self.c_running or self.b_running:
+        if self._w_busy():
             return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
         if not self.wq:
             return messagebox.showwarning('คิวว่าง',
@@ -8554,7 +8613,7 @@ class App:
 
     def w_reset(self):
         """ปุ่ม ↺ รีเซ็ตเวลาเริ่ม — เข้าไปแก้ของเดิม ไม่สร้างใหม่"""
-        if self.w_running or self.running or self.c_running or self.b_running:
+        if self._w_busy():
             return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
         rows, src = self._w_reset_targets()
         rows = [d for d in rows if d.get('doc_start') or d.get('start')]
@@ -9352,6 +9411,37 @@ class App:
     def run(self):
         self.root.mainloop()
 
+
+
+class WRCtx:
+    """แท็บที่ทำงานแบบ WR Master แต่มีข้อมูลของตัวเอง (ตอนนี้ = แท็บ Item Code โค้ดสุ่ม)
+
+    ใช้เมธอดชุดเดียวกับ App ทุกตัว (กรอกเว็บ / เซ็ตเวลาทดสอบ / รีเซ็ต / ประวัติ / เตือนซ้ำ)
+    แต่ คิว · ตาราง · ไฟล์ประวัติ · ปุ่ม เป็นของแท็บนี้เอง ไม่ปนกับ WR Master
+    ของที่ใช้ร่วมกับโปรแกรมหลักได้มีแค่ใน SHARED (หน้าต่าง, Log, ตัวช่วยสร้างปุ่ม ฯลฯ)
+    """
+    SHARED = {'root', 'nb', 'log', 'log_box', 'prefs', 'set_progress', 'progress', 'lbl_stat',
+              'running', 'c_running', 'b_running', 'save_now', 'tab_log', '_card', '_btn',
+              '_entry', 'gen'}
+
+    def __init__(self, app, tab, state, dialog, name, hint):
+        object.__setattr__(self, '_app', app)
+        self.tab_wr = tab
+        self.W_STATE = state
+        self.W_DIALOG = dialog
+        self.W_NAME = name
+        self.W_HINT = hint
+        self.w_running = False
+        self._w_loaded = False
+
+    def __getattr__(self, k):
+        app = object.__getattribute__(self, '_app')
+        if k in WRCtx.SHARED:
+            return getattr(app, k)
+        fn = getattr(App, k, None)
+        if callable(fn) and not isinstance(fn, type):
+            return types.MethodType(fn, self)
+        raise AttributeError(k)
 
 if __name__ == '__main__':
     App().run()
