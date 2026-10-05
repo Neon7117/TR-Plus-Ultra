@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.0.6 : แท็บใหม่ 🎰 Oung Machine — แปลงชีท Oung Oung Machine เป็นแม่แบบกลาง ตรวจ/แก้ในหน้าจอ แล้วส่งให้แท็บสร้าง Bundle (ของเดิมไม่แตะ)
 V1.0.5 : ค้นหา — อ่าน Itemmove แบบ Storage (แลกได้) / Gift (แลกไม่ได้) แล้วเอาเฉพาะตัวที่ตรงชีท
 V1.0.4 : แท็บ Item Code — เผื่อ +2 · จำนวนการใช้งานต่อ 1 User ฝั่งของรางวัล = จำนวนโค้ด
 V1.0.3 : แท็บ Item Code — ช่องประเภทใช้คำเดียวกับเว็บ “Server Generate (ระบบสุ่ม Code)” / “Fix Codes (ส่ง Code เอง)”
@@ -5059,6 +5060,7 @@ class App:
         self.tab_bundle = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_wr = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_gen = tk.Frame(self.nb.body, bg=C['bg'])
+        self.tab_oung = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_log = tk.Frame(self.nb.body, bg=C['bg'])
         self.tab_check = tk.Frame(self.nb.body, bg=C['bg'])
         # ซ้าย = แท็บที่ใช้ทำงาน · ขวา = แท็บไว้ดูข้อมูล จะได้ไม่ปนกัน
@@ -5067,6 +5069,7 @@ class App:
         self.nb.add(self.tab_bundle, '📦  สร้าง Bundle')
         self.nb.add(self.tab_wr, '🎟  WR Master')
         self.nb.add(self.tab_gen, '🎲  Item Code')
+        self.nb.add(self.tab_oung, '🎰  Oung Machine')
         self.nb.add(self.tab_check, '🩺  ตรวจระบบ', side='right')
         self.nb.add(self.tab_log, '📜  Log', side='right')
 
@@ -5096,6 +5099,14 @@ class App:
         App._build_wr(self.gen)
         self._build_log()
         self._build_check()
+        # แท็บ Oung Oung Machine — ของใหม่แยกทั้งก้อน ถ้าพังเองก็พังแค่แท็บนี้ ห้ามพาโปรแกรมพังตาม
+        try:
+            self.oung = OungTab(self, self.tab_oung)
+        except Exception as ex:
+            self.oung = None
+            tk.Label(self.tab_oung, text='แท็บนี้เปิดไม่ขึ้น: %s' % str(ex)[:200], bg=C['bg'],
+                     fg=C['err'], font=FM, wraplength=900, justify='left').pack(padx=20, pady=20)
+            self.log('แท็บ Oung Machine เปิดไม่ขึ้น: %s' % str(ex)[:200], 'ERR')
 
     def _card(self, parent, title, grow=False):
         outer = tk.LabelFrame(parent, text='  ' + title + '  ', bg=C['bg'], fg=C['dim'],
@@ -9611,6 +9622,1141 @@ class WRCtx:
         if callable(fn) and not isinstance(fn, type):
             return types.MethodType(fn, self)
         raise AttributeError(k)
+
+
+# ============================================================================
+#  [9] แท็บ Oung Oung Machine — แปลงชีทกิจกรรมให้เป็น "แม่แบบกลาง" แล้วตรวจ/แก้ในหน้าจอ
+#
+#      ทำแยกเป็นของใหม่ทั้งก้อน ไม่แตะโค้ดเดิมเลย (ใช้ของเดิมแบบเรียกใช้อย่างเดียว)
+#      ชีท Oung Oung Machine ใช้หัวตาราง fdItemNum เหมือนกันหมด แต่ความหมายต่างกัน:
+#         · ตารางที่มีช่อง Chance        = ตารางสุ่ม (กาชา) — ไม่ใช่บันเดิล  -> ข้าม
+#         · ร้านค้า (มีช่องจำกัดจำนวน/Coin) = 1 แถว = 1 บันเดิล
+#         · หีบ / รางวัลสะสม              = ทั้งตาราง = 1 บันเดิล
+#         · ดูไม่ออก                       = ไม่ติ๊กไว้ ให้คนตัดสิน
+#      อ่านจาก "ป้ายข้อความ" ทั้งหมด ไม่ยึดตำแหน่งคอลัมน์/แถว
+#
+#      แม่แบบกลาง (state) = หัวข้อ -> บันเดิล -> ไอเทม
+#         ids   : Aztek Item Id เก็บต่อ "ตัวไอเทม" (fdItemNum + Itemmove + ระยะเวลา + จำนวนในชื่อ)
+#                 ใส่ครั้งเดียว ทุกที่ที่เป็นไอเทมตัวเดียวกันได้ตามไปหมด
+#         names / use / edit / sent : สิ่งที่คนแก้ไว้ — อ่านไฟล์ใหม่ก็ไม่หาย
+# ============================================================================
+OU_STATE = 'oung_state.json'
+OU_SCAN_ROWS = 2000
+_OU_ZONE_RE = re.compile(r'^\s*zone\b', re.I)
+OU_MODES = {'table': 'ทั้งตาราง = 1 บันเดิล', 'row': '1 แถว = 1 บันเดิล', 'skip': 'ข้าม'}
+OU_KINDS = {'chest': '🎁 หีบ', 'shop': '🛒 ร้านค้า', 'gacha': '🎲 สุ่ม', 'unknown': '❓ ดูไม่ออก'}
+OU_SHORT = {'table': 'ทั้งตาราง', 'row': 'ทีละแถว', 'skip': 'ข้าม'}
+
+
+def ou_read_rows(wb, sheet):
+    return [list(r) if r else []
+            for r in wb[sheet].iter_rows(min_row=1, max_row=OU_SCAN_ROWS, values_only=True)]
+
+
+def _ou_cell(rows, r, c):
+    if 0 <= r < len(rows) and 0 <= c < len(rows[r] or []):
+        return rows[r][c]
+    return None
+
+
+def ou_tables(rows, sheet):
+    """หาทุกตาราง fdItemNum ในชีท คืน list ของหัวข้อ (ยังไม่มีสิ่งที่คนแก้)"""
+    sheet = clean_text(sheet) or str(sheet)
+    # ---- โซน: ป้าย "ZONE ..." แถวบนๆ ของชีท กินพื้นที่ไปทางขวาจนเจอโซนถัดไป ----
+    zones = []
+    for r in range(min(6, len(rows))):
+        for c, v in enumerate(rows[r] or []):
+            t = clean_text(v)
+            if t and _OU_ZONE_RE.match(t):
+                zones.append((c, t))
+    zones.sort()
+
+    def zone_of(c):
+        z = ''
+        for zc, zt in zones:
+            if zc <= c:
+                z = zt
+        return z
+
+    heads = [(r, c) for r, row in enumerate(rows) for c, v in enumerate(row or [])
+             if _hkey(v) == 'fditemnum']
+    head_cols = {}
+    for r, c in heads:
+        head_cols.setdefault(r, set()).add(c)
+
+    out = []
+    last_end = {}          # คอลัมน์ fdItemNum -> แถวสุดท้ายของตารางก่อนหน้า (กันหยิบหัวข้อข้ามตาราง)
+    for r, c in heads:
+        # ---- แถวข้อมูล: ไล่ลงไปจนเลข fdItemNum หมด (ยอมเว้นว่างใต้หัวได้ 2 แถว) ----
+        drows, gap = [], 0
+        rr = r + 1
+        while rr < len(rows):
+            k = src_int(_ou_cell(rows, rr, c))
+            if k is None:
+                if drows or gap >= 2:
+                    break
+                gap += 1
+            else:
+                drows.append(rr)
+            rr += 1
+        if not drows:
+            continue
+        header = rows[r] or []
+        ncols = max([len(header)] + [len(rows[x] or []) for x in drows])
+
+        def used(col):
+            if col in head_cols.get(r, set()) and col != c:
+                return False
+            if clean_text(_ou_cell(rows, r, col)):
+                return True
+            return any(clean_text(_ou_cell(rows, x, col)) for x in drows)
+        # ก้อนตาราง = คอลัมน์ที่ติดกันต่อจาก fdItemNum ไปจนเจอคอลัมน์ว่างทั้งแท่ง / ตาราง fdItemNum ตัวอื่น
+        bl = c
+        while bl - 1 >= 0 and used(bl - 1):
+            bl -= 1
+        br = c
+        while br + 1 < ncols and used(br + 1):
+            br += 1
+
+        keys = {j: _hkey(_ou_cell(rows, r, j)) for j in range(bl, br + 1)}
+
+        def find(pred):
+            order = [j for j in range(c, br + 1)] + [j for j in range(c - 1, bl - 1, -1)]
+            for j in order:
+                if keys.get(j) and pred(keys[j]):
+                    return j
+            return None
+        namec = find(lambda h: h in ('itemname', 'name', 'displayname') or h.startswith('itemname'))
+        amtc = find(lambda h: h in ('amt', 'amount', 'จำนวน'))
+        rankc = find(lambda h: h in ('rank', 'tier', 'ยศ'))
+        durc = find(lambda h: h.startswith('duration') or h.startswith('ระยะเวลา'))
+        movec = find(lambda h: 'itemmove' in h)
+        aidc = find(lambda h: 'aztek' in h or h in ('itemid', 'aztekitemid'))
+        limc = find(lambda h: 'จำกัดจำนวน' in h or h.startswith('limit'))
+        chance = [j for j, h in keys.items() if h and 'chance' in h]
+        shopcol = [j for j, h in keys.items() if h and ('coin' in h or h.startswith('ราคาไอเทม'))]
+
+        # ---- หัวข้อของตาราง: ข้อความใกล้หัวตารางที่สุด ในคอลัมน์ fdItemNum (หรือซ้ายติดกัน) ----
+        top = max(r - 8, last_end.get(c, -1) + 1, 0)
+        title = ''
+        above = []
+        for x in range(r - 1, top - 1, -1):
+            for j in range(bl, br + 1):
+                t = clean_text(_ou_cell(rows, x, j))
+                if t and src_int(t) is None:
+                    above.append(t)
+            if not title:
+                for j in (c, c - 1):
+                    t = clean_text(_ou_cell(rows, x, j))
+                    if t and src_int(t) is None and not t.startswith('*') and \
+                            not re.fullmatch(r'[\d.,%\s]+', t):
+                        title = t
+                        break
+        last_end[c] = drows[-1]
+        zone = zone_of(c)
+        tid = '%s!%s%d' % (sheet, col_letter(c), r + 1)
+        if not title:
+            title = 'ตารางที่แถว %d' % (r + 1)
+
+        # ---- แยกประเภท (ดูจากป้ายเท่านั้น) ----
+        ctx = (title + ' ' + zone).lower()
+        if chance:
+            kind, mode, use = 'gacha', 'skip', False
+            why = 'มีช่อง %s = ตารางสุ่ม ไม่ใช่บันเดิล' % clean_text(_ou_cell(rows, r, chance[0]))
+        elif limc is not None or shopcol or any(w in ctx for w in ('ร้านค้า', 'shop')):
+            kind, mode, use = 'shop', 'row', True
+            why = 'ร้านค้า (%s) → 1 แถว = 1 บันเดิล' % (
+                'มีช่อง ' + clean_text(_ou_cell(rows, r, limc if limc is not None else shopcol[0]))
+                if (limc is not None or shopcol) else 'ชื่อหัวข้อ')
+        elif any(w in ctx for w in ('หีบ', 'สะสม', 'รางวัล', 'chest', 'mileage', 'reward')):
+            kind, mode, use = 'chest', 'table', True
+            why = 'หีบ/รางวัล → ทั้งตาราง = 1 บันเดิล'
+        else:
+            kind, mode, use = 'unknown', 'table', False
+            why = 'ดูไม่ออกว่าเป็นอะไร — ไม่ติ๊กไว้ ตรวจแล้วเลือกเอง'
+
+        items = []
+        prev = None
+        for x in drows:
+            def val(col, _x=x):
+                return _ou_cell(rows, _x, col) if col is not None else None
+            k = src_int(val(c))
+            name = clean_text(val(namec))
+            mv_raw = clean_text(val(movec)) if movec is not None else ''
+            dur_raw = clean_text(val(durc)) if durc is not None else ''
+            rank = clean_text(val(rankc)) if rankc is not None else ''
+            # เซลล์รวม (merge) จะมีค่าแค่แถวบน — แถวถัดไปที่เป็นไอเทมตัวเดียวกันใช้ค่าเดิมต่อ
+            if prev and prev['kind'] == k:
+                mv_raw = mv_raw or prev['move']
+                dur_raw = dur_raw or prev['dur_raw']
+                rank = rank or prev['rank']
+                name = name or prev['name']
+            if movec is not None:
+                trade, known = move_to_trade(mv_raw)
+            else:
+                trade, known = 'any', True
+            tier = _SRC_TIER.get(rank.lower(), '') if rank else ''
+            note = ''
+            if not tier:
+                if rank and rank != '-':
+                    note = 'Rank %s → %s (เว็บไม่มี %s)' % (rank, DEFAULT_TIER, rank)
+                tier = DEFAULT_TIER
+            m = re.search(r'(\d+)\s*ชิ้น', name)
+            it = {'r': x + 1, 'kind': k, 'name': name, 'move': mv_raw, 'trade': trade,
+                  'move_ok': known, 'dur_raw': dur_raw,
+                  'dur': dur_from_text(dur_raw) if durc is not None else '',
+                  'rank': rank, 'tier': tier, 'note': note,
+                  'qty': src_int(val(amtc)) if amtc is not None else None,
+                  'pq': m.group(1) if m else '',
+                  'aid': src_int(val(aidc)) if aidc is not None else None,
+                  'limit': clean_text(num_str(val(limc))) if limc is not None else '',
+                  'ref': '%s!%s%d' % (sheet, col_letter(c), x + 1)}
+            it['qty'] = it['qty'] or '1'
+            it['aid'] = it['aid'] or ''
+            items.append(it)
+            prev = it
+        zc = max([zc for zc, _ in zones if zc <= c] or [-1])
+        if zc < 0:                     # ไม่มีป้าย ZONE = จัดกลุ่มตามแท่งคอลัมน์ fdItemNum แทน
+            zc = c
+        out.append({'tid': tid, 'sheet': sheet, 'zone': zone, 'title': title, 'row': r + 1,
+                    'kind': kind, 'mode': mode, 'use': use, 'why': why, 'items': items,
+                    'has_aid_col': aidc is not None, '_o': (zc, r, c)})
+    # เรียงตามโซน (ซ้าย -> ขวา) แล้วค่อยบน -> ล่าง จะได้อ่านเป็นหมวดๆ เหมือนในชีท
+    out.sort(key=lambda t: t.pop('_o'))
+    return out
+
+
+def ou_bundle_hints(wb):
+    """เลข Bundle ที่จดไว้ในชีทแล้ว (เช่นแท็บ bundle+id) — ชื่อ -> [เลข]
+    ใช้เตือนว่า "อันนี้อาจสร้างไปแล้ว" เท่านั้น ไม่ได้เอาไปกรอกที่ไหน
+    หาแถวที่มีป้าย "bundle" เดี่ยวๆ แล้วไล่ลงไป: ชื่อ = คอลัมน์แรกของแถว · เลข = ใต้ป้าย bundle"""
+    hint = {}
+    for s in wb.sheetnames:
+        try:
+            rows = ou_read_rows(wb, s)
+        except Exception:
+            continue
+        for r, row in enumerate(rows):
+            for c, v in enumerate(row or []):
+                if _hkey(v) != 'bundle' or c == 0:
+                    continue
+                for x in range(r + 1, min(len(rows), r + 300)):
+                    rw = rows[x] or []
+                    if not any(clean_text(t) for t in rw):
+                        break
+                    if any(_hkey(t) == 'bundle' for t in rw):
+                        break
+                    num = src_int(_ou_cell(rows, x, c))
+                    name = clean_text(_ou_cell(rows, x, 0))
+                    if num and name:
+                        hint.setdefault(ou_norm(name), [])
+                        if num not in hint[ou_norm(name)]:
+                            hint[ou_norm(name)].append(num)
+    return hint
+
+
+def ou_norm(s):
+    """ชื่อแบบเอาไว้เทียบ: ตัดเว้นวรรค/ขึ้นบรรทัด/ตัวคั่น ทิ้งหมด"""
+    return re.sub(r'[\s/|+·,]+', '', str(s or '')).lower()
+
+
+def ou_parse_workbook(wb):
+    """อ่านทั้งไฟล์ -> (topics, รายงานชีท, hints)"""
+    topics, report = [], []
+    for s in wb.sheetnames:
+        try:
+            ts = ou_tables(ou_read_rows(wb, s), s)
+        except Exception as ex:
+            report.append((s, -1, str(ex)[:80]))
+            continue
+        report.append((s, len(ts), ''))
+        topics.extend(ts)
+    return topics, report, ou_bundle_hints(wb)
+
+
+def ou_new_state(path='', topics=None, report=None, hints=None):
+    return {'file': path, 'read_at': datetime.now().isoformat(timespec='seconds'),
+            'topics': topics or [], 'report': report or [], 'hints': hints or {},
+            'ids': {}, 'names': {}, 'use': {}, 'mode': {}, 'edit': {}, 'sent': {},
+            'multi': {}}
+
+
+def ou_merge(old, new):
+    """อ่านไฟล์ใหม่ แต่เก็บสิ่งที่คนแก้ไว้ (Id / ชื่อ / ติ๊ก / โหมด / จำนวน / Tier / ส่งแล้ว)"""
+    for k in ('ids', 'names', 'use', 'mode', 'edit', 'sent', 'multi'):
+        new[k] = dict(old.get(k) or {})
+    return new
+
+
+def ou_key(it):
+    """ตัวไอเทมบนเว็บ = fdItemNum + แลกเปลี่ยน + ระยะเวลา + จำนวนในชื่อ"""
+    return '|'.join(str(it.get(k) or '') for k in ('kind', 'trade', 'dur', 'pq'))
+
+
+def ou_fill_sheet_ids(st):
+    """ชีทไหนมีคอลัมน์ Aztek Item Id อยู่แล้ว เอามาใส่ให้ (ไม่ทับที่คนใส่เอง) · เลขขัดกัน = เตือน"""
+    clash = []
+    for t in st['topics']:
+        for it in t['items']:
+            if not it.get('aid'):
+                continue
+            k = ou_key(it)
+            cur = st['ids'].get(k)
+            if not cur:
+                st['ids'][k] = it['aid']
+            elif cur != it['aid']:
+                clash.append('%s: ในชีทมี %s แต่ใช้ %s อยู่' % (it['ref'], it['aid'], cur))
+    return clash
+
+
+def ou_item(st, t, it):
+    """ไอเทม 1 ตัว พร้อมค่าที่คนแก้ไว้แล้ว"""
+    e = st['edit'].get('%s:%d' % (t['tid'], it['r'])) or {}
+    return {'id': str(st['ids'].get(ou_key(it), '') or ''),
+            'qty': str(e.get('qty') or it['qty']),
+            'tier': e.get('tier') or it['tier'],
+            'disp': it['name'], 'kind': it['kind'], 'src': it, 'key': ou_key(it),
+            'ekey': '%s:%d' % (t['tid'], it['r'])}
+
+
+def ou_bundles(st):
+    """แม่แบบกลาง -> รายการบันเดิล (เรียงตามหัวข้อ) พร้อมสถานะ
+    คืน list ของ dict: tid, bkey, name, use, items, status, ready, dup_of, hint, sent"""
+    out = []
+    for t in st['topics']:
+        mode = st['mode'].get(t['tid'], t['mode'])
+        if mode == 'skip':
+            continue
+        groups = [t['items']] if mode == 'table' else [[it] for it in t['items']]
+        for g in groups:
+            bkey = t['tid'] + ('#T' if mode == 'table' else '#R%d' % g[0]['r'])
+            items = [ou_item(st, t, it) for it in g]
+            # ชื่อเริ่มต้น = ชื่อไอเทม (แบบที่ทีมตั้งในแท็บ bundle+id) · ของเยอะเกิน 3 ชิ้นใช้ชื่อหัวข้อแทน
+            dname = (' / '.join(it['name'] for it in g if it['name']) if len(g) <= 3 else '') \
+                or t['title']
+            name = st['names'].get(bkey) or dname
+            hint = st['hints'].get(ou_norm(dname)) or st['hints'].get(ou_norm(name)) or []
+            # ในชีทจดเลข Bundle ของอันนี้ไว้แล้ว = น่าจะสร้างไปแล้ว -> ไม่ติ๊กไว้ก่อน (กันสร้างซ้ำ)
+            use = st['use'].get(bkey, bool(t['use'] and not hint))
+            sig = (t['sheet'], t['zone'],
+                   tuple(sorted((x['key'], x['qty'], x['tier']) for x in items)))
+            out.append({'tid': t['tid'], 'bkey': bkey, 'name': name, 'use': use,
+                        'items': items, 'sig': sig, 'hint': hint, 'topic': t,
+                        'sent': st['sent'].get(bkey, ''), 'dup_of': None})
+    first = {}
+    for b in out:
+        if not b['use']:
+            continue
+        if b['sig'] in first:
+            b['dup_of'] = first[b['sig']]
+        else:
+            first[b['sig']] = b
+    for b in out:
+        miss = sum(1 for x in b['items'] if not re.fullmatch(r'\d+', x['id']))
+        badq = sum(1 for x in b['items'] if not re.fullmatch(r'[1-9]\d*', x['qty']))
+        b['miss'], b['badq'] = miss, badq
+        b['ready'] = b['use'] and not b['dup_of'] and not miss and not badq and bool(b['name'].strip())
+        if not b['use']:
+            b['status'] = '— ไม่ได้เลือก'
+        elif b['dup_of']:
+            b['status'] = '⧉ ของข้างในเหมือน “%s” → ใช้บันเดิลเดียวกัน ไม่สร้างซ้ำ' % b['dup_of']['name'][:40]
+        elif miss:
+            b['status'] = '⚠ ยังไม่มี Aztek Item Id %d ตัว' % miss
+        elif badq:
+            b['status'] = '⚠ จำนวนไม่ถูก'
+        elif b['sent']:
+            b['status'] = '➜ ส่งไปแท็บสร้าง Bundle แล้ว (%s)' % b['sent']
+        else:
+            b['status'] = '✓ พร้อม'
+        if b['hint']:
+            b['status'] += '  ·  📌 ในชีทมีเลข Bundle %s แล้ว (สร้างไปแล้ว?)' % ', '.join(b['hint'][:3])
+    return out
+
+
+def ou_summary(st, bundles=None):
+    bs = ou_bundles(st) if bundles is None else bundles
+    skip = sum(1 for t in st['topics'] if st['mode'].get(t['tid'], t['mode']) == 'skip')
+    use = [b for b in bs if b['use']]
+    return {'topics': len(st['topics']), 'skip': skip, 'bundles': len(bs),
+            'create': sum(1 for b in use if not b['dup_of']),
+            'ready': sum(1 for b in use if b['ready']),
+            'miss': sum(1 for b in use if not b['dup_of'] and b['miss']),
+            'dup': sum(1 for b in use if b['dup_of']),
+            'hint': sum(1 for b in bs if b['hint']),
+            'ids_missing': len({x['key'] for b in use if not b['dup_of']
+                                for x in b['items'] if not x['id']})}
+
+
+def ou_to_queue(b):
+    """บันเดิลจากแม่แบบกลาง -> หน้าตาเดียวกับที่แท็บสร้าง Bundle ใช้อยู่ (ห้ามต่างแม้แต่ช่องเดียว)"""
+    return {'name': b['name'].strip(), 'type': DEFAULT_BUNDLE_TYPE, 'deliver': True,
+            'items': [{'id': x['id'], 'qty': x['qty'], 'tier': x['tier'],
+                       'disp': x['disp'], 'kind': x['kind']} for x in b['items']],
+            'rewards': [], 'sheet': 'Oung · ' + b['topic']['sheet'], 'src_bundle_id': None,
+            'use': True}
+
+
+def ou_search_criteria(st):
+    """ไอเทมที่ยังไม่มี Aztek Id -> เงื่อนไขค้นหาแบบเดียวกับแท็บค้นหา (ไม่ซ้ำตัว)"""
+    keys, crit = [], []
+    for b in ou_bundles(st):
+        if not b['use'] or b['dup_of']:
+            continue
+        for x in b['items']:
+            if x['id'] or x['key'] in keys:
+                continue
+            it = x['src']
+            keys.append(x['key'])
+            crit.append({'kind': it['kind'], 'name': '', 'disp': it['name'],
+                         'dur': it['dur'], 'trade': it['trade'], 'qty': it['pq'],
+                         'has_move': bool(it['move']), 'move_raw': it['move']})
+    return keys, crit
+
+
+def ou_take_results(st, keys, results):
+    """ผลจากแท็บค้นหา -> Aztek Id (เติมเฉพาะช่องที่ยังว่าง · เจอตัวเดียวเท่านั้น)
+    คืน (เติมได้, หลายตัว, ไม่เจอ)"""
+    got = {}
+    for r in results or []:
+        if r.get('miss') or not r.get('id'):
+            continue
+        s = r.get('seq') or 0
+        if 1 <= s <= len(keys):
+            got.setdefault(keys[s - 1], [])
+            if str(r['id']) not in got[keys[s - 1]]:
+                got[keys[s - 1]].append(str(r['id']))
+    filled = multi = miss = 0
+    for k in keys:
+        ids = got.get(k) or []
+        if st['ids'].get(k):
+            continue
+        if len(ids) == 1:
+            st['ids'][k] = ids[0]
+            st['multi'].pop(k, None)
+            filled += 1
+        elif ids:
+            st['multi'][k] = ids
+            multi += 1
+        else:
+            miss += 1
+    return filled, multi, miss
+
+
+
+class OungTab:
+    """แท็บ 🎰 Oung Machine — ของใหม่ทั้งหมด
+    ใช้ของเดิมแค่ 3 อย่างแบบ "เรียกใช้" ไม่ได้แก้อะไรของเดิม:
+       · หน้าตาปุ่ม/การ์ด/Log ของโปรแกรม
+       · แท็บค้นหา (ปุ่มค้นหา Aztek Id — กดเองถึงจะทำงาน)
+       · คิวของแท็บสร้าง Bundle (ปุ่มส่งไปสร้าง — สร้างจริงด้วยระบบเดิมทุกขั้นตอน)"""
+    COLS = (('use', 'ใช้', 40, False), ('st', 'สถานะ', 104, False),
+            ('what', 'fdItemNum / ประเภท', 146, False), ('move', 'Itemmove', 74, False),
+            ('aid', 'Aztek Item Id', 100, False), ('qty', 'จำนวน', 52, False),
+            ('tier', 'Tier', 62, False), ('note', 'รายละเอียด / ที่มาในชีท', 420, True))
+    EDIT = {'#0': 'name', '#5': 'aid', '#6': 'qty', '#7': 'tier'}
+
+    def __init__(self, app, tab):
+        self.app = app
+        self.tab = tab
+        self.st = ou_new_state()
+        self._map = {}
+        self._ed = None
+        self._next_job = None
+        self._wait_keys = None
+        self._build()
+        self._load()
+        self.refresh()
+
+    # ---------- หน้าจอ ----------
+    def _build(self):
+        a, p = self.app, self.tab
+        s1 = a._card(p, '1) เปิดไฟล์ชีท Oung Oung Machine')
+        bar = tk.Frame(s1, bg=C['bg'])
+        bar.pack(fill='x')
+        a._btn(bar, '📂  เปิดไฟล์ชีท (.xlsx)', self.open_file, primary=True).pack(
+            side='left', ipadx=10, ipady=4)
+        a._btn(bar, '↻  อ่านไฟล์เดิมใหม่', self.reread).pack(
+            side='left', padx=(8, 0), ipadx=8, ipady=4)
+        a._btn(bar, '🗑  ล้าง', self.clear).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
+        self.lbl_file = tk.Label(s1, text='ยังไม่ได้เปิดไฟล์', bg=C['bg'], fg=C['fg'], font=FM,
+                                 anchor='w')
+        self.lbl_file.pack(fill='x', pady=(8, 0))
+        tk.Label(s1, text='โปรแกรมแยกให้เองจากป้ายในชีท:  ตารางที่มีช่อง Chance = ตารางสุ่ม (ข้าม)  ·  '
+                          'หีบ/รางวัลสะสม = ทั้งตาราง 1 บันเดิล  ·  ร้านค้า = 1 แถว 1 บันเดิล  ·  '
+                          'ของข้างในเหมือนกัน = ใช้บันเดิลเดียวกัน — ตรวจแล้วแก้ในตารางข้างล่างได้เลย',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w', justify='left',
+                 wraplength=1000).pack(fill='x', pady=(8, 0))
+
+        s2 = a._card(p, '2) ตรวจ / แก้  (แม่แบบกลาง: หัวข้อ › บันเดิล › ไอเทม)', grow=True)
+        tb = tk.Frame(s2, bg=C['bg'])
+        tb.pack(fill='x', pady=(0, 6))
+        tk.Label(tb, text='หัวข้อที่เลือก →', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9)).pack(side='left')
+        for mode, txt in (('table', '▣  ทั้งตาราง = 1 บันเดิล'), ('row', '☰  1 แถว = 1 บันเดิล'),
+                          ('skip', '⊘  ข้ามหัวข้อนี้')):
+            a._btn(tb, txt, lambda m=mode: self.set_mode(m)).pack(
+                side='left', padx=(6, 0), ipadx=6, ipady=2)
+        a._btn(tb, '⌃  หุบ', lambda: self.expand(False)).pack(side='right', ipadx=6, ipady=2)
+        a._btn(tb, '⌄  กาง', lambda: self.expand(True)).pack(
+            side='right', padx=(0, 6), ipadx=6, ipady=2)
+
+        tw = tk.Frame(s2, bg=C['bg'])
+        tw.pack(fill='both', expand=True)
+        self.tree = ttk.Treeview(tw, columns=[c[0] for c in self.COLS], show='tree headings',
+                                 style='TR.Treeview', height=8, selectmode='browse')
+        self.tree.heading('#0', text='หัวข้อ › บันเดิล › ไอเทม')
+        self.tree.column('#0', width=310, minwidth=180, stretch=False, anchor='w')
+        for c, t, w, grow in self.COLS:
+            self.tree.heading(c, text=t)
+            self.tree.column(c, width=w, minwidth=36, stretch=grow, anchor='w')
+        for tag, kw in (('topic', {'foreground': C['fg'], 'font': FB}),
+                        ('off', {'foreground': C['dim']}), ('ok', {'foreground': C['ok']}),
+                        ('warn', {'foreground': C['warn']}), ('dup', {'foreground': '#7aa2f7'}),
+                        ('bad', {'foreground': C['err']})):
+            self.tree.tag_configure(tag, **kw)
+        ys = ttk.Scrollbar(tw, orient='vertical', command=self.tree.yview)
+        xs = ttk.Scrollbar(tw, orient='horizontal', command=self.tree.xview)
+        # ตารางเลื่อน (ล้อเมาส์ / ลากแถบเลื่อน) ระหว่างแก้ = บันทึกช่องที่แก้ไว้ก่อน ไม่ให้ช่องลอยค้างผิดแถว
+        self.tree.configure(yscrollcommand=lambda *a: (self._scrolled(), ys.set(*a)),
+                            xscrollcommand=lambda *a: (self._scrolled(), xs.set(*a)))
+        self.tree.grid(row=0, column=0, sticky='nsew')
+        ys.grid(row=0, column=1, sticky='ns')
+        xs.grid(row=1, column=0, sticky='ew')
+        tw.rowconfigure(0, weight=1)
+        tw.columnconfigure(0, weight=1)
+        self.tree.bind('<Button-1>', self._click, add='+')
+        self.tree.bind('<Double-1>', self._dbl)
+
+        tk.Label(s2, text='ดับเบิลคลิกเพื่อแก้: ชื่อบันเดิล · Aztek Item Id · จำนวน · Tier   '
+                          '(Enter = บันทึกแล้วไปแถวถัดไป · Esc = ยกเลิก)  ·  คลิกช่อง “ใช้” = เลือก/ไม่เลือก  ·  '
+                          'ใส่ Aztek Id ครั้งเดียว ไอเทมตัวเดียวกันทุกที่ได้ตามไปหมด',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w', justify='left',
+                 wraplength=1000).pack(fill='x', pady=(6, 0))
+        self.lbl_sum = tk.Label(s2, text='', bg=C['bg'], fg=C['fg'], font=FB, anchor='w',
+                                justify='left', wraplength=1000)
+        self.lbl_sum.pack(fill='x', pady=(4, 0))
+
+        s3 = a._card(p, '3) ใส่ Aztek Item Id ให้ครบ แล้วส่งไปสร้าง')
+        b3 = tk.Frame(s3, bg=C['bg'])
+        b3.pack(fill='x')
+        a._btn(b3, '🔍  ค้นหา Aztek Id ที่ยังว่าง (ใช้แท็บค้นหา)', self.search_ids).pack(
+            side='left', ipadx=8, ipady=4)
+        a._btn(b3, '📋  คัดลอกสรุป', self.copy_summary).pack(
+            side='left', padx=(8, 0), ipadx=8, ipady=4)
+        self.btn_send = a._btn(b3, '📦  ส่งไปแท็บสร้าง Bundle', self.send, primary=True)
+        self.btn_send.pack(side='right', ipadx=14, ipady=4)
+        tk.Label(s3, text='สร้างจริงใช้ระบบเดิมของแท็บ “สร้าง Bundle” ทุกขั้นตอน '
+                          '(โหมดทดสอบ · ป๊อปอัปยืนยัน · เลข Bundle ที่สร้างแล้ว) — แท็บนี้แค่เตรียมของให้',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(fill='x', pady=(6, 0))
+
+    # ---------- เก็บ/โหลด ----------
+    def _path(self):
+        return os.path.join(DATA_DIR, OU_STATE)
+
+    def _save(self):
+        try:
+            tmp = self._path() + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(self.st, f, ensure_ascii=False)
+            os.replace(tmp, self._path())
+        except Exception:
+            pass
+
+    def _load(self):
+        try:
+            if not os.path.exists(self._path()):
+                return
+            with open(self._path(), 'r', encoding='utf-8') as f:
+                d = json.load(f)
+            if not isinstance(d, dict) or not isinstance(d.get('topics'), list):
+                raise ValueError('รูปแบบไฟล์ไม่ถูก')
+            st = ou_new_state()
+            st.update(d)
+            self.st = st
+            if st['topics']:
+                n = ou_summary(st)
+                self.app.root.after(0, lambda: self.app.log(
+                    'กู้ข้อมูลแท็บ Oung Machine จากครั้งก่อน: %s · %d หัวข้อ · จะสร้าง %d บันเดิล'
+                    % (os.path.basename(st.get('file') or '-'), n['topics'], n['create']), 'OK'))
+        except Exception as ex:
+            try:
+                os.replace(self._path(), self._path() + '.bad')
+            except Exception:
+                pass
+            self.app.root.after(0, lambda: self.app.log(
+                'ไฟล์ข้อมูลแท็บ Oung Machine อ่านไม่ได้ (%s) — เริ่มใหม่' % str(ex)[:60], 'WARN'))
+
+    # ---------- เปิดไฟล์ ----------
+    def open_file(self):
+        path = filedialog.askopenfilename(title='เลือกไฟล์ชีท Oung Oung Machine',
+                                          filetypes=[('Excel', '*.xlsx *.xlsm'), ('ทุกไฟล์', '*.*')])
+        if path:
+            self.load_path(path)
+
+    def reread(self):
+        f = self.st.get('file')
+        if not f:
+            return messagebox.showinfo('ยังไม่มีไฟล์', 'กด “เปิดไฟล์ชีท” ก่อนนะ')
+        if not os.path.exists(f):
+            return messagebox.showwarning('หาไฟล์ไม่เจอ', 'ไม่เจอไฟล์เดิมแล้ว:\n%s\n\nเปิดไฟล์ใหม่แทนนะ' % f)
+        self.load_path(f)
+
+    def load_path(self, path):
+        """อ่านไฟล์ -> แม่แบบกลาง  (ไฟล์เดิม = เก็บที่แก้ไว้ทั้งหมด · ไฟล์ใหม่ = เก็บแค่ Aztek Id)"""
+        self._cancel_edit()
+        try:
+            self.tab.config(cursor='watch')
+            self.tab.update_idletasks()
+        except Exception:
+            pass
+        try:
+            wb = open_workbook(path)
+            try:
+                topics, report, hints = ou_parse_workbook(wb)
+            finally:
+                wb.close()
+        except Exception as ex:
+            self.app.log('Oung: อ่านไฟล์ไม่ได้ — %s' % ex, 'ERR')
+            return messagebox.showerror('อ่านไฟล์ไม่ได้', str(ex)[:300])
+        finally:
+            try:
+                self.tab.config(cursor='')
+            except Exception:
+                pass
+        new = ou_new_state(path, topics, report, hints)
+        same = os.path.abspath(path) == os.path.abspath(self.st.get('file') or '')
+        if same:
+            ou_merge(self.st, new)
+        else:
+            # Aztek Id ผูกกับ "ตัวไอเทม" ไม่ใช่ไฟล์ — กิจกรรมรอบหน้าไอเทมเดิมก็ได้ Id ตามมาเลย
+            new['ids'] = dict(self.st.get('ids') or {})
+        clash = ou_fill_sheet_ids(new)
+        self.st = new
+        self.refresh(keep=same)
+        n = ou_summary(new)
+        a = self.app
+        a.log('=' * 46, 'STEP')
+        a.log('Oung: อ่าน %s' % os.path.basename(path), 'STEP')
+        for s, cnt, err in report:
+            if err:
+                a.log('   ✗ ชีท %s อ่านไม่ได้: %s' % (s, err), 'WARN')
+            elif cnt:
+                a.log('   · ชีท %s: %d ตาราง' % (s, cnt), 'INFO')
+        a.log('   %d หัวข้อ (ข้าม %d) · บันเดิล %d · จะสร้าง %d · ของซ้ำใช้ร่วมกัน %d · '
+              'มีเลข Bundle ในชีทแล้ว %d' % (n['topics'], n['skip'], n['bundles'], n['create'],
+                                           n['dup'], n['hint']), 'OK')
+        for c in clash[:20]:
+            a.log('   ⚠ Aztek Id ไม่ตรงกัน ' + c, 'WARN')
+        log_event('oung_read', file=os.path.basename(path), topics=n['topics'],
+                  bundles=n['bundles'], create=n['create'])
+
+    def clear(self):
+        if not self.st['topics'] and not self.st['ids']:
+            return
+        if not messagebox.askyesno('ล้าง', 'ล้างข้อมูลแท็บนี้ทั้งหมด (รวม Aztek Id ที่ใส่ไว้)?\n'
+                                           'คิวในแท็บสร้าง Bundle ไม่โดนด้วย'):
+            return
+        self._cancel_edit()
+        self.st = ou_new_state()
+        self.refresh(keep=False)
+
+    # ---------- วาดตาราง ----------
+    def _note(self, x):
+        parts = []
+        it = x['src']
+        if it.get('note'):
+            parts.append(it['note'])
+        if not it.get('move_ok', True):
+            parts.append('Itemmove “%s” ไม่รู้จัก' % it.get('move'))
+        multi = self.st['multi'].get(x['key'])
+        if multi and not x['id']:
+            parts.append('ค้นเจอหลายตัว: %s — เลือกใส่เอง' % ', '.join(multi[:5]))
+        if it.get('limit'):
+            parts.append('จำกัด/ไอดี %s' % it['limit'])
+        parts.append(it['ref'])
+        return '  ·  '.join(parts)
+
+    @staticmethod
+    def _short(b):
+        if not b['use']:
+            s = '— ไม่เลือก'
+        elif b['dup_of']:
+            s = '⧉ ใช้ร่วม'
+        elif b['miss']:
+            s = '⚠ ขาด Id %d' % b['miss']
+        elif b['badq']:
+            s = '⚠ จำนวน'
+        elif b['sent']:
+            s = '➜ ส่งแล้ว'
+        else:
+            s = '✓ พร้อม'
+        return s + ('  📌' if b['hint'] else '')
+
+    def refresh(self, keep=True):
+        tr = self.tree
+        opened, sel, top = {}, None, 0.0
+        if keep:
+            for iid in list(self._map):
+                try:
+                    opened[iid] = bool(tr.item(iid, 'open'))
+                except Exception:
+                    pass
+            s = tr.selection()
+            sel = s[0] if s else None
+            try:
+                top = tr.yview()[0]
+            except Exception:
+                top = 0.0
+        tr.delete(*tr.get_children())
+        self._map = {}
+        bs = ou_bundles(self.st)
+        by_t = {}
+        for b in bs:
+            by_t.setdefault(b['tid'], []).append(b)
+        for t in self.st['topics']:
+            tid = t['tid']
+            mode = self.st['mode'].get(tid, t['mode'])
+            tiid = 'T|' + tid
+            nb = by_t.get(tid, [])
+            n_use = sum(1 for b in nb if b['use'])
+            if mode == 'skip':
+                stt = 'ข้าม'
+            else:
+                stt = 'เลือก %d/%d' % (n_use, len(nb))
+            note = '%s  ·  %s%s' % (t['why'], ('%s  ·  ' % t['zone']) if t['zone'] else '', tid)
+            tr.insert('', 'end', iid=tiid, text='🗂  ' + t['title'],
+                      values=('—' if mode == 'skip' else ('✔' if n_use else '✗'), stt,
+                              '%s · %s' % (OU_KINDS.get(t['kind'], t['kind']), OU_SHORT[mode]),
+                              '', '', '', '', note),
+                      open=opened.get(tiid, mode != 'skip'),
+                      tags=('topic',) if mode != 'skip' else ('topic', 'off'))
+            self._map[tiid] = ('t', tid)
+            if mode == 'skip':
+                for j, it in enumerate(t['items']):
+                    iid = 'S|%s|%d' % (tid, j)
+                    tr.insert(tiid, 'end', iid=iid, text='      ' + (it['name'] or '-'),
+                              values=('', '', it['kind'], it['move'], '', it['qty'], it['rank'],
+                                      it['ref']), tags=('off',))
+                    self._map[iid] = ('s', tid, j)
+                continue
+            for b in nb:
+                biid = 'B|' + b['bkey']
+                if not b['use']:
+                    tag = 'off'
+                elif b['dup_of']:
+                    tag = 'dup'
+                elif b['ready']:
+                    tag = 'ok'
+                else:
+                    tag = 'warn'
+                one = b['items'][0] if len(b['items']) == 1 else None
+                short = self._short(b)
+                if one:
+                    vals = ('✔' if b['use'] else '✗', short, one['kind'], one['src']['move'],
+                            one['id'] or ('—' if not b['use'] or b['dup_of'] else '⚠ ใส่ Id'),
+                            one['qty'], one['tier'], b['status'] + '  ·  ' + self._note(one))
+                else:
+                    vals = ('✔' if b['use'] else '✗', short, '%d ไอเทม' % len(b['items']), '', '',
+                            '', '', b['status'])
+                tr.insert(tiid, 'end', iid=biid, text='📦  ' + b['name'], values=vals,
+                          open=opened.get(biid, True), tags=(tag,))
+                self._map[biid] = ('b', b['bkey'])
+                if one:
+                    continue
+                for j, x in enumerate(b['items']):
+                    iid = 'I|%s|%d' % (b['bkey'], j)
+                    itag = tag if (x['id'] or tag in ('off', 'dup')) else 'warn'
+                    tr.insert(biid, 'end', iid=iid, text='      %d. %s' % (j + 1, x['disp'] or '-'),
+                              values=('', '⚠ ใส่ Id' if itag == 'warn' else '', x['kind'], x['src']['move'],
+                                      x['id'] or ('—' if tag in ('off', 'dup') else '⚠ ใส่ Id'),
+                                      x['qty'], x['tier'], self._note(x)), tags=(itag,))
+                    self._map[iid] = ('i', b['bkey'], j)
+        if sel and tr.exists(sel):
+            tr.selection_set(sel)
+        try:
+            tr.update_idletasks()
+            tr.yview_moveto(top)
+        except Exception:
+            pass
+        self._bs = {b['bkey']: b for b in bs}
+        self._summary(bs)
+        self._save()
+
+    def _summary(self, bs):
+        f = self.st.get('file')
+        self.lbl_file.config(text=('📄 %s  ·  อ่านเมื่อ %s' % (os.path.basename(f),
+                                                          str(self.st.get('read_at', '')).replace('T', ' ')))
+                             if f else 'ยังไม่ได้เปิดไฟล์')
+        if not self.st['topics']:
+            self.lbl_sum.config(text='ยังไม่มีข้อมูล — เปิดไฟล์ชีทก่อนนะ', fg=C['dim'])
+            return
+        n = ou_summary(self.st, bs)
+        txt = ('%d หัวข้อ (ข้าม %d)  ·  จะสร้าง %d บันเดิล  ·  พร้อมแล้ว %d  ·  ยังขาด Aztek Id %d บันเดิล '
+               '(%d ไอเทม)  ·  ของเหมือนกันใช้ร่วม %d'
+               % (n['topics'], n['skip'], n['create'], n['ready'], n['miss'], n['ids_missing'], n['dup']))
+        if n['hint']:
+            txt += '  ·  📌 มีเลข Bundle ในชีทแล้ว %d (ไม่ได้ติ๊กไว้ให้)' % n['hint']
+        self.lbl_sum.config(text=txt, fg=C['ok'] if n['create'] and n['ready'] == n['create']
+                            else C['warn'] if n['create'] else C['dim'])
+
+    def expand(self, on):
+        for iid, m in self._map.items():
+            if m[0] in ('t', 'b'):
+                try:
+                    self.tree.item(iid, open=on)
+                except Exception:
+                    pass
+
+    # ---------- เลือก / โหมด ----------
+    def _tid_of(self, iid):
+        m = self._map.get(iid)
+        if not m:
+            return None
+        if m[0] in ('t', 's'):
+            return m[1]
+        b = self._bs.get(m[1])
+        return b['tid'] if b else None
+
+    def set_mode(self, mode):
+        s = self.tree.selection()
+        tid = self._tid_of(s[0]) if s else None
+        if not tid:
+            return messagebox.showinfo('เลือกหัวข้อก่อน', 'คลิกที่หัวข้อ (แถว 🗂) หรือบันเดิลในหัวข้อนั้นก่อนนะ')
+        self._cancel_edit()
+        self.st['mode'][tid] = mode
+        t = next((t for t in self.st['topics'] if t['tid'] == tid), None)
+        if t and not t['use'] and mode != 'skip':
+            # หัวข้อที่โปรแกรมไม่ได้ติ๊กไว้ (ตารางสุ่ม/ดูไม่ออก) แต่คนสั่งให้ทำเป็นบันเดิลเอง = ติ๊กให้
+            # (ที่เคยติ๊ก/ไม่ติ๊กเองไว้แล้ว ไม่ไปยุ่ง · อันที่มีเลข Bundle ในชีทแล้วก็ไม่ติ๊ก)
+            for b in ou_bundles(self.st):
+                if b['tid'] == tid and b['bkey'] not in self.st['use'] and not b['hint']:
+                    self.st['use'][b['bkey']] = True
+        self.refresh()
+        self.tree.selection_set('T|' + tid)
+        self.tree.see('T|' + tid)
+
+    def _click(self, ev):
+        if self._ed:                    # คลิกที่อื่นในตาราง = บันทึกช่องที่แก้ค้างไว้ (ค่าไม่ถูก = ยกเลิก)
+            self._commit(False, quiet=True)
+        if self.tree.identify_region(ev.x, ev.y) != 'cell' or self.tree.identify_column(ev.x) != '#1':
+            return
+        iid = self.tree.identify_row(ev.y)
+        m = self._map.get(iid)
+        if not m:
+            return
+        self._cancel_edit()
+        if m[0] == 'b':
+            b = self._bs.get(m[1])
+            if b:
+                self.st['use'][b['bkey']] = not b['use']
+        elif m[0] == 't':
+            nb = [b for b in self._bs.values() if b['tid'] == m[1]]
+            if not nb:
+                return
+            on = not any(b['use'] for b in nb)
+            for b in nb:
+                self.st['use'][b['bkey']] = on
+        else:
+            return
+        self.refresh()
+        return 'break'
+
+    # ---------- แก้ในตาราง ----------
+    def _target(self, iid, col):
+        """ช่องที่แก้ได้ -> {'get', 'set', 'kind'} หรือ None"""
+        what = self.EDIT.get(col)
+        m = self._map.get(iid)
+        if not what or not m or m[0] not in ('b', 'i'):
+            return None
+        b = self._bs.get(m[1])
+        if not b:
+            return None
+        st = self.st
+        if what == 'name':
+            if m[0] != 'b':
+                return None
+
+            def setn(v):
+                if not v.strip():
+                    return 'ชื่อบันเดิลห้ามว่าง'
+                st['names'][b['bkey']] = v.strip()
+            return {'kind': what, 'get': lambda: b['name'], 'set': setn}
+        if m[0] == 'b':
+            if len(b['items']) != 1:
+                return None
+            x = b['items'][0]
+        else:
+            x = b['items'][m[2]]
+        if what == 'aid':
+            def seta(v):
+                v = v.strip()
+                if v and not re.fullmatch(r'\d+', v):
+                    return 'Aztek Item Id ต้องเป็นตัวเลขล้วน'
+                if v:
+                    st['ids'][x['key']] = v
+                    st['multi'].pop(x['key'], None)
+                else:
+                    st['ids'].pop(x['key'], None)
+            return {'kind': what, 'get': lambda: x['id'], 'set': seta}
+        if what == 'qty':
+            def setq(v):
+                if not re.fullmatch(r'[1-9]\d*', v.strip()):
+                    return 'จำนวนต้องเป็นเลข 1 ขึ้นไป'
+                st['edit'].setdefault(x['ekey'], {})['qty'] = v.strip()
+            return {'kind': what, 'get': lambda: x['qty'], 'set': setq}
+
+        def sett(v):
+            if v not in TIERS:
+                return 'Tier ต้องเป็นหนึ่งใน ' + ', '.join(TIERS)
+            st['edit'].setdefault(x['ekey'], {})['tier'] = v
+        return {'kind': what, 'get': lambda: x['tier'], 'set': sett}
+
+    def _dbl(self, ev):
+        if self.tree.identify_region(ev.x, ev.y) not in ('cell', 'tree'):
+            return
+        iid = self.tree.identify_row(ev.y)
+        col = self.tree.identify_column(ev.x)
+        if self._target(iid, col):
+            self.edit(iid, col)
+            return 'break'
+
+    def edit(self, iid, col):
+        self._cancel_edit()
+        tg = self._target(iid, col)
+        if not tg:
+            return False
+        self.tree.see(iid)
+        self.tree.update_idletasks()
+        bb = self.tree.bbox(iid, col)
+        if bb and bb[1] + bb[3] * 2 > self.tree.winfo_height():
+            # แถวอยู่ขอบล่างพอดี -> เลื่อนขึ้นอีกนิด จะได้เห็นแถวถัดไปตอนพิมพ์ต่อ
+            self.tree.yview_scroll(3, 'units')
+            self.tree.update_idletasks()
+            bb = self.tree.bbox(iid, col)
+        if not bb:
+            return False
+        x, y, w, h = bb
+        if tg['kind'] == 'tier':
+            ed = ttk.Combobox(self.tree, values=TIERS, state='readonly', font=FM)
+            ed.set(tg['get']())
+            ed.bind('<<ComboboxSelected>>', lambda e: self._commit(True))
+        else:
+            ed = tk.Entry(self.tree, bg=C['input'], fg=C['fg'], insertbackground=C['fg'],
+                          relief='flat', font=FM, highlightthickness=1,
+                          highlightbackground=C['accent'], highlightcolor=C['accent'])
+            cur = tg['get']()
+            ed.insert(0, cur if not str(cur).startswith('⚠') else '')
+            ed.select_range(0, 'end')
+        if tg['kind'] == 'name':
+            x, w = x + 20, max(w - 20, 160)
+        ed.place(x=x, y=y, width=max(w, 90), height=h)
+        ed.focus_set()
+        ed.bind('<Return>', lambda e: self._commit(True))
+        ed.bind('<KP_Enter>', lambda e: self._commit(True))
+        ed.bind('<Tab>', lambda e: self._commit(True))
+        ed.bind('<Escape>', lambda e: self._cancel_edit())
+        if tg['kind'] != 'tier':        # ช่องเลือก Tier เปิดรายการแล้วโฟกัสหลุดเอง ห้ามบันทึกตอนนั้น
+            ed.bind('<FocusOut>', lambda e: self._commit(False, quiet=True))
+        self._ed = {'w': ed, 'iid': iid, 'col': col, 'tg': tg, 'y': y}
+        self.tree.selection_set(iid)
+        return True
+
+    def _cancel_edit(self):
+        if self._next_job:              # ยกเลิก "ไปแก้แถวถัดไป" ที่ตั้งเวลาไว้ด้วย
+            try:
+                self.tree.after_cancel(self._next_job)
+            except Exception:
+                pass
+            self._next_job = None
+        ed, self._ed = self._ed, None
+        if ed:
+            try:
+                ed['w'].destroy()
+            except Exception:
+                pass
+        return 'break'
+
+    def _commit(self, nxt=False, quiet=False):
+        ed = self._ed
+        if not ed:
+            return 'break'
+        try:
+            v = ed['w'].get()
+        except Exception:
+            v = ''
+        err = ed['tg']['set'](v)
+        if err:
+            if quiet:                   # คลิกไปที่อื่นทั้งที่ค่าไม่ถูก = ยกเลิก ไม่บันทึก
+                self._cancel_edit()
+                self.refresh()
+                return 'break'
+            try:
+                self.app.root.bell()
+            except Exception:
+                pass
+            self.lbl_sum.config(text='⚠  ' + err, fg=C['err'])
+            return 'break'
+        self._cancel_edit()
+        iid, col = ed['iid'], ed['col']
+        self.refresh()
+        if nxt:
+            order = self._visible()
+            if iid in order:
+                for nx in order[order.index(iid) + 1:]:
+                    if self._target(nx, col) and self._live(nx):
+                        self._next_job = self.tree.after(10, lambda n=nx: self._go_next(n, col))
+                        break
+        return 'break'
+
+    def _scrolled(self):
+        ed = self._ed
+        if not ed:
+            return
+        try:
+            bb = self.tree.bbox(ed['iid'], ed['col'])
+        except Exception:
+            bb = ''
+        if not bb or bb[1] != ed.get('y'):
+            self.tree.after_idle(lambda: self._commit(False, quiet=True) if self._ed is ed else None)
+
+    def _live(self, iid):
+        """แถวของบันเดิลที่ติ๊กไว้และไม่ใช่ตัวใช้ร่วม (Enter ข้ามตัวที่ไม่ได้เลือกไปเลย)"""
+        m = self._map.get(iid)
+        b = self._bs.get(m[1]) if m and m[0] in ('b', 'i') else None
+        return bool(b and b['use'] and not b['dup_of'])
+
+    def _go_next(self, iid, col):
+        self._next_job = None
+        if self.tree.exists(iid):
+            self.edit(iid, col)
+
+    def _visible(self):
+        out = []
+
+        def walk(p):
+            for c in self.tree.get_children(p):
+                out.append(c)
+                if self.tree.item(c, 'open'):
+                    walk(c)
+        walk('')
+        return out
+
+    # ---------- หา Id / ส่ง ----------
+    def search_ids(self):
+        a = self.app
+        if a.running or a.b_running or getattr(a, 'c_running', False) or self._wait_keys:
+            return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
+        keys, crit = ou_search_criteria(self.st)
+        if not crit:
+            return messagebox.showinfo('ครบแล้ว', 'บันเดิลที่เลือกไว้มี Aztek Item Id ครบทุกตัวแล้ว')
+        if not messagebox.askyesno(
+                'ค้นหา Aztek Item Id',
+                'จะใช้แท็บ “ค้นหา” หา Id ของไอเทมที่ยังว่าง %d ตัว\n'
+                '(ค้นด้วย fdItemNum + Itemmove + ระยะเวลา + จำนวน แบบเดียวกับแท็บค้นหา)\n\n'
+                '· ผลค้นหาเดิมในแท็บค้นหาจะถูกล้าง\n'
+                '· ค้นเสร็จแล้วเติม Id ให้เอง เฉพาะตัวที่เจอตัวเดียว\n'
+                '· ตัวที่เจอหลายตัว จะบอกเลขไว้ให้เลือกใส่เอง' % len(crit)):
+            return
+        self._wait_keys = keys
+        a.start(crit)
+        if not a.running:
+            self._wait_keys = None
+            return
+        a.log('Oung: ส่งไปค้นหา Aztek Id %d ตัว — เสร็จแล้วจะเติมกลับมาให้เอง' % len(crit), 'STEP')
+        self.tab.after(1500, self._poll)
+
+    def _poll(self):
+        if self._wait_keys is None:
+            return
+        try:
+            if not self.tab.winfo_exists():
+                return
+        except Exception:
+            return
+        if self.app.running:
+            self.tab.after(1000, self._poll)
+            return
+        keys, self._wait_keys = self._wait_keys, None
+        f, m, n = ou_take_results(self.st, keys, self.app.results)
+        self.refresh()
+        self.app.log('Oung: เติม Aztek Id จากผลค้นหาแล้ว %d ตัว · เจอหลายตัว (เลือกเอง) %d · ไม่เจอ %d'
+                     % (f, m, n), 'OK' if f and not (m or n) else 'WARN')
+        self.app.nb.select(self.tab)
+
+    def copy_summary(self):
+        if not self.st['topics']:
+            return
+        bs = ou_bundles(self.st)
+        lines = ['Oung Oung Machine — %s' % os.path.basename(self.st.get('file') or '')]
+        for t in self.st['topics']:
+            mode = self.st['mode'].get(t['tid'], t['mode'])
+            lines.append('')
+            lines.append('[%s] %s  ‹%s›  (%s)' % (OU_MODES[mode], t['title'], t['zone'], t['tid']))
+            if mode == 'skip':
+                lines.append('   ข้าม — ' + t['why'])
+                continue
+            for b in (b for b in bs if b['tid'] == t['tid']):
+                lines.append('   %s %s   → %s' % ('✔' if b['use'] else '✗', b['name'], b['status']))
+                for x in b['items']:
+                    lines.append('      - fdItemNum %s · %s · Aztek Id %s · จำนวน %s · %s'
+                                 % (x['kind'], x['src']['move'] or '-', x['id'] or '(ยังไม่มี)',
+                                    x['qty'], x['tier']))
+        n = ou_summary(self.st, bs)
+        lines.append('')
+        lines.append('รวม: จะสร้าง %d บันเดิล · พร้อม %d · ขาด Id %d · ใช้ร่วม %d'
+                     % (n['create'], n['ready'], n['miss'], n['dup']))
+        self.app.root.clipboard_clear()
+        self.app.root.clipboard_append('\n'.join(lines))
+        self.app.log('Oung: คัดลอกสรุปแล้ว (%d บรรทัด)' % len(lines), 'OK')
+
+    def send(self):
+        a = self.app
+        self._cancel_edit()
+        if a.b_running:
+            return messagebox.showinfo('กำลังสร้างอยู่', 'รอแท็บสร้าง Bundle ทำงานเสร็จก่อนนะ')
+        bs = ou_bundles(self.st)
+        use = [b for b in bs if b['use'] and not b['dup_of']]
+        if not use:
+            return messagebox.showwarning('ยังไม่ได้เลือก', 'ติ๊กเลือกบันเดิลที่จะสร้างก่อนนะ')
+        ready = [b for b in use if b['ready']]
+        bad = [b for b in use if not b['ready']]
+        if bad:
+            msg = 'ยังไม่พร้อม %d บันเดิล:\n%s%s' % (
+                len(bad), '\n'.join('  • %s — %s' % (b['name'][:36], b['status'][:40]) for b in bad[:8]),
+                '\n  …' if len(bad) > 8 else '')
+            if not ready:
+                return messagebox.showwarning('ยังส่งไม่ได้', msg)
+            if not messagebox.askyesno('ส่งเฉพาะที่พร้อม', msg + '\n\nส่งเฉพาะที่พร้อม %d อันไปก่อนไหม?'
+                                       % len(ready)):
+                return
+
+        def sig(q):
+            return (q['name'], tuple((str(i['id']), str(i['qty']), i['tier']) for i in q['items']))
+        have = {sig(q) for q in a.bq}
+        new = [(b, ou_to_queue(b)) for b in ready]
+        dup = [b for b, q in new if sig(q) in have]
+        new = [(b, q) for b, q in new if sig(q) not in have]
+        if not new:
+            return messagebox.showinfo('อยู่ในคิวแล้ว', 'บันเดิลที่พร้อมทั้งหมด %d อัน อยู่ในคิวแท็บสร้าง Bundle แล้ว'
+                                       % len(dup))
+        msg = 'ส่ง %d บันเดิลไปต่อท้ายคิวในแท็บ “สร้าง Bundle”' % len(new)
+        if dup:
+            msg += '\n(ข้าม %d อันที่อยู่ในคิวแล้ว)' % len(dup)
+        if a.bq:
+            msg += '\n\nในคิวมีของเดิมอยู่ %d อัน — ของเดิมไม่โดนแตะ' % len(a.bq)
+        msg += '\n\nแล้วไปกด ▶ เริ่มทำงาน ที่แท็บนั้นต่อ (ลองโหมดทดสอบก่อนได้เหมือนเดิม)'
+        if not messagebox.askyesno('ส่งไปแท็บสร้าง Bundle', msg):
+            return
+        now = datetime.now().strftime('%H:%M')
+        for b, q in new:
+            a.bq.append(q)
+            self.st['sent'][b['bkey']] = now
+        a._b_refresh()
+        a.log('Oung: ส่ง %d บันเดิลไปคิวแท็บสร้าง Bundle แล้ว (คิวรวม %d)' % (len(new), len(a.bq)), 'OK')
+        log_event('oung_send', count=len(new), skipped=len(dup))
+        self.refresh()
+        a.nb.select(a.tab_bundle)
+
 
 if __name__ == '__main__':
     App().run()
