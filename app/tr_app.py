@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.0.5 : ค้นหา — อ่าน Itemmove แบบ Storage (แลกได้) / Gift (แลกไม่ได้) แล้วเอาเฉพาะตัวที่ตรงชีท
 V1.0.4 : แท็บ Item Code — เผื่อ +2 · จำนวนการใช้งานต่อ 1 User ฝั่งของรางวัล = จำนวนโค้ด
 V1.0.3 : แท็บ Item Code — ช่องประเภทใช้คำเดียวกับเว็บ “Server Generate (ระบบสุ่ม Code)” / “Fix Codes (ส่ง Code เอง)”
 
@@ -2646,6 +2647,32 @@ JS_BUNDLE_FAME_TYPE = """
 #        หนึ่งแถวมีได้หลายตาราง (fdItemNum หลายคอลัมน์วางเรียงกัน) และตัด ID ซ้ำให้
 # ============================================================================
 MASTER_TRADE_YES = ('yes', 'y', 'true', 'ได้', 'แลกเปลี่ยนได้')
+# ชีทรุ่นใหม่เขียน Itemmove เป็นที่เก็บของแทน Yes/No
+#   Storage = เข้าคลัง แลกเปลี่ยนได้ (Y) · Gift = เข้ากล่องของขวัญ แลกเปลี่ยนไม่ได้ (N)
+MOVE_YES = MASTER_TRADE_YES + ('storage',)
+MOVE_NO = ('no', 'n', 'false', 'ไม่ได้', 'แลกเปลี่ยนไม่ได้', 'gift')
+
+
+def _hkey(h):
+    """หัวคอลัมน์แบบตัดทุกอย่างที่ไม่ใช่ตัวอักษร/ตัวเลขทิ้ง (เว้นวรรค ขีด อักษรล่องหน ฯลฯ)"""
+    return re.sub(r'[^0-9a-zก-๙]', '', str(h or '').lower())
+
+
+def is_move_header(h):
+    k = _hkey(h)
+    return 'itemmove' in k
+
+
+def move_to_trade(v):
+    """ค่าในคอลัมน์ Itemmove -> ('yes'|'no'|'any', รู้จักค่านี้ไหม)
+       Storage/Yes = ได้ · Gift/No/ว่าง = ไม่ได้ (ว่าง = No ตามเครื่องมือเดิม)
+       คำแปลกๆ ที่ไม่รู้จัก -> ไม่กรอง + เตือน (ไม่เดาเอง)"""
+    s = clean_text(v).strip().lower()
+    if not s or s in MOVE_NO:
+        return 'no', True
+    if s in MOVE_YES:
+        return 'yes', True
+    return 'any', False
 
 
 def read_sheet_rows(wb, sheet):
@@ -2683,7 +2710,18 @@ def suspect_reasons(r, mode_len=0):
     nm = str(r.get('raw') or r.get('name') or r.get('disp') or '')
     if len(nm) > MAX_SANE_NAME:
         out.append('ชื่อยาวผิดปกติ (%d ตัวอักษร) อาจเป็นข้อความโน้ตในชีท' % len(nm))
+    if r.get('move_bad'):
+        out.append('Itemmove = “%s” ไม่รู้จัก (รู้จักแค่ Storage/Gift/Yes/No) — ตัวนี้ไม่กรองแลกเปลี่ยน'
+                   % r.get('move_raw', ''))
     return out
+
+
+def trade_text(r):
+    """ข้อความช่อง “แลกเปลี่ยน” ในตาราง — โชว์คำในชีทด้วย เช่น “ได้ (Storage)”"""
+    t = {'yes': 'ได้', 'no': 'ไม่ได้', 'any': '— ไม่กรอง —'}.get(r.get('trade', 'any'),
+                                                                 str(r.get('trade', '')))
+    raw = str(r.get('move_raw') or '')
+    return t + (' (%s)' % raw if raw and raw.lower() not in ('yes', 'no') else '')
 
 
 def mark_suspects(rows):
@@ -2831,10 +2869,10 @@ def parse_master_rows(rows, seen=None):
                                    lambda h: 'item dec' in h])
                 dur_col = findin([lambda h: 'ระยะเวลา' in h, lambda h: 'ของขวัญ' in h,
                                   lambda h: 'duration' in h])
-                move_col = findin([lambda h: 'itemmove' in h])
+                move_col = findin([is_move_header])
                 if move_col is None:      # บางไฟล์เขียน Itemmove ไว้แถวบนของหัวตาราง
                     for j in span:
-                        if j < len(top) and 'itemmove' in top[j]:
+                        if j < len(top) and is_move_header(top[j]):
                             move_col = j
                             break
                 tables.append({'kind': a, 'name': name_col, 'dur': dur_col,
@@ -2859,9 +2897,23 @@ def parse_master_rows(rows, seen=None):
             # ต้องมีตัวอักษรจริงในชื่อ ไม่ใช่ตัวเลขล้วน (กันแถวยอดรวม)
             if not name.strip() or not re.search(r'[^\d.,\s]', name):
                 continue
-            if kind in seen:
-                continue
-            seen.add(kind)
+            if t['move'] is not None:
+                mc = cells[t['move']] if t['move'] < len(cells) else ''
+                trade, known = move_to_trade(mc)
+                move_raw = clean_text(mc)
+            else:
+                trade, known, move_raw = 'any', True, ''
+            # ตัดซ้ำด้วย ItemKind + แลกเปลี่ยน — ตัวเดียวกันแต่ Storage กับ Gift คือคนละไอเทม
+            #   (ตัวที่ไม่มีคอลัมน์ Itemmove ยังตัดด้วย ItemKind อย่างเดียวเหมือนเดิม)
+            if trade == 'any':
+                if kind in seen or kind + '|*' in seen:
+                    continue
+                seen.add(kind)
+            else:
+                key = kind + '|' + trade
+                if kind in seen or key in seen:
+                    continue
+                seen.update((key, kind + '|*'))
 
             m = re.search(r'(\d+)\s*ชิ้น', name)
             qty = m.group(1) if m else ''
@@ -2872,12 +2924,6 @@ def parse_master_rows(rows, seen=None):
             md = re.search(r'(\d+)', durc) if 'วัน' in durc else None
             dur = md.group(1) if md else ''
 
-            if t['move'] is not None:
-                mc = cells[t['move']] if t['move'] < len(cells) else ''
-                trade = 'yes' if mc.strip().lower() in MASTER_TRADE_YES else 'no'
-            else:
-                trade = 'any'
-
             dsc = ''
             if t.get('desc') is not None and t['desc'] < len(cells):
                 dsc = clean_text(cells[t['desc']])
@@ -2887,6 +2933,7 @@ def parse_master_rows(rows, seen=None):
             out.append({'kind': kind, 'name': '', 'disp': disp,
                         'dur': dur, 'trade': trade, 'qty': qty,
                         'has_move': t['move'] is not None,
+                        'move_raw': move_raw, 'move_bad': not known,
                         # ---- ใช้ตอน "สร้างไอเทม" ----
                         'raw': name.strip(), 'cname': cname,
                         'amount': amount, 'has_qty': has_qty, 'desc': dsc})
@@ -3934,7 +3981,7 @@ class ImportDialog:
 
         tk.Label(right, text='อ่านให้อัตโนมัติแบบเดียวกับเครื่องมือเดิม — '
                              'qty ดึงจากเลขหน้าคำว่า “ชิ้น” ในชื่อ · ระยะเวลาอ่านจากคอลัมน์ที่มีคำว่า “วัน” · '
-                             'แลกเปลี่ยนอ่านจากคอลัมน์ Itemmove (ไม่มีคอลัมน์ = ไม่กรอง)',
+                             'แลกเปลี่ยนอ่านจากคอลัมน์ Itemmove: Storage = ได้ · Gift = ไม่ได้ (ไม่มีคอลัมน์ = ไม่กรอง)',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), wraplength=690,
                  justify='left').pack(anchor='w', pady=(6, 0))
 
@@ -4136,7 +4183,7 @@ class ImportDialog:
         self.tree.delete(*self.tree.get_children())
         for r in rows[:400]:
             dur = 'ถาวร' if r['dur'] == '' else (r['dur'] + ' วัน')
-            trade = {'yes': 'ได้', 'no': 'ไม่ได้', 'any': '— ไม่กรอง —'}.get(r['trade'], r['trade'])
+            trade = trade_text(r)
             self.tree.insert('', 'end', tags=('warn',) if r.get('warn') else (),
                              values=('⚠' if r.get('warn') else '', r['kind'], r['disp'],
                                      dur, trade, r['qty'] or '—'))
@@ -4610,6 +4657,10 @@ def run_logic_tests():
     r.append(_t(len(g2) == 2 and g2[0]['trade'] == 'yes' and g2[1]['trade'] == 'no',
                 'มีคอลัมน์ Itemmove: Yes = ได้ / ว่าง = ไม่ได้',
                 [x['trade'] for x in g2]))
+    g3 = parse_master_rows([['fdItemNum', 'Item Name', 'Itemmove'],
+                            ['333333', 'ของสาม 1 ชิ้น', 'Storage'], ['444444', 'ของสี่ 1 ชิ้น', 'Gift']])
+    r.append(_t([x['trade'] for x in g3] == ['yes', 'no'],
+                'Itemmove: Storage = ได้ / Gift = ไม่ได้', [x['trade'] for x in g3]))
 
     # ---- ตัด ID ซ้ำ ----
     seen = set()
@@ -9159,8 +9210,7 @@ class App:
         for i, r in enumerate(self.imported, 1):
             dur = r.get('dur', '')
             dur = 'ถาวร' if dur == '' else ('— ไม่กรอง —' if dur == 'any' else str(dur) + ' วัน')
-            trade = {'yes': 'ได้', 'no': 'ไม่ได้', 'any': '— ไม่กรอง —'}.get(
-                r.get('trade', 'any'), r.get('trade', ''))
+            trade = trade_text(r)
             name = r.get('disp') or r.get('name') or ''
             self.imp_tree.insert('', 'end', tags=('warn',) if r.get('warn') else (),
                                  values=(i, '⚠' if r.get('warn') else '',
@@ -9421,6 +9471,11 @@ class App:
             shown = c.get('disp') or c.get('name') or ''
             label = f"#{i + 1} Kind={c.get('kind') or '-'}" + (f"  {shown}" if shown else '')
             self.log(f'── {label}', 'STEP')
+            if c.get('trade') in ('yes', 'no') and c.get('has_move'):
+                mv = c.get('move_raw') or ('Yes' if c['trade'] == 'yes' else 'No')
+                self.log('  ชีทบอก Itemmove = %s → เอาเฉพาะตัวที่%s' % (
+                    mv, 'แลกเปลี่ยนได้ (trade=Y)' if c['trade'] == 'yes'
+                    else 'แลกเปลี่ยนไม่ได้ (trade=N)'), 'INFO')
 
             use_filter = bool(duration_only_numeric(c))
             await self._goto_list(page)
