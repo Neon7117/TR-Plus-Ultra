@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.0.8 : ทำงานเสร็จแล้วไม่ปิด Chrome — เด้ง popup แล้วเปิดหน้าเว็บค้างไว้ให้ตรวจ (ทุกแท็บ)
 V1.0.7 : แท็บ Oung — ตาราง Real Chance = บันเดิล RANDOM + กรอกเรทสุ่มให้ · สร้างในแท็บนี้ได้เลย (ใช้ตัวสร้าง Bundle เดิม)
 V1.0.6 : แท็บใหม่ 🎰 Oung Machine — แปลงชีท Oung Oung Machine เป็นแม่แบบกลาง ตรวจ/แก้ในหน้าจอ แล้วส่งให้แท็บสร้าง Bundle (ของเดิมไม่แตะ)
 V1.0.5 : ค้นหา — อ่าน Itemmove แบบ Storage (แลกได้) / Gift (แลกไม่ได้) แล้วเอาเฉพาะตัวที่ตรงชีท
@@ -352,6 +353,78 @@ def launch_kwargs(headless=False):
     if exe:
         kw['executable_path'] = exe
     return kw
+
+
+# ---- ทำงานเสร็จแล้ว "ไม่ปิด Chrome" — เด้งบอก แล้วเปิดหน้าเว็บค้างไว้ให้ตรวจ ----
+# ทุกแท็บใช้ Chrome โปรไฟล์เดียวกัน เปิดซ้อนกันไม่ได้
+# -> ระหว่างที่ค้างไว้ ถ้ากดเริ่มงานใหม่ จะถามก่อนว่าให้ปิดตัวที่ค้างไว้แล้วเริ่มเลยไหม
+CHROME_HOLD = {'on': False, 'close': False, 'what': '', 'thread': None}
+
+
+def _live_pages(browser):
+    try:
+        return [p for p in browser.pages if not p.is_closed()]
+    except Exception:
+        return []
+
+
+async def finish_chrome(app, browser, what, headless=False):
+    """เรียกแทน browser.close() ตอนจบงาน
+    · มีหน้าต่างให้ดู = เด้ง popup "ทำงานเสร็จแล้ว" แล้วรอจนคนปิดหน้าต่าง Chrome เอง
+    · โหมดซ่อนหน้าต่าง (มองไม่เห็นอยู่แล้ว) = เด้ง popup แล้วปิดเลย"""
+    def _pop(msg):
+        try:
+            app.root.after(0, lambda: messagebox.showinfo('ทำงานเสร็จแล้ว', msg))
+        except Exception:
+            pass
+    try:
+        if headless or not _live_pages(browser):
+            _pop('%s ทำงานเสร็จแล้ว\n\nดูสรุปได้ในแท็บ Log' % what)
+            return
+        CHROME_HOLD.update(on=True, close=False, what=what, thread=threading.current_thread())
+        try:
+            app.log('%s เสร็จแล้ว — เปิดหน้า Chrome ค้างไว้ให้ตรวจ (ดูเสร็จปิดหน้าต่าง Chrome ได้เลย)'
+                    % what, 'OK')
+        except Exception:
+            pass
+        _pop('%s ทำงานเสร็จแล้ว ✓\n\nหน้า Chrome เปิดค้างไว้ให้ตรวจความถูกต้อง\n'
+             'ดูเสร็จแล้วปิดหน้าต่าง Chrome ได้เลย\n\n'
+             '(ระหว่างที่ยังเปิดอยู่ ถ้ากดเริ่มงานใหม่ โปรแกรมจะถามก่อนว่าให้ปิดแล้วเริ่มเลยไหม)'
+             % what)
+        while not CHROME_HOLD['close']:
+            await asyncio.sleep(0.7)
+            if not _live_pages(browser):
+                break
+    finally:
+        try:
+            await browser.close()
+        except Exception:
+            pass
+        CHROME_HOLD.update(on=False, close=False, what='')
+
+
+def chrome_held_ask(app, retry):
+    """กดเริ่มงานตอน Chrome ยังเปิดค้างจากงานก่อน
+    คืน False = ไม่มีอะไรค้าง เริ่มได้เลย
+    คืน True  = หยุดไว้ก่อน (ตอบไม่ = ไม่เริ่ม · ตอบใช่ = ปิดตัวที่ค้างให้ แล้วเริ่มงานนี้ให้เอง)"""
+    if not CHROME_HOLD['on']:
+        return False
+    if not messagebox.askyesno(
+            'Chrome ยังเปิดค้างอยู่',
+            'หน้า Chrome จากงาน “%s” ยังเปิดค้างไว้ให้ตรวจอยู่\n\n'
+            'ปิด Chrome นั้นแล้วเริ่มงานนี้เลยไหม?' % CHROME_HOLD['what']):
+        return True
+    CHROME_HOLD['close'] = True
+    th = CHROME_HOLD.get('thread')
+
+    def _wait(n=0):
+        busy = CHROME_HOLD['on'] or (th is not None and th.is_alive())
+        if busy and n < 150:                      # รอได้ ~30 วิ
+            app.root.after(200, lambda: _wait(n + 1))
+            return
+        app.root.after(300, retry)
+    _wait()
+    return True
 
 
 def load_prefs():
@@ -5670,6 +5743,8 @@ class App:
         self.log('กำลังยกเลิกการสร้างไอเทม...', 'WARN')
 
     def c_start(self):
+        if chrome_held_ask(self, self.c_start):
+            return
         if self.c_running or self.running:
             return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
         if not self.cq:
@@ -5753,7 +5828,7 @@ class App:
                 log_event('create_done', ok=okc, fail=errc, commit=bool(do))
             finally:
                 try:
-                    await browser.close()
+                    await finish_chrome(self, browser, 'สร้าง Item')
                 except Exception:
                     pass
 
@@ -7304,6 +7379,8 @@ class App:
         self.log('กำลังยกเลิกการสร้างบันเดิล...', 'WARN')
 
     def b_start(self):
+        if chrome_held_ask(self, self.b_start):
+            return
         if self.b_running or self.running or getattr(self, 'c_running', False):
             return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
         use = [b for b in self.bq if b.get('use', True)]
@@ -7381,7 +7458,7 @@ class App:
                 log_event('bundle_done', ok=okc, fail=errc, commit=bool(do))
             finally:
                 try:
-                    await browser.close()
+                    await finish_chrome(self, browser, 'สร้าง Bundle')
                 except Exception:
                     pass
 
@@ -8087,6 +8164,8 @@ class App:
             messagebox.showerror('ตรวจระบบ', str(ex))
 
     def run_check_full(self):
+        if chrome_held_ask(self, self.run_check_full):
+            return
         if self.running:
             return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
         self.nb.select(self.tab_check)
@@ -8698,6 +8777,8 @@ class App:
         self.log('กำลังยกเลิกการสร้าง Item Code...', 'WARN')
 
     def w_start(self, test_time=False):
+        if chrome_held_ask(self, lambda: self.w_start(test_time)):
+            return
         if self._w_busy():
             return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
         if not self.wq:
@@ -8788,6 +8869,8 @@ class App:
 
     def w_reset(self):
         """ปุ่ม ↺ รีเซ็ตเวลาเริ่ม — เข้าไปแก้ของเดิม ไม่สร้างใหม่"""
+        if chrome_held_ask(self, self.w_reset):
+            return
         if self._w_busy():
             return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
         rows, src = self._w_reset_targets()
@@ -8874,7 +8957,7 @@ class App:
                 log_event('wr_done', ok=okc, fail=errc, commit=bool(do))
             finally:
                 try:
-                    await browser.close()
+                    await finish_chrome(self, browser, self.W_NAME)
                 except Exception:
                     pass
 
@@ -9319,6 +9402,8 @@ class App:
 
     # ---------- login ----------
     def open_login(self):
+        if chrome_held_ask(self, self.open_login):
+            return
         if self.running:
             return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
         log_event('login_open')
@@ -9359,6 +9444,8 @@ class App:
         self.start([dict(c) for c in self.imported])
 
     def start(self, criteria):
+        if chrome_held_ask(self, lambda: self.start(criteria)):
+            return
         if self.running:
             return
         self.save_now()
@@ -9408,7 +9495,7 @@ class App:
                 await self._search_all(page, criteria)
             finally:
                 try:
-                    await browser.close()
+                    await finish_chrome(self, browser, 'ค้นหา', headless=bool(self.v_headless.get()))
                 except Exception:
                     pass
 
@@ -11000,6 +11087,8 @@ class OungTab:
     # ---------- หา Id / ส่ง ----------
     def search_ids(self):
         a = self.app
+        if chrome_held_ask(a, self.search_ids):
+            return
         if a.running or a.b_running or getattr(a, 'c_running', False) or self._wait_keys:
             return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
         keys, crit = ou_search_criteria(self.st)
@@ -11029,7 +11118,9 @@ class OungTab:
                 return
         except Exception:
             return
-        if self.app.running:
+        # ค้นเสร็จแล้วแต่ Chrome ยังเปิดค้างให้ตรวจ = ถือว่าเสร็จ เติม Id ได้เลย ไม่ต้องรอปิด
+        done_hold = CHROME_HOLD['on'] and CHROME_HOLD['what'] == 'ค้นหา'
+        if self.app.running and not done_hold:
             self.tab.after(1000, self._poll)
             return
         keys, self._wait_keys = self._wait_keys, None
@@ -11088,6 +11179,8 @@ class OungTab:
     def create(self):
         a = self.app
         self._cancel_edit()
+        if chrome_held_ask(a, self.create):
+            return
         if self._busy():
             return messagebox.showinfo('กำลังทำงาน', 'รองานที่ทำอยู่ให้เสร็จก่อนนะ (ใช้ Chrome ตัวเดียวกัน)')
         bs = ou_bundles(self.st)
@@ -11162,7 +11255,7 @@ class OungTab:
                 await self._run_rows(page, rows, do)
             finally:
                 try:
-                    await browser.close()
+                    await finish_chrome(a, browser, 'Oung Machine')
                 except Exception:
                     pass
 
