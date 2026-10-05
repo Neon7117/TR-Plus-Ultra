@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.0.7 : แท็บ Oung — ตาราง Real Chance = บันเดิล RANDOM + กรอกเรทสุ่มให้ · สร้างในแท็บนี้ได้เลย (ใช้ตัวสร้าง Bundle เดิม)
 V1.0.6 : แท็บใหม่ 🎰 Oung Machine — แปลงชีท Oung Oung Machine เป็นแม่แบบกลาง ตรวจ/แก้ในหน้าจอ แล้วส่งให้แท็บสร้าง Bundle (ของเดิมไม่แตะ)
 V1.0.5 : ค้นหา — อ่าน Itemmove แบบ Storage (แลกได้) / Gift (แลกไม่ได้) แล้วเอาเฉพาะตัวที่ตรงชีท
 V1.0.4 : แท็บ Item Code — เผื่อ +2 · จำนวนการใช้งานต่อ 1 User ฝั่งของรางวัล = จำนวนโค้ด
@@ -9629,7 +9630,7 @@ class WRCtx:
 #
 #      ทำแยกเป็นของใหม่ทั้งก้อน ไม่แตะโค้ดเดิมเลย (ใช้ของเดิมแบบเรียกใช้อย่างเดียว)
 #      ชีท Oung Oung Machine ใช้หัวตาราง fdItemNum เหมือนกันหมด แต่ความหมายต่างกัน:
-#         · ตารางที่มีช่อง Chance        = ตารางสุ่ม (กาชา) — ไม่ใช่บันเดิล  -> ข้าม
+#         · ตารางที่มีช่อง Real Chance   = บันเดิลแบบ RANDOM ทั้งตาราง (เรทสุ่ม = Real Chance)
 #         · ร้านค้า (มีช่องจำกัดจำนวน/Coin) = 1 แถว = 1 บันเดิล
 #         · หีบ / รางวัลสะสม              = ทั้งตาราง = 1 บันเดิล
 #         · ดูไม่ออก                       = ไม่ติ๊กไว้ ให้คนตัดสิน
@@ -9644,7 +9645,45 @@ OU_STATE = 'oung_state.json'
 OU_SCAN_ROWS = 2000
 _OU_ZONE_RE = re.compile(r'^\s*zone\b', re.I)
 OU_MODES = {'table': 'ทั้งตาราง = 1 บันเดิล', 'row': '1 แถว = 1 บันเดิล', 'skip': 'ข้าม'}
-OU_KINDS = {'chest': '🎁 หีบ', 'shop': '🛒 ร้านค้า', 'gacha': '🎲 สุ่ม', 'unknown': '❓ ดูไม่ออก'}
+OU_KINDS = {'chest': '🎁 หีบ', 'shop': '🛒 ร้านค้า', 'random': '🎲 สุ่ม RANDOM', 'gacha': '🎲 สุ่ม',
+            'unknown': '❓ ดูไม่ออก'}
+OU_RANDOM = 'RANDOM'
+
+
+def _ou_fmt(d):
+    s = format(d.normalize(), 'f')
+    return '0' if s in ('-0', '') else s
+
+
+def ou_rate(v):
+    """ค่า Real Chance -> (เรทสุ่มที่จะกรอก, หมายเหตุ)
+    เว็บรับ 0.000 - 999.999 (ทศนิยม 3 ตำแหน่ง) · เศษทศนิยมลอยของ Excel (2.1069999999) ตัดทิ้งให้
+    ทศนิยมเกิน 3 ตำแหน่งจริงๆ (3.7975) ปัดครึ่งขึ้น แล้วบอกไว้ · ว่าง/ไม่ใช่ตัวเลข = ไม่ใส่ให้ (ต้องกรอกเอง)"""
+    import decimal
+    t = str(v if v is not None else '').replace(',', '').strip()
+    if not t:
+        return '', 'ไม่มีค่า Real Chance'
+    try:
+        d = decimal.Decimal(t)
+    except decimal.InvalidOperation:
+        return '', 'Real Chance “%s” ไม่ใช่ตัวเลข' % t
+    d6 = d.quantize(decimal.Decimal('0.000001'), decimal.ROUND_HALF_UP)
+    d3 = d6.quantize(decimal.Decimal('0.001'), decimal.ROUND_HALF_UP)
+    if d3 < 0 or d3 > decimal.Decimal('999.999'):
+        return '', 'เรท %s เกินช่วง 0 – 999.999' % _ou_fmt(d6)
+    note = '' if d3 == d6 else 'ปัดจาก %s (เว็บรับทศนิยม 3 ตำแหน่ง)' % _ou_fmt(d6)
+    return _ou_fmt(d3), note
+
+
+def ou_rate_sum(rates):
+    import decimal
+    tot = decimal.Decimal(0)
+    for r in rates:
+        try:
+            tot += decimal.Decimal(str(r))
+        except Exception:
+            pass
+    return _ou_fmt(tot.quantize(decimal.Decimal('0.001')))
 OU_SHORT = {'table': 'ทั้งตาราง', 'row': 'ทีละแถว', 'skip': 'ข้าม'}
 
 
@@ -9733,6 +9772,7 @@ def ou_tables(rows, sheet):
         movec = find(lambda h: 'itemmove' in h)
         aidc = find(lambda h: 'aztek' in h or h in ('itemid', 'aztekitemid'))
         limc = find(lambda h: 'จำกัดจำนวน' in h or h.startswith('limit'))
+        realc = find(lambda h: h == 'realchance')
         chance = [j for j, h in keys.items() if h and 'chance' in h]
         shopcol = [j for j, h in keys.items() if h and ('coin' in h or h.startswith('ราคาไอเทม'))]
 
@@ -9760,9 +9800,13 @@ def ou_tables(rows, sheet):
 
         # ---- แยกประเภท (ดูจากป้ายเท่านั้น) ----
         ctx = (title + ' ' + zone).lower()
-        if chance:
-            kind, mode, use = 'gacha', 'skip', False
-            why = 'มีช่อง %s = ตารางสุ่ม ไม่ใช่บันเดิล' % clean_text(_ou_cell(rows, r, chance[0]))
+        if chance and realc is not None:
+            kind, mode, use = 'random', 'table', True
+            why = 'มีช่อง Real Chance → บันเดิลแบบ RANDOM ทั้งตาราง · เรทสุ่ม = Real Chance'
+        elif chance:
+            kind, mode, use = 'unknown', 'table', False
+            why = 'มีช่อง %s แต่ไม่มีช่อง Real Chance — ไม่รู้จะใช้เรทช่องไหน ตรวจเอง' % \
+                clean_text(_ou_cell(rows, r, chance[0]))
         elif limc is not None or shopcol or any(w in ctx for w in ('ร้านค้า', 'shop')):
             kind, mode, use = 'shop', 'row', True
             why = 'ร้านค้า (%s) → 1 แถว = 1 บันเดิล' % (
@@ -9802,7 +9846,9 @@ def ou_tables(rows, sheet):
                     note = 'Rank %s → %s (เว็บไม่มี %s)' % (rank, DEFAULT_TIER, rank)
                 tier = DEFAULT_TIER
             m = re.search(r'(\d+)\s*ชิ้น', name)
+            rate, rnote = ou_rate(val(realc)) if realc is not None else ('', '')
             it = {'r': x + 1, 'kind': k, 'name': name, 'move': mv_raw, 'trade': trade,
+                  'rate': rate, 'rate_note': rnote,
                   'move_ok': known, 'dur_raw': dur_raw,
                   'dur': dur_from_text(dur_raw) if durc is not None else '',
                   'rank': rank, 'tier': tier, 'note': note,
@@ -9815,11 +9861,15 @@ def ou_tables(rows, sheet):
             it['aid'] = it['aid'] or ''
             items.append(it)
             prev = it
+        if kind == 'random' and items and all(it['rate'] and float(it['rate']) == 0 for it in items):
+            use = False
+            why += ' · เรทเป็น 0 ทุกตัว (ไม่มีโอกาสออกเลย) — ไม่ติ๊กไว้'
         zc = max([zc for zc, _ in zones if zc <= c] or [-1])
         if zc < 0:                     # ไม่มีป้าย ZONE = จัดกลุ่มตามแท่งคอลัมน์ fdItemNum แทน
             zc = c
         out.append({'tid': tid, 'sheet': sheet, 'zone': zone, 'title': title, 'row': r + 1,
                     'kind': kind, 'mode': mode, 'use': use, 'why': why, 'items': items,
+                    'btype': OU_RANDOM if kind == 'random' else DEFAULT_BUNDLE_TYPE,
                     'has_aid_col': aidc is not None, '_o': (zc, r, c)})
     # เรียงตามโซน (ซ้าย -> ขวา) แล้วค่อยบน -> ล่าง จะได้อ่านเป็นหมวดๆ เหมือนในชีท
     out.sort(key=lambda t: t.pop('_o'))
@@ -9878,12 +9928,12 @@ def ou_new_state(path='', topics=None, report=None, hints=None):
     return {'file': path, 'read_at': datetime.now().isoformat(timespec='seconds'),
             'topics': topics or [], 'report': report or [], 'hints': hints or {},
             'ids': {}, 'names': {}, 'use': {}, 'mode': {}, 'edit': {}, 'sent': {},
-            'multi': {}}
+            'multi': {}, 'made': {}}
 
 
 def ou_merge(old, new):
     """อ่านไฟล์ใหม่ แต่เก็บสิ่งที่คนแก้ไว้ (Id / ชื่อ / ติ๊ก / โหมด / จำนวน / Tier / ส่งแล้ว)"""
-    for k in ('ids', 'names', 'use', 'mode', 'edit', 'sent', 'multi'):
+    for k in ('ids', 'names', 'use', 'mode', 'edit', 'sent', 'multi', 'made'):
         new[k] = dict(old.get(k) or {})
     return new
 
@@ -9915,6 +9965,8 @@ def ou_item(st, t, it):
     return {'id': str(st['ids'].get(ou_key(it), '') or ''),
             'qty': str(e.get('qty') or it['qty']),
             'tier': e.get('tier') or it['tier'],
+            'rate': str(e['rate'] if 'rate' in e else it.get('rate', '')),
+            'rate_note': '' if 'rate' in e else it.get('rate_note', ''),
             'disp': it['name'], 'kind': it['kind'], 'src': it, 'key': ou_key(it),
             'ekey': '%s:%d' % (t['tid'], it['r'])}
 
@@ -9923,10 +9975,15 @@ def ou_bundles(st):
     """แม่แบบกลาง -> รายการบันเดิล (เรียงตามหัวข้อ) พร้อมสถานะ
     คืน list ของ dict: tid, bkey, name, use, items, status, ready, dup_of, hint, sent"""
     out = []
+    # ชื่อหัวข้อเดียวกันอยู่หลายชีท (Paid / Free) -> ต่อท้ายชื่อชีทให้แยกออก
+    sheets_of = {}
+    for t in st['topics']:
+        sheets_of.setdefault(t['title'], set()).add(t['sheet'])
     for t in st['topics']:
         mode = st['mode'].get(t['tid'], t['mode'])
         if mode == 'skip':
             continue
+        btype = t.get('btype') or DEFAULT_BUNDLE_TYPE
         groups = [t['items']] if mode == 'table' else [[it] for it in t['items']]
         for g in groups:
             bkey = t['tid'] + ('#T' if mode == 'table' else '#R%d' % g[0]['r'])
@@ -9934,14 +9991,19 @@ def ou_bundles(st):
             # ชื่อเริ่มต้น = ชื่อไอเทม (แบบที่ทีมตั้งในแท็บ bundle+id) · ของเยอะเกิน 3 ชิ้นใช้ชื่อหัวข้อแทน
             dname = (' / '.join(it['name'] for it in g if it['name']) if len(g) <= 3 else '') \
                 or t['title']
+            if dname == t['title'] and len(sheets_of.get(t['title'], ())) > 1:
+                dname = '%s (%s)' % (t['title'], t['sheet'])
             name = st['names'].get(bkey) or dname
             hint = st['hints'].get(ou_norm(dname)) or st['hints'].get(ou_norm(name)) or []
             # ในชีทจดเลข Bundle ของอันนี้ไว้แล้ว = น่าจะสร้างไปแล้ว -> ไม่ติ๊กไว้ก่อน (กันสร้างซ้ำ)
             use = st['use'].get(bkey, bool(t['use'] and not hint))
-            sig = (t['sheet'], t['zone'],
-                   tuple(sorted((x['key'], x['qty'], x['tier']) for x in items)))
+            sig = (t['sheet'], t['zone'], btype,
+                   tuple(sorted((x['key'], x['qty'], x['tier'],
+                                 x['rate'] if btype == OU_RANDOM else '') for x in items)))
             out.append({'tid': t['tid'], 'bkey': bkey, 'name': name, 'use': use,
-                        'items': items, 'sig': sig, 'hint': hint, 'topic': t,
+                        'items': items, 'sig': sig, 'hint': hint, 'topic': t, 'type': btype,
+                        'rsum': ou_rate_sum(x['rate'] for x in items) if btype == OU_RANDOM else '',
+                        'made': (st.get('made') or {}).get(bkey),
                         'sent': st['sent'].get(bkey, ''), 'dup_of': None})
     first = {}
     for b in out:
@@ -9954,16 +10016,22 @@ def ou_bundles(st):
     for b in out:
         miss = sum(1 for x in b['items'] if not re.fullmatch(r'\d+', x['id']))
         badq = sum(1 for x in b['items'] if not re.fullmatch(r'[1-9]\d*', x['qty']))
-        b['miss'], b['badq'] = miss, badq
-        b['ready'] = b['use'] and not b['dup_of'] and not miss and not badq and bool(b['name'].strip())
+        badr = sum(1 for x in b['items'] if not x['rate']) if b['type'] == OU_RANDOM else 0
+        b['miss'], b['badq'], b['badr'] = miss, badq, badr
+        b['ready'] = b['use'] and not b['dup_of'] and not miss and not badq and not badr \
+            and bool(b['name'].strip()) and not b['made']
         if not b['use']:
             b['status'] = '— ไม่ได้เลือก'
+        elif b['made']:
+            b['status'] = '✓ สร้างแล้ว · Bundle %s (%s)' % (b['made'].get('id') or '?', b['made'].get('at', ''))
         elif b['dup_of']:
             b['status'] = '⧉ ของข้างในเหมือน “%s” → ใช้บันเดิลเดียวกัน ไม่สร้างซ้ำ' % b['dup_of']['name'][:40]
         elif miss:
             b['status'] = '⚠ ยังไม่มี Aztek Item Id %d ตัว' % miss
         elif badq:
             b['status'] = '⚠ จำนวนไม่ถูก'
+        elif badr:
+            b['status'] = '⚠ ยังไม่มีเรทสุ่ม %d ตัว' % badr
         elif b['sent']:
             b['status'] = '➜ ส่งไปแท็บสร้าง Bundle แล้ว (%s)' % b['sent']
         else:
@@ -9978,7 +10046,9 @@ def ou_summary(st, bundles=None):
     skip = sum(1 for t in st['topics'] if st['mode'].get(t['tid'], t['mode']) == 'skip')
     use = [b for b in bs if b['use']]
     return {'topics': len(st['topics']), 'skip': skip, 'bundles': len(bs),
-            'create': sum(1 for b in use if not b['dup_of']),
+            'create': sum(1 for b in use if not b['dup_of'] and not b['made']),
+            'made': sum(1 for b in use if b['made']),
+            'random': sum(1 for b in use if not b['dup_of'] and b['type'] == OU_RANDOM),
             'ready': sum(1 for b in use if b['ready']),
             'miss': sum(1 for b in use if not b['dup_of'] and b['miss']),
             'dup': sum(1 for b in use if b['dup_of']),
@@ -9989,9 +10059,11 @@ def ou_summary(st, bundles=None):
 
 def ou_to_queue(b):
     """บันเดิลจากแม่แบบกลาง -> หน้าตาเดียวกับที่แท็บสร้าง Bundle ใช้อยู่ (ห้ามต่างแม้แต่ช่องเดียว)"""
-    return {'name': b['name'].strip(), 'type': DEFAULT_BUNDLE_TYPE, 'deliver': True,
-            'items': [{'id': x['id'], 'qty': x['qty'], 'tier': x['tier'],
-                       'disp': x['disp'], 'kind': x['kind']} for x in b['items']],
+    rnd = b.get('type') == OU_RANDOM
+    return {'name': b['name'].strip(), 'type': b.get('type') or DEFAULT_BUNDLE_TYPE, 'deliver': True,
+            'items': [dict({'id': x['id'], 'qty': x['qty'], 'tier': x['tier'],
+                            'disp': x['disp'], 'kind': x['kind']},
+                           **({'rate': x['rate']} if rnd else {})) for x in b['items']],
             'rewards': [], 'sheet': 'Oung · ' + b['topic']['sheet'], 'src_bundle_id': None,
             'use': True}
 
@@ -10000,7 +10072,7 @@ def ou_search_criteria(st):
     """ไอเทมที่ยังไม่มี Aztek Id -> เงื่อนไขค้นหาแบบเดียวกับแท็บค้นหา (ไม่ซ้ำตัว)"""
     keys, crit = [], []
     for b in ou_bundles(st):
-        if not b['use'] or b['dup_of']:
+        if not b['use'] or b['dup_of'] or b['made']:
             continue
         for x in b['items']:
             if x['id'] or x['key'] in keys:
@@ -10043,17 +10115,258 @@ def ou_take_results(st, keys, results):
 
 
 
+# ---- ช่อง "เรทสุ่ม" ในการ์ดไอเทม (มีเฉพาะตอนประเภท Bundle = RANDOM) ----
+# หาการ์ดแบบเดียวกับ JS_BUNDLE_ACT (Item ID + ใบที่ nth) แล้วหาช่องจาก "ป้ายเรทสุ่ม" (ไม่ใช่เรทโชว์)
+JS_OU_RATE = """
+([key, nth, act, value]) => {
+  function vis(el){
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  function idAfter(t, prefix) {
+    const i = t.indexOf(prefix);
+    if (i < 0) return null;
+    let j = i + prefix.length, out = '';
+    while (j < t.length && t.charCodeAt(j) <= 32) j++;
+    while (j < t.length && t.charAt(j) >= '0' && t.charAt(j) <= '9') { out += t.charAt(j); j++; }
+    return out || null;
+  }
+  function clean(s) {
+    s = (s || '').split('*').join(' ');
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+      if (s.charCodeAt(i) <= 32) { if (out && out.charAt(out.length - 1) !== ' ') out += ' '; }
+      else out += s.charAt(i);
+    }
+    return out.trim();
+  }
+  function ownText(el) {
+    let s = '';
+    for (const n of el.childNodes) if (n.nodeType === 3) s += n.nodeValue;
+    return clean(s);
+  }
+  const cands = [];
+  for (const el of document.querySelectorAll('div,section,li')) {
+    const t = el.textContent || '';
+    if (t.indexOf('จำนวน (Quantity)') < 0) continue;
+    if (idAfter(t, 'Item ID') !== String(key)) continue;
+    if (!vis(el)) continue;
+    cands.push(el);
+  }
+  const cards = cands.filter(a => !cands.some(b => b !== a && a.contains(b)));
+  const want = Math.max(1, parseInt(nth || 1, 10));
+  const card = cards[want - 1];
+  if (!card) return cards.length ? ('ไอเทม ' + key + ' มีแค่ ' + cards.length + ' ใบ แต่ขอใบที่ ' + want)
+                                 : ('ไม่เจอการ์ด ' + key);
+  let ctl = null;
+  for (const lab of card.querySelectorAll('label,div,span,p')) {
+    if (ownText(lab) !== 'เรทสุ่ม') continue;
+    let up = lab;
+    for (let d = 0; d < 5 && up && !ctl; d++) {
+      for (const c of up.querySelectorAll('input')) {
+        if (c.type === 'checkbox' || c.type === 'file' || !vis(c)) continue;
+        if (lab.compareDocumentPosition(c) & 4) { ctl = c; break; }
+      }
+      if (up === card) break;
+      up = up.parentElement;
+    }
+    if (ctl) break;
+  }
+  if (!ctl) return 'ไม่เจอช่อง “เรทสุ่ม” ในการ์ด ' + key + ' (ประเภท Bundle เป็น RANDOM หรือยัง?)';
+  if (act === 'read') return 'ok|' + ctl.value;
+  ctl.scrollIntoView({block: 'center'});
+  ctl.focus();
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(ctl, String(value));
+  ctl.dispatchEvent(new Event('input', {bubbles: true}));
+  ctl.dispatchEvent(new Event('change', {bubbles: true}));
+  ctl.dispatchEvent(new Event('blur', {bubbles: true}));
+  return 'ok';
+}"""
+
+# ผลรวมเรทสุ่มที่เว็บโชว์หัวรายการ ("ผลรวม เรทสุ่ม: 10.000") — ไว้เทียบกับในชีท
+JS_OU_RATE_SUM = """
+() => {
+  const m = (document.body.innerText || '').match(/ผลรวม\\s*เรทสุ่ม\\s*:?\\s*([0-9][0-9,]*(?:\\.[0-9]+)?)/);
+  return m ? m[1].split(',').join('') : '';
+}"""
+
+
+# ช่อง "ประเภท Bundle" — หาจากป้ายชื่อช่อง (ไม่ใช่ combobox ตัวแรกของหน้า) แล้วคืนพิกัดไว้กดด้วยเมาส์จริง
+JS_OU_TYPE_POINT = """
+(label) => {
+  function vis(el){
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  const nodes = [...document.querySelectorAll('*')].filter(
+    e => e.children.length <= 1 && (e.textContent || '').trim().indexOf(label) === 0 && vis(e));
+  for (const lb of nodes) {
+    let n = lb.parentElement;
+    for (let i = 0; i < 4 && n; i++) {
+      const c = [...n.querySelectorAll('select,[role="combobox"],button')].filter(vis)[0];
+      if (c) {
+        if (c.tagName === 'SELECT') return 'select';
+        c.scrollIntoView({block: 'center'});
+        const r = c.getBoundingClientRect();
+        return 'ok|' + Math.round(r.left + r.width / 2) + ',' + Math.round(r.top + r.height / 2);
+      }
+      n = n.parentElement;
+    }
+  }
+  return 'ไม่เจอช่อง ' + label;
+}"""
+
+
+def ou_same_rate(a, b):
+    try:
+        return abs(float(str(a).replace(',', '')) - float(str(b).replace(',', ''))) < 0.0005
+    except Exception:
+        return False
+
+
+class OuRunner:
+    """ใช้เครื่องสร้าง Bundle เดิม (App._b_one) ทั้งดุ้น ไม่ได้แก้ของเดิม
+    แค่ "ต่อท้าย" 2 จุด สำหรับบันเดิลจากแท็บ Oung:
+       · เพิ่มไอเทมไม่ได้แม้แต่ตัวเดียว = หยุดทันที ไม่กดสร้าง (บันเดิลขาดของห้ามขึ้นเว็บ)
+       · ตั้งจำนวน/Tier ของการ์ดเสร็จ = กรอก "เรทสุ่ม" ต่อ แล้วอ่านกลับมาเช็ก ไม่ตรง = หยุด ไม่กดสร้าง
+    ที่เหลือ (ชื่อ / ประเภท / ตรวจซ้ำ / กดสร้าง / ป๊อปอัป / เลข Bundle) เป็นของเดิมเป๊ะ"""
+    _OWN = ('_app', '_rates', '_want_sum', 'made_id', 'rate_done')
+
+    def __init__(self, app, rates=None, want_sum=''):
+        object.__setattr__(self, '_app', app)
+        object.__setattr__(self, '_rates', dict(rates or {}))
+        object.__setattr__(self, '_want_sum', want_sum)
+        object.__setattr__(self, 'made_id', None)
+        object.__setattr__(self, 'rate_done', 0)
+
+    def __getattr__(self, k):
+        app = object.__getattribute__(self, '_app')
+        fn = getattr(App, k, None)
+        if k.startswith('_b_') and callable(fn) and not isinstance(fn, type):
+            return types.MethodType(fn, self)      # ตัวช่วยของหน้า Bundle เรียกต่อกันผ่านตัวนี้
+        return getattr(app, k)
+
+    def __setattr__(self, k, v):
+        if k in OuRunner._OWN:
+            object.__setattr__(self, k, v)
+        else:
+            setattr(object.__getattribute__(self, '_app'), k, v)
+
+    def log(self, msg, kind='INFO'):
+        self._app.log(msg, kind)
+
+    def add_made_bundle(self, name, bid, n_items):
+        object.__setattr__(self, 'made_id', bid or '')
+        App.add_made_bundle(self._app, name, bid, n_items)
+
+    async def _b_pick(self, page, label, value):
+        """ประเภท Bundle: กดช่องที่อยู่ใต้ป้าย "ประเภท Bundle" จริงๆ แล้วเลือกตัวที่ชื่อตรงเป๊ะ
+        (RANDOM / GACHAPON_LIMIT ชื่อคล้ายกัน ห้ามเลือกแบบ "มีคำนี้อยู่")"""
+        if label != SEL_BUNDLE['type']:
+            return await App._b_pick(self, page, label, value)
+        for _ in range(2):
+            pt = str(await page.evaluate(JS_OU_TYPE_POINT, label))
+            if pt == 'select':
+                return await App._b_pick(self, page, label, value)
+            if not pt.startswith('ok|'):
+                self.log('   ✗ %s: %s' % (label, pt), 'ERR')
+                return False
+            x, y = (int(v) for v in pt[3:].split(','))
+            try:
+                await page.mouse.click(x, y)
+                await page.wait_for_timeout(500)
+                opts = page.locator('[role="option"]')
+                hit = None
+                seen = []
+                for i in range(await opts.count()):
+                    t = (await opts.nth(i).inner_text()).strip()
+                    seen.append(t)
+                    if t == value:
+                        hit = opts.nth(i)
+                        break
+                if hit is None:
+                    self.log('   ✗ %s ไม่มีตัวเลือก %s (เจอ: %s)' % (label, value, ', '.join(seen[:8]) or '-'),
+                             'ERR')
+                    await page.keyboard.press('Escape')
+                    return False
+                await hit.click(timeout=5000)
+                await page.wait_for_timeout(500)
+            except Exception as ex:
+                self.log('   ! เลือก%s ไม่ติด (%s) — ลองใหม่' % (label, str(ex)[:60]), 'WARN')
+                continue
+            got = await page.evaluate(JS_BUNDLE_TYPE_GET)
+            if (got or '').strip() == value:
+                self.log('   · %s = %s' % (label, value), 'OK')
+                return True
+        self.log('   ✗ ตั้ง%s = %s ไม่สำเร็จ' % (label, value), 'ERR')
+        return False
+
+    async def _b_add_item(self, page, it):
+        ok = await App._b_add_item(self, page, it)
+        if not ok:
+            raise RuntimeError('เพิ่มไอเทม %s เข้าบันเดิลไม่ได้ — หยุด ไม่กดสร้าง' % it.get('id'))
+        return ok
+
+    async def _b_set_row(self, page, item_id, qty, tier, nth=1):
+        await App._b_set_row(self, page, item_id, qty, tier, nth)
+        rate = self._rates.get((str(item_id), nth))
+        if rate is None:
+            return
+        who = 'ไอเทม %s' % item_id + (' (ใบที่ %d)' % nth if nth > 1 else '')
+        got = ''
+        for _ in range(2):
+            r = await page.evaluate(JS_OU_RATE, [str(item_id), nth, 'set', str(rate)])
+            await page.wait_for_timeout(200)
+            got = await page.evaluate(JS_OU_RATE, [str(item_id), nth, 'read', ''])
+            if str(got).startswith('ok|') and ou_same_rate(str(got)[3:], rate):
+                break
+            if r != 'ok':
+                got = r
+        else:
+            self.log('   ✗ ตั้งเรทสุ่มของ%s เป็น %s ไม่สำเร็จ (%s)' % (who, rate, got), 'ERR')
+            raise RuntimeError('ตั้งเรทสุ่มของ%s ไม่ได้ — หยุด ไม่กดสร้าง' % who)
+        self.log('   · %s เรทสุ่ม = %s' % (who, rate), 'INFO')
+        object.__setattr__(self, 'rate_done', self.rate_done + 1)
+        if self.rate_done == len(self._rates) and self._want_sum:
+            shown = await page.evaluate(JS_OU_RATE_SUM)
+            if not shown:
+                self.log('   · อ่านผลรวมเรทสุ่มบนหน้าเว็บไม่ได้ (เช็กรายตัวครบแล้ว)', 'INFO')
+            elif ou_same_rate(shown, self._want_sum):
+                self.log('   · ผลรวมเรทสุ่มบนเว็บ = %s ตรงกับชีท' % shown, 'OK')
+            else:
+                self.log('   ✗ ผลรวมเรทสุ่มบนเว็บ = %s แต่ในชีท = %s' % (shown, self._want_sum), 'ERR')
+                raise RuntimeError('ผลรวมเรทสุ่มไม่ตรง — หยุด ไม่กดสร้าง')
+
+
+def ou_rate_map(q):
+    """(Aztek Id, ใบที่) -> เรทสุ่ม — นับใบแบบเดียวกับที่ _b_one นับตอนตั้งจำนวน/Tier"""
+    if q.get('type') != OU_RANDOM:
+        return {}
+    out, nth = {}, {}
+    for it in q['items']:
+        nth[it['id']] = nth.get(it['id'], 0) + 1
+        out[(str(it['id']), nth[it['id']])] = it.get('rate', '')
+    return out
+
+
 class OungTab:
     """แท็บ 🎰 Oung Machine — ของใหม่ทั้งหมด
     ใช้ของเดิมแค่ 3 อย่างแบบ "เรียกใช้" ไม่ได้แก้อะไรของเดิม:
        · หน้าตาปุ่ม/การ์ด/Log ของโปรแกรม
        · แท็บค้นหา (ปุ่มค้นหา Aztek Id — กดเองถึงจะทำงาน)
-       · คิวของแท็บสร้าง Bundle (ปุ่มส่งไปสร้าง — สร้างจริงด้วยระบบเดิมทุกขั้นตอน)"""
+       · เครื่องสร้าง Bundle เดิม (App._b_one) ผ่าน OuRunner — เพิ่มแค่กรอกเรทสุ่มของ RANDOM"""
     COLS = (('use', 'ใช้', 40, False), ('st', 'สถานะ', 104, False),
-            ('what', 'fdItemNum / ประเภท', 146, False), ('move', 'Itemmove', 74, False),
-            ('aid', 'Aztek Item Id', 100, False), ('qty', 'จำนวน', 52, False),
-            ('tier', 'Tier', 62, False), ('note', 'รายละเอียด / ที่มาในชีท', 420, True))
-    EDIT = {'#0': 'name', '#5': 'aid', '#6': 'qty', '#7': 'tier'}
+            ('what', 'fdItemNum / ประเภท', 150, False), ('move', 'Itemmove', 72, False),
+            ('aid', 'Aztek Item Id', 98, False), ('qty', 'จำนวน', 50, False),
+            ('tier', 'Tier', 58, False), ('rate', 'เรทสุ่ม', 82, False),
+            ('note', 'รายละเอียด / ที่มาในชีท', 400, True))
+    EDIT = {'#0': 'name', '#5': 'aid', '#6': 'qty', '#7': 'tier', '#8': 'rate'}
 
     def __init__(self, app, tab):
         self.app = app
@@ -10063,6 +10376,7 @@ class OungTab:
         self._ed = None
         self._next_job = None
         self._wait_keys = None
+        self.running = False
         self._build()
         self._load()
         self.refresh()
@@ -10081,7 +10395,8 @@ class OungTab:
         self.lbl_file = tk.Label(s1, text='ยังไม่ได้เปิดไฟล์', bg=C['bg'], fg=C['fg'], font=FM,
                                  anchor='w')
         self.lbl_file.pack(fill='x', pady=(8, 0))
-        tk.Label(s1, text='โปรแกรมแยกให้เองจากป้ายในชีท:  ตารางที่มีช่อง Chance = ตารางสุ่ม (ข้าม)  ·  '
+        tk.Label(s1, text='โปรแกรมแยกให้เองจากป้ายในชีท:  มีช่อง Real Chance = บันเดิล RANDOM ทั้งตาราง '
+                          '(เรทสุ่ม = Real Chance)  ·  '
                           'หีบ/รางวัลสะสม = ทั้งตาราง 1 บันเดิล  ·  ร้านค้า = 1 แถว 1 บันเดิล  ·  '
                           'ของข้างในเหมือนกัน = ใช้บันเดิลเดียวกัน — ตรวจแล้วแก้ในตารางข้างล่างได้เลย',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w', justify='left',
@@ -10127,7 +10442,7 @@ class OungTab:
         self.tree.bind('<Button-1>', self._click, add='+')
         self.tree.bind('<Double-1>', self._dbl)
 
-        tk.Label(s2, text='ดับเบิลคลิกเพื่อแก้: ชื่อบันเดิล · Aztek Item Id · จำนวน · Tier   '
+        tk.Label(s2, text='ดับเบิลคลิกเพื่อแก้: ชื่อบันเดิล · Aztek Item Id · จำนวน · Tier · เรทสุ่ม   '
                           '(Enter = บันทึกแล้วไปแถวถัดไป · Esc = ยกเลิก)  ·  คลิกช่อง “ใช้” = เลือก/ไม่เลือก  ·  '
                           'ใส่ Aztek Id ครั้งเดียว ไอเทมตัวเดียวกันทุกที่ได้ตามไปหมด',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w', justify='left',
@@ -10136,18 +10451,26 @@ class OungTab:
                                 justify='left', wraplength=1000)
         self.lbl_sum.pack(fill='x', pady=(4, 0))
 
-        s3 = a._card(p, '3) ใส่ Aztek Item Id ให้ครบ แล้วส่งไปสร้าง')
+        s3 = a._card(p, '3) ใส่ Aztek Item Id ให้ครบ แล้วลงมือสร้าง')
         b3 = tk.Frame(s3, bg=C['bg'])
         b3.pack(fill='x')
-        a._btn(b3, '🔍  ค้นหา Aztek Id ที่ยังว่าง (ใช้แท็บค้นหา)', self.search_ids).pack(
+        a._btn(b3, '🔍  ค้นหา Aztek Id ที่ยังว่าง', self.search_ids).pack(
             side='left', ipadx=8, ipady=4)
         a._btn(b3, '📋  คัดลอกสรุป', self.copy_summary).pack(
             side='left', padx=(8, 0), ipadx=8, ipady=4)
-        self.btn_send = a._btn(b3, '📦  ส่งไปแท็บสร้าง Bundle', self.send, primary=True)
-        self.btn_send.pack(side='right', ipadx=14, ipady=4)
-        tk.Label(s3, text='สร้างจริงใช้ระบบเดิมของแท็บ “สร้าง Bundle” ทุกขั้นตอน '
-                          '(โหมดทดสอบ · ป๊อปอัปยืนยัน · เลข Bundle ที่สร้างแล้ว) — แท็บนี้แค่เตรียมของให้',
-                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(fill='x', pady=(6, 0))
+        self.btn_stop = a._btn(b3, '■  ยกเลิก', self.stop)
+        self.btn_stop.config(state='disabled')
+        self.btn_stop.pack(side='right', padx=(8, 0), ipadx=10, ipady=4)
+        self.btn_run = a._btn(b3, '▶  เริ่มทำงาน', self.create, primary=True)
+        self.btn_run.pack(side='right', ipadx=16, ipady=4)
+        self.v_do = tk.BooleanVar(value=False)
+        tk.Checkbutton(b3, variable=self.v_do, command=self._do_changed,
+                       text='กดปุ่ม “สร้าง Bundle” จริง', bg=C['bg'], fg=C['fg'],
+                       selectcolor=C['input'], activebackground=C['bg'], activeforeground=C['fg'],
+                       font=FB, bd=0, highlightthickness=0).pack(side='right', padx=(0, 12))
+        self.lbl_mode = tk.Label(s3, text='', bg=C['bg'], font=('Segoe UI', 9), anchor='w')
+        self.lbl_mode.pack(fill='x', pady=(6, 0))
+        self._do_changed()
 
     # ---------- เก็บ/โหลด ----------
     def _path(self):
@@ -10271,6 +10594,10 @@ class OungTab:
         multi = self.st['multi'].get(x['key'])
         if multi and not x['id']:
             parts.append('ค้นเจอหลายตัว: %s — เลือกใส่เอง' % ', '.join(multi[:5]))
+        if x.get('rate_note'):
+            parts.append(x['rate_note'])
+        if x.get('rate') == '0':
+            parts.append('เรท 0 = ไม่มีโอกาสออก')
         if it.get('limit'):
             parts.append('จำกัด/ไอดี %s' % it['limit'])
         parts.append(it['ref'])
@@ -10280,12 +10607,16 @@ class OungTab:
     def _short(b):
         if not b['use']:
             s = '— ไม่เลือก'
+        elif b['made']:
+            s = '✓ สร้างแล้ว'
         elif b['dup_of']:
             s = '⧉ ใช้ร่วม'
         elif b['miss']:
             s = '⚠ ขาด Id %d' % b['miss']
         elif b['badq']:
             s = '⚠ จำนวน'
+        elif b.get('badr'):
+            s = '⚠ ขาดเรท %d' % b['badr']
         elif b['sent']:
             s = '➜ ส่งแล้ว'
         else:
@@ -10327,7 +10658,7 @@ class OungTab:
             tr.insert('', 'end', iid=tiid, text='🗂  ' + t['title'],
                       values=('—' if mode == 'skip' else ('✔' if n_use else '✗'), stt,
                               '%s · %s' % (OU_KINDS.get(t['kind'], t['kind']), OU_SHORT[mode]),
-                              '', '', '', '', note),
+                              '', '', '', '', '', note),
                       open=opened.get(tiid, mode != 'skip'),
                       tags=('topic',) if mode != 'skip' else ('topic', 'off'))
             self._map[tiid] = ('t', tid)
@@ -10336,7 +10667,7 @@ class OungTab:
                     iid = 'S|%s|%d' % (tid, j)
                     tr.insert(tiid, 'end', iid=iid, text='      ' + (it['name'] or '-'),
                               values=('', '', it['kind'], it['move'], '', it['qty'], it['rank'],
-                                      it['ref']), tags=('off',))
+                                      it.get('rate', ''), it['ref']), tags=('off',))
                     self._map[iid] = ('s', tid, j)
                 continue
             for b in nb:
@@ -10351,25 +10682,36 @@ class OungTab:
                     tag = 'warn'
                 one = b['items'][0] if len(b['items']) == 1 else None
                 short = self._short(b)
+                rnd = b['type'] == OU_RANDOM
+                live = b['use'] and not b['dup_of'] and not b['made']
+
+                def rate_of(x):
+                    if not rnd:
+                        return ''
+                    return x['rate'] or ('⚠ ใส่เรท' if live else '—')
                 if one:
                     vals = ('✔' if b['use'] else '✗', short, one['kind'], one['src']['move'],
                             one['id'] or ('—' if not b['use'] or b['dup_of'] else '⚠ ใส่ Id'),
-                            one['qty'], one['tier'], b['status'] + '  ·  ' + self._note(one))
+                            one['qty'], one['tier'], rate_of(one),
+                            b['status'] + '  ·  ' + self._note(one))
                 else:
-                    vals = ('✔' if b['use'] else '✗', short, '%d ไอเทม' % len(b['items']), '', '',
-                            '', '', b['status'])
+                    vals = ('✔' if b['use'] else '✗', short,
+                            ('🎲 RANDOM · %d ไอเทม' if rnd else '%d ไอเทม') % len(b['items']), '', '',
+                            '', '', ('Σ ' + b['rsum']) if rnd else '', b['status'])
                 tr.insert(tiid, 'end', iid=biid, text='📦  ' + b['name'], values=vals,
-                          open=opened.get(biid, True), tags=(tag,))
+                          open=opened.get(biid, len(b['items']) <= 12), tags=(tag,))
                 self._map[biid] = ('b', b['bkey'])
                 if one:
                     continue
                 for j, x in enumerate(b['items']):
                     iid = 'I|%s|%d' % (b['bkey'], j)
-                    itag = tag if (x['id'] or tag in ('off', 'dup')) else 'warn'
+                    lack = live and (not x['id'] or (rnd and not x['rate']))
+                    itag = 'warn' if lack else tag
                     tr.insert(biid, 'end', iid=iid, text='      %d. %s' % (j + 1, x['disp'] or '-'),
-                              values=('', '⚠ ใส่ Id' if itag == 'warn' else '', x['kind'], x['src']['move'],
-                                      x['id'] or ('—' if tag in ('off', 'dup') else '⚠ ใส่ Id'),
-                                      x['qty'], x['tier'], self._note(x)), tags=(itag,))
+                              values=('', ('⚠ ใส่ Id' if not x['id'] else '⚠ ใส่เรท') if lack else '',
+                                      x['kind'], x['src']['move'],
+                                      x['id'] or ('—' if not live else '⚠ ใส่ Id'),
+                                      x['qty'], x['tier'], rate_of(x), self._note(x)), tags=(itag,))
                     self._map[iid] = ('i', b['bkey'], j)
         if sel and tr.exists(sel):
             tr.selection_set(sel)
@@ -10391,9 +10733,12 @@ class OungTab:
             self.lbl_sum.config(text='ยังไม่มีข้อมูล — เปิดไฟล์ชีทก่อนนะ', fg=C['dim'])
             return
         n = ou_summary(self.st, bs)
-        txt = ('%d หัวข้อ (ข้าม %d)  ·  จะสร้าง %d บันเดิล  ·  พร้อมแล้ว %d  ·  ยังขาด Aztek Id %d บันเดิล '
-               '(%d ไอเทม)  ·  ของเหมือนกันใช้ร่วม %d'
-               % (n['topics'], n['skip'], n['create'], n['ready'], n['miss'], n['ids_missing'], n['dup']))
+        txt = ('%d หัวข้อ (ข้าม %d)  ·  จะสร้าง %d บันเดิล (RANDOM %d)  ·  พร้อมแล้ว %d  ·  '
+               'ยังขาด Aztek Id %d บันเดิล (%d ไอเทม)  ·  ของเหมือนกันใช้ร่วม %d'
+               % (n['topics'], n['skip'], n['create'], n['random'], n['ready'], n['miss'],
+                  n['ids_missing'], n['dup']))
+        if n['made']:
+            txt += '  ·  ✓ สร้างแล้ว %d' % n['made']
         if n['hint']:
             txt += '  ·  📌 มีเลข Bundle ในชีทแล้ว %d (ไม่ได้ติ๊กไว้ให้)' % n['hint']
         self.lbl_sum.config(text=txt, fg=C['ok'] if n['create'] and n['ready'] == n['create']
@@ -10504,6 +10849,17 @@ class OungTab:
                     return 'จำนวนต้องเป็นเลข 1 ขึ้นไป'
                 st['edit'].setdefault(x['ekey'], {})['qty'] = v.strip()
             return {'kind': what, 'get': lambda: x['qty'], 'set': setq}
+
+        if what == 'rate':
+            if b['type'] != OU_RANDOM:
+                return None
+
+            def setr(v):
+                r, _ = ou_rate(v)
+                if not r:
+                    return 'เรทสุ่มต้องเป็นตัวเลข 0 – 999.999'
+                st['edit'].setdefault(x['ekey'], {})['rate'] = r
+            return {'kind': what, 'get': lambda: x['rate'], 'set': setr}
 
         def sett(v):
             if v not in TIERS:
@@ -10696,11 +11052,15 @@ class OungTab:
                 lines.append('   ข้าม — ' + t['why'])
                 continue
             for b in (b for b in bs if b['tid'] == t['tid']):
-                lines.append('   %s %s   → %s' % ('✔' if b['use'] else '✗', b['name'], b['status']))
+                rnd = b['type'] == OU_RANDOM
+                lines.append('   %s [%s] %s%s   → %s' % ('✔' if b['use'] else '✗', b['type'], b['name'],
+                                                     ('  (ผลรวมเรทสุ่ม %s)' % b['rsum']) if rnd else '',
+                                                     b['status']))
                 for x in b['items']:
-                    lines.append('      - fdItemNum %s · %s · Aztek Id %s · จำนวน %s · %s'
+                    lines.append('      - fdItemNum %s · %s · Aztek Id %s · จำนวน %s · %s%s'
                                  % (x['kind'], x['src']['move'] or '-', x['id'] or '(ยังไม่มี)',
-                                    x['qty'], x['tier']))
+                                    x['qty'], x['tier'],
+                                    (' · เรทสุ่ม %s' % (x['rate'] or '(ยังไม่มี)')) if rnd else ''))
         n = ou_summary(self.st, bs)
         lines.append('')
         lines.append('รวม: จะสร้าง %d บันเดิล · พร้อม %d · ขาด Id %d · ใช้ร่วม %d'
@@ -10709,13 +11069,29 @@ class OungTab:
         self.app.root.clipboard_append('\n'.join(lines))
         self.app.log('Oung: คัดลอกสรุปแล้ว (%d บรรทัด)' % len(lines), 'OK')
 
-    def send(self):
+    # ---------- ลงมือสร้าง ----------
+    def _do_changed(self):
+        if self.v_do.get():
+            self.lbl_mode.config(text='⚠  จะสร้างบันเดิลจริงบนเว็บ — เพิ่มไอเทมไม่ครบ / เรทสุ่มไม่ตรง = หยุด ไม่กดสร้าง',
+                                 fg=C['err'])
+        else:
+            self.lbl_mode.config(text='โหมดทดสอบ — กรอกให้ดูเฉยๆ ไม่กดสร้าง  ·  ใช้ตัวสร้าง Bundle เดิมของโปรแกรม '
+                                      '+ กรอกเรทสุ่มให้ (RANDOM)  ·  ค้างหน้าไว้ตามที่ตั้งในแท็บสร้าง Bundle',
+                                 fg=C['ok'])
+
+    def _busy(self):
+        a = self.app
+        return bool(self.running or a.running or a.b_running or getattr(a, 'c_running', False)
+                    or getattr(a, 'w_running', False)
+                    or getattr(getattr(a, 'gen', None), 'w_running', False) or self._wait_keys)
+
+    def create(self):
         a = self.app
         self._cancel_edit()
-        if a.b_running:
-            return messagebox.showinfo('กำลังสร้างอยู่', 'รอแท็บสร้าง Bundle ทำงานเสร็จก่อนนะ')
+        if self._busy():
+            return messagebox.showinfo('กำลังทำงาน', 'รองานที่ทำอยู่ให้เสร็จก่อนนะ (ใช้ Chrome ตัวเดียวกัน)')
         bs = ou_bundles(self.st)
-        use = [b for b in bs if b['use'] and not b['dup_of']]
+        use = [b for b in bs if b['use'] and not b['dup_of'] and not b['made']]
         if not use:
             return messagebox.showwarning('ยังไม่ได้เลือก', 'ติ๊กเลือกบันเดิลที่จะสร้างก่อนนะ')
         ready = [b for b in use if b['ready']]
@@ -10725,37 +11101,106 @@ class OungTab:
                 len(bad), '\n'.join('  • %s — %s' % (b['name'][:36], b['status'][:40]) for b in bad[:8]),
                 '\n  …' if len(bad) > 8 else '')
             if not ready:
-                return messagebox.showwarning('ยังส่งไม่ได้', msg)
-            if not messagebox.askyesno('ส่งเฉพาะที่พร้อม', msg + '\n\nส่งเฉพาะที่พร้อม %d อันไปก่อนไหม?'
+                return messagebox.showwarning('ยังทำไม่ได้', msg)
+            if not messagebox.askyesno('ทำเฉพาะที่พร้อม', msg + '\n\nทำเฉพาะที่พร้อม %d อันไปก่อนไหม?'
                                        % len(ready)):
                 return
+        do = bool(self.v_do.get())
+        if do:
+            msg = 'จะสร้างบันเดิลจริงบนเว็บ %d อัน\n\n' % len(ready)
+            msg += '\n'.join('  • %s%s (%d ไอเทม%s)' % (
+                '🎲 ' if b['type'] == OU_RANDOM else '', b['name'][:36], len(b['items']),
+                (' · เรทรวม %s' % b['rsum']) if b['type'] == OU_RANDOM else '') for b in ready[:8])
+            if len(ready) > 8:
+                msg += '\n  … อีก %d อัน' % (len(ready) - 8)
+            msg += '\n\nตรวจชื่อ / จำนวน / Tier / เรทสุ่ม เรียบร้อยแล้วใช่ไหม?'
+            if not messagebox.askyesno('ยืนยัน', msg):
+                return
+        rows = [(b['bkey'], ou_to_queue(b), b['rsum']) for b in ready]
+        self.running = True
+        a.b_running = True              # กันแท็บสร้าง Bundle ใช้ Chrome ชนกัน
+        a.b_cancel = False
+        self.btn_run.config(state='disabled')
+        self.btn_stop.config(state='normal')
+        a.nb.select(a.tab_log)
+        a.log('=' * 46, 'STEP')
+        a.log('Oung: %s %d บันเดิล' % ('เริ่มสร้างจริง' if do else 'เริ่มทดสอบกรอก', len(rows)), 'STEP')
+        log_event('oung_start', count=len(rows), commit=do,
+                  random=sum(1 for _, q, _ in rows if q['type'] == OU_RANDOM))
+        threading.Thread(target=self._thread, args=(rows, do), daemon=True).start()
 
-        def sig(q):
-            return (q['name'], tuple((str(i['id']), str(i['qty']), i['tier']) for i in q['items']))
-        have = {sig(q) for q in a.bq}
-        new = [(b, ou_to_queue(b)) for b in ready]
-        dup = [b for b, q in new if sig(q) in have]
-        new = [(b, q) for b, q in new if sig(q) not in have]
-        if not new:
-            return messagebox.showinfo('อยู่ในคิวแล้ว', 'บันเดิลที่พร้อมทั้งหมด %d อัน อยู่ในคิวแท็บสร้าง Bundle แล้ว'
-                                       % len(dup))
-        msg = 'ส่ง %d บันเดิลไปต่อท้ายคิวในแท็บ “สร้าง Bundle”' % len(new)
-        if dup:
-            msg += '\n(ข้าม %d อันที่อยู่ในคิวแล้ว)' % len(dup)
-        if a.bq:
-            msg += '\n\nในคิวมีของเดิมอยู่ %d อัน — ของเดิมไม่โดนแตะ' % len(a.bq)
-        msg += '\n\nแล้วไปกด ▶ เริ่มทำงาน ที่แท็บนั้นต่อ (ลองโหมดทดสอบก่อนได้เหมือนเดิม)'
-        if not messagebox.askyesno('ส่งไปแท็บสร้าง Bundle', msg):
-            return
-        now = datetime.now().strftime('%H:%M')
-        for b, q in new:
-            a.bq.append(q)
-            self.st['sent'][b['bkey']] = now
-        a._b_refresh()
-        a.log('Oung: ส่ง %d บันเดิลไปคิวแท็บสร้าง Bundle แล้ว (คิวรวม %d)' % (len(new), len(a.bq)), 'OK')
-        log_event('oung_send', count=len(new), skipped=len(dup))
-        self.refresh()
-        a.nb.select(a.tab_bundle)
+    def stop(self):
+        self.app.b_cancel = True
+        self.app.log('Oung: กำลังยกเลิก (จบบันเดิลที่ทำอยู่ก่อน)...', 'WARN')
+
+    def _thread(self, rows, do):
+        try:
+            asyncio.run(self._work(rows, do))
+        except Exception as ex:
+            log_event('error', where='oung', message=str(ex)[:300])
+            self.app.log('ผิดพลาด: ' + str(ex), 'ERR')
+            self.app.log(traceback.format_exc(), 'ERR')
+        finally:
+            self.running = False
+            self.app.b_running = False
+
+            def _rst():
+                try:
+                    self.btn_run.config(state='normal')
+                    self.btn_stop.config(state='disabled')
+                    self.refresh()
+                except Exception:
+                    pass
+            self.app.root.after(0, _rst)
+
+    async def _work(self, rows, do):
+        a = self.app
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch_persistent_context(**launch_kwargs(False))
+            page = browser.pages[0] if browser.pages else await browser.new_page()
+            try:
+                await self._run_rows(page, rows, do)
+            finally:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+
+    async def _run_rows(self, page, rows, do):
+        """สร้างทีละบันเดิลด้วยตัวสร้างเดิม (แยกออกมาให้เทสกับหน้าเว็บจำลองได้)"""
+        a = self.app
+        try:
+            hold = max(0, int(float(a.bv_hold.get() or 0)))
+        except Exception:
+            hold = 4
+        okc = errc = 0
+        for i, (bkey, q, rsum) in enumerate(rows, 1):
+            if a.b_cancel:
+                a.log('ยกเลิกแล้ว', 'WARN')
+                break
+            rnd = q['type'] == OU_RANDOM
+            a.set_progress(i - 1, len(rows), q['name'][:30])
+            a.log('[%d/%d] %s  (%s · %d ไอเทม%s)' % (i, len(rows), q['name'], q['type'], len(q['items']),
+                                                     (' · ผลรวมเรทสุ่ม %s' % rsum) if rnd else ''), 'STEP')
+            run = OuRunner(a, ou_rate_map(q), rsum if rnd else '')
+            try:
+                ok = await App._b_one(run, page, q, do, hold)
+            except Exception as ex:
+                ok = False
+                a.log('   ✗ ' + str(ex)[:200], 'ERR')
+                log_event('error', where='oung_one', name=q['name'], message=str(ex)[:200])
+            if ok:
+                okc += 1
+                if do:
+                    self.st['made'][bkey] = {'id': str(run.made_id or ''),
+                                             'at': datetime.now().strftime('%d/%m %H:%M')}
+                    a.root.after(0, self.refresh)
+            else:
+                errc += 1
+        a.set_progress(len(rows), len(rows), 'เสร็จ')
+        a.log('Oung: จบ — สำเร็จ %d · ไม่ผ่าน %d' % (okc, errc), 'OK' if not errc else 'WARN')
+        log_event('oung_done', ok=okc, fail=errc, commit=bool(do))
+        return okc, errc
 
 
 if __name__ == '__main__':
