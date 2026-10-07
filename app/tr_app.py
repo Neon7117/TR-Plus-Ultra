@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.1.2 : สร้าง Product — แก้สกุลเงินไม่ถูกเลือก (หากล่อง “สกุลเงินที่ 1” ไม่เจอ) · พิมพ์ค้น mileage / coral แบบในคลิป
 V1.1.1 : สร้าง Product — ช่องติ๊ก ☑/☐ · ลบแถวออกจากคิว · แก้ชื่อสินค้าทั้งหมด (แม่แบบชื่อ) · ลำดับการแสดงจากคอลัมน์ “ลำดับ”
 V1.1.0 : แท็บ Oung มีแถบย่อย — 📦 สร้าง Bundle (ของเดิม) · 🛒 สร้าง Product ใหม่ (อ่านแท็บ bundle+id กรอกหน้าสร้าง Product)
 V1.0.9 : แท็บ Oung — ช่องหมายเหตุบอกเฉพาะเรื่องที่ต้องแก้/ผิดปกติ · รายละเอียดเต็มขึ้นใต้ตารางตอนคลิกเลือก
@@ -11870,6 +11871,7 @@ def pd_view(st):
             x['sheet_name'] = it['name']
             x.update((st.get('edit') or {}).get(it['key'], {}))
             x['skey'], x['cat'], x['cur'], x['pre'] = s['skey'], v['cat'], v['cur'], v['pre']
+            x['price_h'] = s.get('price_h') or ''
             x['made'] = (st.get('made') or {}).get(it['key'])
             x['last'] = (st.get('last') or {}).get(it['key'])
             x['problems'] = pd_check(x)
@@ -11984,13 +11986,26 @@ JS_PD = r"""
     mark(box, 'data-trw-pds');
     return 'ok';
   }
+  // หัวกล่อง "สกุลเงินที่ N" — เว็บจริง (React) แยกข้อความเป็น 2 ท่อน "สกุลเงินที่ " + "1"
+  // ต้องดูข้อความ "ทั้งก้อน" ของกล่อง ห้ามดูทีละท่อน (เคยพลาด: นับได้ 0 กล่องทั้งที่มี)
+  const curHeads = () => [...document.querySelectorAll('body *')].filter(vis).filter(el =>
+      /^สกุลเงินที่\s*\d+$/.test(txt(el)) &&
+      ![...el.children].some(c => /^สกุลเงินที่/.test(txt(c))));
   if (act === 'curblocks') {                 // มีกล่อง "สกุลเงินที่ N" กี่กล่อง
-    let n = 0;
-    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-    let node;
-    while ((node = w.nextNode()))
-      if (/^สกุลเงินที่\s*\d+/.test((node.textContent || '').trim()) && vis(node.parentElement)) n++;
-    return String(n);
+    return String(curHeads().length);
+  }
+  if (act === 'curtrig') {                   // ช่องเลือกสกุลเงินในกล่อง "สกุลเงินที่ 1"
+    const hs = curHeads();
+    if (!hs.length) return 'ไม่เจอกล่องสกุลเงิน';
+    let box = hs[0], s = null;
+    for (let i = 0; i < 6 && box && !s; i++) {
+      box = box.parentElement;
+      if (!box || box === document.body || txt(box).indexOf('หมวดหมู่') >= 0) break;  // ห้ามเลยกล่องไปโดนหมวดหมู่
+      s = pickSel(box);
+    }
+    if (!s) return 'ไม่เจอช่องเลือกสกุลเงินในกล่อง';
+    mark(s, 'data-trw-pd');
+    return 'ok|' + selText(s);
   }
   if (act === 'button') {                    // ปุ่มตามข้อความ (ไม่สนเครื่องหมาย + ข้างหน้า)
     const want = norm(a);
@@ -12129,50 +12144,67 @@ class PdRunner:
         except Exception as ex:
             return 'error: %s' % str(ex)[:80]
 
-    async def _pd_combo(self, page, label, mode, want, terms, what):
-        """ดรอปดาวน์ที่มีช่องค้นหา: เปิด -> หาในรายการ (ไม่เจอค่อยพิมพ์ค้น) -> คลิก -> อ่านกลับ
-        mode 'exact' = ชื่อตรงเป๊ะ · 'cur' = want 'prefix|ชื่อ' (เจอเกิน 1 ตัว = ไม่เดา หยุด)"""
+    async def _pd_combo(self, page, label, mode, want, terms, what, trig='trig', type_first=False):
+        """ดรอปดาวน์ที่มีช่องค้นหา: เปิด -> หาในรายการ / พิมพ์ค้น -> คลิก -> อ่านกลับ
+        mode 'exact' = ชื่อตรงเป๊ะ · 'cur' = want 'prefix|ชื่อ' (เจอเกิน 1 ตัว = ไม่เดา หยุด)
+        type_first = พิมพ์คำค้นก่อน (แบบที่คนทำในคลิป: สกุลเงินพิมพ์ mileage / coral)
+                     ไม่เจอค่อยล้างช่องค้นหาแล้วไล่ดูทั้งรายการ"""
         def good(t):
             if mode == 'exact':
                 return pd_norm(t) == pd_norm(want)
             pre, nm = want.split('|', 1)
             return pd_cur_ok(t, pre, nm)
         show = want if mode == 'exact' else '%sxxxx - %s' % tuple(want.split('|', 1))
-        r = await self._pd(page, 'trig', label)
+        r = await self._pd(page, trig, label)
         if not r.startswith('ok|'):
-            self.log('   ! เลือก “%s” ไม่ได้ (ไม่เจอช่อง)' % what, 'WARN')
+            self.log('   ! เลือก “%s” ไม่ได้ (%s)' % (what, r if not r.startswith('ok') else 'ไม่เจอช่อง'), 'WARN')
             return False
         if good(r[3:]):
             self.log('   · %s = %s  (เป็นค่านี้อยู่แล้ว)' % (what, r[3:]), 'INFO')
             return True
         why = ''
+        done = lambda x: x.startswith(('ok', 'many'))
+
+        async def look(n=12, ms=200):
+            x = 'none'
+            for _ in range(n):
+                await page.wait_for_timeout(ms)
+                x = await self._pd(page, 'opts', mode, want)
+                if done(x):
+                    break
+            return x
+
+        async def type_in(term):
+            for _ in range(10):                       # รอช่องค้นหาในป๊อปอัปโผล่
+                if (await self._pd(page, 'search')) == 'ok':
+                    break
+                await page.wait_for_timeout(150)
+            else:
+                return False
+            try:
+                await page.locator('[data-trw-pds="1"]').first.fill(term, timeout=3000)
+                return True
+            except Exception:
+                return False
+
         for _ in range(2):
-            await self._pd(page, 'trig', label)
+            await self._pd(page, trig, label)
             try:
                 await page.locator('[data-trw-pd="1"]').first.click(timeout=4000)
             except Exception:
                 why = 'กดเปิดรายการไม่ได้'
                 continue
             r = 'none'
-            for _ in range(12):
-                await page.wait_for_timeout(200)
-                r = await self._pd(page, 'opts', mode, want)
-                if r.startswith(('ok', 'many')):
-                    break
+            if not type_first:
+                r = await look()
             for term in terms:
-                if r.startswith(('ok', 'many')):
+                if done(r):
                     break
-                if (await self._pd(page, 'search')) != 'ok':
+                if not await type_in(term):
                     break
-                try:
-                    await page.locator('[data-trw-pds="1"]').first.fill(term, timeout=3000)
-                except Exception:
-                    break
-                for _ in range(12):
-                    await page.wait_for_timeout(250)
-                    r = await self._pd(page, 'opts', mode, want)
-                    if r.startswith(('ok', 'many')):
-                        break
+                r = await look(12, 250)
+            if type_first and not done(r) and await type_in(''):
+                r = await look()                       # ล้างคำค้น -> ไล่ดูทั้งรายการ
             if r.startswith('many'):
                 self.log('   ! %s: เจอตัวเลือกเข้าเงื่อนไขมากกว่า 1 ตัว (%s) — ไม่เดา ต้องเลือกเองบนเว็บ'
                          % (what, r.split('|', 1)[1][:160]), 'WARN')
@@ -12193,7 +12225,7 @@ class PdRunner:
             now = ''
             for _ in range(10):
                 await page.wait_for_timeout(200)
-                r2 = await self._pd(page, 'trig', label)
+                r2 = await self._pd(page, trig, label)
                 now = r2[3:] if r2.startswith('ok|') else ''
                 if good(now):
                     self.log('   · %s = %s' % (what, now), 'INFO')
@@ -12206,7 +12238,7 @@ class PdRunner:
         r = await self._pd(page, 'curblocks')
         return int(r) if r.isdigit() else -1
 
-    async def _pd_currency(self, page, pre, name):
+    async def _pd_currency(self, page, pre, name, word=''):
         """สกุลเงินที่ 1: ยังไม่มีกล่อง = กด “+ เพิ่มสกุลเงิน” ก่อน (มีแล้วไม่กดซ้ำ) แล้วเลือกตามกติกา"""
         n = await self._pd_blocks(page)
         if n == 0:
@@ -12229,9 +12261,9 @@ class PdRunner:
             self.log('   ! กล่องสกุลเงินมี %s กล่อง (ต้องมี 1) — ต้องแก้เองบนเว็บ'
                      % (n if n >= 0 else 'อ่านไม่ได้'), 'WARN')
             return False
-        terms = [name] + ([pre.rstrip('-')] if pre else [])
-        return await self._pd_combo(page, SEL_PD['cur'], 'cur', '%s|%s' % (pre, name), terms,
-                                    'สกุลเงิน')
+        terms = [t for t in dict.fromkeys([str(word or '').strip(), name, pre.rstrip('-')]) if t]
+        return await self._pd_combo(page, '', 'cur', '%s|%s' % (pre, name), terms, 'สกุลเงิน',
+                                    trig='curtrig', type_first=True)
 
     async def _pd_bundle(self, page, bid):
         """เลือก Bundle จากเลขในชีท — เปิดป๊อปอัป พิมพ์เลข รอโหลด คลิกแถวที่ ID ตรงเป๊ะ
@@ -12345,7 +12377,7 @@ class PdRunner:
             bad.append('หมวดหมู่')
         await T(SEL_PD['name_th'], x['name'], 'ชื่อสินค้า (ไทย)')
         await T(SEL_PD['name_en'], x['name'], 'ชื่อสินค้า (อังกฤษ)')
-        if not await self._pd_currency(page, pre, x['cur']):
+        if not await self._pd_currency(page, pre, x['cur'], x.get('price_h')):
             bad.append('สกุลเงิน')
         else:
             await T(SEL_PD['price_full'], x['price'], 'ราคาเต็ม')
@@ -12380,7 +12412,7 @@ class PdRunner:
                 self.log('   ! ตรวจรอบสุดท้าย: หมวดหมู่บนเว็บเป็น “%s”' % r[3:][:60], 'WARN')
                 bad.append('หมวดหมู่')
         if 'สกุลเงิน' not in bad:
-            r = await self._pd(page, 'trig', SEL_PD['cur'])
+            r = await self._pd(page, 'curtrig')
             n = await self._pd_blocks(page)
             if n != 1 or not (r.startswith('ok|') and pd_cur_ok(r[3:], pre, x['cur'])):
                 self.log('   ! ตรวจรอบสุดท้าย: สกุลเงินบนเว็บเป็น “%s” (%s กล่อง)' % (r[3:][:60], n),
