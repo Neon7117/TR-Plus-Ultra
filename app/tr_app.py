@@ -3,6 +3,8 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.1.0 : แท็บ Oung มีแถบย่อย — 📦 สร้าง Bundle (ของเดิม) · 🛒 สร้าง Product ใหม่ (อ่านแท็บ bundle+id กรอกหน้าสร้าง Product)
+V1.0.9 : แท็บ Oung — ช่องหมายเหตุบอกเฉพาะเรื่องที่ต้องแก้/ผิดปกติ · รายละเอียดเต็มขึ้นใต้ตารางตอนคลิกเลือก
 V1.0.8 : ทำงานเสร็จแล้วไม่ปิด Chrome — เด้ง popup แล้วเปิดหน้าเว็บค้างไว้ให้ตรวจ (ทุกแท็บ)
 V1.0.7 : แท็บ Oung — ตาราง Real Chance = บันเดิล RANDOM + กรอกเรทสุ่มให้ · สร้างในแท็บนี้ได้เลย (ใช้ตัวสร้าง Bundle เดิม)
 V1.0.6 : แท็บใหม่ 🎰 Oung Machine — แปลงชีท Oung Oung Machine เป็นแม่แบบกลาง ตรวจ/แก้ในหน้าจอ แล้วส่งให้แท็บสร้าง Bundle (ของเดิมไม่แตะ)
@@ -9758,7 +9760,7 @@ def ou_rate(v):
     d3 = d6.quantize(decimal.Decimal('0.001'), decimal.ROUND_HALF_UP)
     if d3 < 0 or d3 > decimal.Decimal('999.999'):
         return '', 'เรท %s เกินช่วง 0 – 999.999' % _ou_fmt(d6)
-    note = '' if d3 == d6 else 'ปัดจาก %s (เว็บรับทศนิยม 3 ตำแหน่ง)' % _ou_fmt(d6)
+    note = '' if d3 == d6 else 'ปัดเรทจาก %s (เว็บรับทศนิยม 3 ตำแหน่ง)' % _ou_fmt(d6)
     return _ou_fmt(d3), note
 
 
@@ -10015,12 +10017,12 @@ def ou_new_state(path='', topics=None, report=None, hints=None):
     return {'file': path, 'read_at': datetime.now().isoformat(timespec='seconds'),
             'topics': topics or [], 'report': report or [], 'hints': hints or {},
             'ids': {}, 'names': {}, 'use': {}, 'mode': {}, 'edit': {}, 'sent': {},
-            'multi': {}, 'made': {}}
+            'multi': {}, 'made': {}, 'notfound': {}}
 
 
 def ou_merge(old, new):
     """อ่านไฟล์ใหม่ แต่เก็บสิ่งที่คนแก้ไว้ (Id / ชื่อ / ติ๊ก / โหมด / จำนวน / Tier / ส่งแล้ว)"""
-    for k in ('ids', 'names', 'use', 'mode', 'edit', 'sent', 'multi', 'made'):
+    for k in ('ids', 'names', 'use', 'mode', 'edit', 'sent', 'multi', 'made', 'notfound'):
         new[k] = dict(old.get(k) or {})
     return new
 
@@ -10185,6 +10187,7 @@ def ou_take_results(st, keys, results):
             if str(r['id']) not in got[keys[s - 1]]:
                 got[keys[s - 1]].append(str(r['id']))
     filled = multi = miss = 0
+    nf = st.setdefault('notfound', {})
     for k in keys:
         ids = got.get(k) or []
         if st['ids'].get(k):
@@ -10192,11 +10195,14 @@ def ou_take_results(st, keys, results):
         if len(ids) == 1:
             st['ids'][k] = ids[0]
             st['multi'].pop(k, None)
+            nf.pop(k, None)
             filled += 1
         elif ids:
             st['multi'][k] = ids
+            nf.pop(k, None)
             multi += 1
         else:
+            nf[k] = True                    # ค้นแล้วไม่เจอบนเว็บ -> บอกไว้ในหมายเหตุ
             miss += 1
     return filled, multi, miss
 
@@ -10452,12 +10458,28 @@ class OungTab:
             ('what', 'fdItemNum / ประเภท', 150, False), ('move', 'Itemmove', 72, False),
             ('aid', 'Aztek Item Id', 98, False), ('qty', 'จำนวน', 50, False),
             ('tier', 'Tier', 58, False), ('rate', 'เรทสุ่ม', 82, False),
-            ('note', 'รายละเอียด / ที่มาในชีท', 400, True))
+            ('note', 'หมายเหตุ', 400, True))
     EDIT = {'#0': 'name', '#5': 'aid', '#6': 'qty', '#7': 'tier', '#8': 'rate'}
 
     def __init__(self, app, tab):
         self.app = app
-        self.tab = tab
+        # แถบย่อยของแท็บนี้: 📦 สร้าง Bundle (ของเดิมของแท็บ) · 🛒 สร้าง Product (ของใหม่)
+        self.outer = tab
+        self._sub_bar = tk.Frame(tab, bg=C['bg'])
+        self._sub_bar.pack(fill='x', padx=14, pady=(8, 0))
+        self._subs = []
+        self.tab = tk.Frame(tab, bg=C['bg'])
+        self.ptab = tk.Frame(tab, bg=C['bg'])
+        for fr, text in ((self.tab, '📦  สร้าง Bundle'), (self.ptab, '🛒  สร้าง Product')):
+            b = tk.Button(self._sub_bar, text=text, bd=0, cursor='hand2', font=FM,
+                          bg=C['card'], fg=C['dim'], activebackground=C['line'],
+                          activeforeground=C['fg'], padx=14, pady=4,
+                          command=lambda f=fr: self.show_sub(f))
+            b.pack(side='left', padx=(0, 2))
+            self._subs.append((fr, b))
+        tk.Label(self._sub_bar, text='แถบย่อยของ Oung Machine', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 8)).pack(side='right')
+        self.show_sub(self.tab)
         self.st = ou_new_state()
         self._map = {}
         self._ed = None
@@ -10467,6 +10489,21 @@ class OungTab:
         self._build()
         self._load()
         self.refresh()
+        self.product = None
+        try:
+            self.product = OungProductTab(app, self.ptab, self)
+        except Exception as ex:
+            app.log('สร้างแถบย่อย “สร้าง Product” ไม่ได้: %s' % ex, 'ERR')
+
+    def show_sub(self, frame):
+        for fr, b in self._subs:
+            on = fr is frame
+            b.config(bg=C['input'] if on else C['card'], fg=C['fg'] if on else C['dim'],
+                     font=FB if on else FM)
+            if on:
+                fr.pack(fill='both', expand=True)
+            else:
+                fr.pack_forget()
 
     # ---------- หน้าจอ ----------
     def _build(self):
@@ -10505,7 +10542,7 @@ class OungTab:
         tw = tk.Frame(s2, bg=C['bg'])
         tw.pack(fill='both', expand=True)
         self.tree = ttk.Treeview(tw, columns=[c[0] for c in self.COLS], show='tree headings',
-                                 style='TR.Treeview', height=8, selectmode='browse')
+                                 style='TR.Treeview', height=4, selectmode='browse')
         self.tree.heading('#0', text='หัวข้อ › บันเดิล › ไอเทม')
         self.tree.column('#0', width=310, minwidth=180, stretch=False, anchor='w')
         for c, t, w, grow in self.COLS:
@@ -10534,6 +10571,11 @@ class OungTab:
                           'ใส่ Aztek Id ครั้งเดียว ไอเทมตัวเดียวกันทุกที่ได้ตามไปหมด',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w', justify='left',
                  wraplength=1000).pack(fill='x', pady=(6, 0))
+        # รายละเอียดเต็มของแถวที่เลือก (ที่มาในชีท / ทำไมถึงแยกแบบนี้) — ไม่ยัดลงหมายเหตุให้รก
+        self.lbl_info = tk.Label(s2, text='', bg=C['bg'], fg=C['fg'], font=('Segoe UI', 9),
+                                 anchor='w', justify='left', wraplength=1000)
+        self.lbl_info.pack(fill='x', pady=(4, 0))
+        self.tree.bind('<<TreeviewSelect>>', lambda e: self._info(), add='+')
         self.lbl_sum = tk.Label(s2, text='', bg=C['bg'], fg=C['fg'], font=FB, anchor='w',
                                 justify='left', wraplength=1000)
         self.lbl_sum.pack(fill='x', pady=(4, 0))
@@ -10593,8 +10635,9 @@ class OungTab:
                 os.replace(self._path(), self._path() + '.bad')
             except Exception:
                 pass
+            why = str(ex)[:60]
             self.app.root.after(0, lambda: self.app.log(
-                'ไฟล์ข้อมูลแท็บ Oung Machine อ่านไม่ได้ (%s) — เริ่มใหม่' % str(ex)[:60], 'WARN'))
+                'ไฟล์ข้อมูลแท็บ Oung Machine อ่านไม่ได้ (%s) — เริ่มใหม่' % why, 'WARN'))
 
     # ---------- เปิดไฟล์ ----------
     def open_file(self):
@@ -10659,6 +10702,13 @@ class OungTab:
             a.log('   ⚠ Aztek Id ไม่ตรงกัน ' + c, 'WARN')
         log_event('oung_read', file=os.path.basename(path), topics=n['topics'],
                   bundles=n['bundles'], create=n['create'])
+        # แถบย่อย “สร้าง Product” อ่านไฟล์เดียวกันให้เลย (พังก็ไม่กระทบแถบนี้)
+        pt = getattr(self, 'product', None)
+        if pt is not None and type(self) is OungTab and not pt.running:
+            try:
+                pt.load_path(path, quiet=True)
+            except Exception as ex:
+                a.log('   ! แถบสร้าง Product อ่านไฟล์นี้ไม่ได้: %s' % ex, 'WARN')
 
     def clear(self):
         if not self.st['topics'] and not self.st['ids']:
@@ -10671,24 +10721,103 @@ class OungTab:
         self.refresh(keep=False)
 
     # ---------- วาดตาราง ----------
-    def _note(self, x):
-        parts = []
+    # ---- หมายเหตุ = เฉพาะเรื่องที่ต้องรู้ / ต้องแก้ (ไม่มี Id · หาไม่เจอ · ผิดปกติ) ปกติดี = ว่าง ----
+    def _inote(self, x, live=True, rnd=False):
+        """หมายเหตุของไอเทม 1 ตัว"""
+        p = []
         it = x['src']
-        if it.get('note'):
-            parts.append(it['note'])
+        if live and not x['id']:
+            multi = self.st['multi'].get(x['key'])
+            if multi:
+                p.append('ค้นเจอหลายตัว: %s — เลือกใส่เอง' % ', '.join(multi[:5]))
+            elif (self.st.get('notfound') or {}).get(x['key']):
+                p.append('ค้นหาไม่เจอบนเว็บ')
+            else:
+                p.append('ไม่มี Aztek Id')
+        if live and rnd and not x['rate']:
+            p.append('ไม่มีเรทสุ่ม')
         if not it.get('move_ok', True):
-            parts.append('Itemmove “%s” ไม่รู้จัก' % it.get('move'))
-        multi = self.st['multi'].get(x['key'])
-        if multi and not x['id']:
-            parts.append('ค้นเจอหลายตัว: %s — เลือกใส่เอง' % ', '.join(multi[:5]))
-        if x.get('rate_note'):
-            parts.append(x['rate_note'])
-        if x.get('rate') == '0':
-            parts.append('เรท 0 = ไม่มีโอกาสออก')
-        if it.get('limit'):
-            parts.append('จำกัด/ไอดี %s' % it['limit'])
-        parts.append(it['ref'])
-        return '  ·  '.join(parts)
+            p.append('Itemmove “%s” ไม่รู้จัก' % it.get('move'))
+        if it.get('note'):
+            p.append(it['note'].split(' (')[0])
+        if rnd and x.get('rate_note') and x['rate']:
+            p.append(x['rate_note'].split(' (')[0])
+        if rnd and x.get('rate') == '0':
+            p.append('เรท 0 (ไม่มีโอกาสออก)')
+        return p
+
+    @staticmethod
+    def _bnote(b, with_items=True):
+        """หมายเหตุของบันเดิล"""
+        p = []
+        if b['made']:
+            p.append('สร้างแล้ว · Bundle %s' % (b['made'].get('id') or '?'))
+        elif b['dup_of']:
+            p.append('ของเหมือน “%s” → ใช้บันเดิลเดียวกัน' % b['dup_of']['name'][:30])
+        elif b['use'] and with_items:
+            if b['miss']:
+                p.append('ไม่มี Aztek Id %d ตัว' % b['miss'])
+            if b.get('badr'):
+                p.append('ไม่มีเรทสุ่ม %d ตัว' % b['badr'])
+        if b['use'] and not b['made'] and b['badq']:
+            p.append('จำนวนไม่ถูก')
+        if b['hint']:
+            p.append('ในชีทมีเลข Bundle %s แล้ว' % ', '.join(b['hint'][:2]))
+        return p
+
+    @staticmethod
+    def _tnote(t, mode):
+        """หมายเหตุของหัวข้อ — เฉพาะตอนผิดปกติ"""
+        if mode == 'skip':
+            return ''
+        if t['kind'] == 'unknown':
+            return t['why']
+        if t['kind'] == 'random' and t['items'] and \
+                all(i.get('rate') and float(i['rate']) == 0 for i in t['items']):
+            return 'เรทเป็น 0 ทุกตัว — ไม่ได้ติ๊กไว้'
+        bad = sum(1 for i in t['items'] if not i.get('move_ok', True))
+        return ('Itemmove แปลก %d แถว' % bad) if bad else ''
+
+    def _info(self):
+        """แถวที่เลือก -> รายละเอียดเต็มใต้ตาราง (ที่มาในชีท / เหตุผลที่แยกแบบนี้)"""
+        s = self.tree.selection()
+        m = self._map.get(s[0]) if s else None
+        txt = ''
+        if m and m[0] == 't':
+            t = next((t for t in self.st['topics'] if t['tid'] == m[1]), None)
+            if t:
+                txt = '📍 %s  ·  %s%s  ·  %d แถว' % (t['tid'], (t['zone'] + '  ·  ') if t['zone'] else '',
+                                                    t['why'], len(t['items']))
+        elif m and m[0] in ('b', 'i', 's'):
+            if m[0] == 's':
+                t = next((t for t in self.st['topics'] if t['tid'] == m[1]), None)
+                it, b = (t['items'][m[2]] if t else None), None
+            else:
+                b = self._bs.get(m[1])
+                one = b and (b['items'][m[2]] if m[0] == 'i' else
+                             (b['items'][0] if len(b['items']) == 1 else None))
+                it = one['src'] if one else None
+            parts = []
+            if it:
+                parts.append('📍 %s' % it['ref'])
+                parts.append('fdItemNum %s · %s' % (it['kind'], it['name']))
+                if it.get('move'):
+                    parts.append('Itemmove %s' % it['move'])
+                if it.get('dur_raw'):
+                    parts.append('ระยะเวลา %s' % it['dur_raw'])
+                if it.get('rank'):
+                    parts.append('Rank %s' % it['rank'])
+                if it.get('rate') or it.get('rate_note'):
+                    parts.append('Real Chance %s%s' % (it.get('rate', ''), ('  (%s)' % it['rate_note'])
+                                                       if it.get('rate_note') else ''))
+                if it.get('limit'):
+                    parts.append('จำกัด/ไอดี %s' % it['limit'])
+            elif b:
+                parts.append('📍 %s' % b['tid'])
+            if b:
+                parts.append('%s · %s' % (b['type'], b['status']))
+            txt = '  ·  '.join(parts)
+        self.lbl_info.config(text=txt)
 
     @staticmethod
     def _short(b):
@@ -10741,7 +10870,7 @@ class OungTab:
                 stt = 'ข้าม'
             else:
                 stt = 'เลือก %d/%d' % (n_use, len(nb))
-            note = '%s  ·  %s%s' % (t['why'], ('%s  ·  ' % t['zone']) if t['zone'] else '', tid)
+            note = self._tnote(t, mode)
             tr.insert('', 'end', iid=tiid, text='🗂  ' + t['title'],
                       values=('—' if mode == 'skip' else ('✔' if n_use else '✗'), stt,
                               '%s · %s' % (OU_KINDS.get(t['kind'], t['kind']), OU_SHORT[mode]),
@@ -10754,7 +10883,7 @@ class OungTab:
                     iid = 'S|%s|%d' % (tid, j)
                     tr.insert(tiid, 'end', iid=iid, text='      ' + (it['name'] or '-'),
                               values=('', '', it['kind'], it['move'], '', it['qty'], it['rank'],
-                                      it.get('rate', ''), it['ref']), tags=('off',))
+                                      it.get('rate', ''), ''), tags=('off',))
                     self._map[iid] = ('s', tid, j)
                 continue
             for b in nb:
@@ -10780,11 +10909,11 @@ class OungTab:
                     vals = ('✔' if b['use'] else '✗', short, one['kind'], one['src']['move'],
                             one['id'] or ('—' if not b['use'] or b['dup_of'] else '⚠ ใส่ Id'),
                             one['qty'], one['tier'], rate_of(one),
-                            b['status'] + '  ·  ' + self._note(one))
+                            '  ·  '.join(self._bnote(b, with_items=False) + self._inote(one, live, rnd)))
                 else:
                     vals = ('✔' if b['use'] else '✗', short,
                             ('🎲 RANDOM · %d ไอเทม' if rnd else '%d ไอเทม') % len(b['items']), '', '',
-                            '', '', ('Σ ' + b['rsum']) if rnd else '', b['status'])
+                            '', '', ('Σ ' + b['rsum']) if rnd else '', '  ·  '.join(self._bnote(b)))
                 tr.insert(tiid, 'end', iid=biid, text='📦  ' + b['name'], values=vals,
                           open=opened.get(biid, len(b['items']) <= 12), tags=(tag,))
                 self._map[biid] = ('b', b['bkey'])
@@ -10798,7 +10927,8 @@ class OungTab:
                               values=('', ('⚠ ใส่ Id' if not x['id'] else '⚠ ใส่เรท') if lack else '',
                                       x['kind'], x['src']['move'],
                                       x['id'] or ('—' if not live else '⚠ ใส่ Id'),
-                                      x['qty'], x['tier'], rate_of(x), self._note(x)), tags=(itag,))
+                                      x['qty'], x['tier'], rate_of(x),
+                                      '  ·  '.join(self._inote(x, live, rnd))), tags=(itag,))
                     self._map[iid] = ('i', b['bkey'], j)
         if sel and tr.exists(sel):
             tr.selection_set(sel)
@@ -11128,7 +11258,8 @@ class OungTab:
         self.refresh()
         self.app.log('Oung: เติม Aztek Id จากผลค้นหาแล้ว %d ตัว · เจอหลายตัว (เลือกเอง) %d · ไม่เจอ %d'
                      % (f, m, n), 'OK' if f and not (m or n) else 'WARN')
-        self.app.nb.select(self.tab)
+        self.app.nb.select(self.outer)          # กลับมาแท็บ Oung › แถบย่อยสร้าง Bundle
+        self.show_sub(self.tab)
 
     def copy_summary(self):
         if not self.st['topics']:
@@ -11293,6 +11424,1681 @@ class OungTab:
         a.set_progress(len(rows), len(rows), 'เสร็จ')
         a.log('Oung: จบ — สำเร็จ %d · ไม่ผ่าน %d' % (okc, errc), 'OK' if not errc else 'WARN')
         log_event('oung_done', ok=okc, fail=errc, commit=bool(do))
+        return okc, errc
+
+
+# ============================================================================
+#  [10] แถบย่อย "🛒 สร้าง Product" ในแท็บ Oung Machine — ของใหม่ทั้งก้อน ไม่แตะของเดิม
+#
+#      อ่านแท็บ bundle+id ของชีท Oung (อ่านจากป้ายข้อความทั้งหมด ไม่ยึดตำแหน่ง):
+#         แถวหัวตาราง = แถวที่มีป้าย "bundle" กับ "product id"
+#         โน้ตที่ทีมเขียนไว้ข้างตาราง:   ขึ้น PROD ใน <หมวดหมู่>
+#                                        ใช้เคอเรนซี่ "<ชื่อสกุลเงิน>" ละใส่จำนวนตามหัวข้อ <คอลัมน์ราคา>
+#                                        (อย่าลืมใส่ลิมิต **เรียงลำดับ...**)
+#         แถวสินค้า = แถวใต้หัวตารางที่มีเลข bundle  (แถวหัวข้อไม่มีเลข bundle = ไม่เอา)
+#      สกุลเงินบนเว็บ = tr-oung<เลข>-xxxx - <ชื่อสกุลเงิน>  (<เลข> เอาจาก "Oung Machine 2" ในหมวดหมู่)
+#      เวลาขาย: เริ่ม = วันนี้ 00:00:00 (ไว้เทส) · หยุด = End ในชีท วิธีการเล่น+ราคา (00:00:00 -> 23:59:59)
+#      จำกัดการซื้อ: limit เป็นเลข = PLAYER + จำนวน · "ไม่จำกัด" = ไม่จำกัด
+#      กรอกหน้าเว็บด้วยตัวช่วยเดิมของ WR Master (เรียกใช้อย่างเดียว) — ทุกช่องอ่านกลับก่อนกดสร้าง
+#      โหมดทดสอบ = กรอกครบแล้วไม่กดสร้าง · ติ๊ก “กดปุ่ม สร้าง Product จริง” ถึงจะสร้าง
+# ============================================================================
+PD_STATE = 'oung_product.json'
+PD_CREATE_URL = BASE + '/hof/talesrunner/shop/products/create'
+PD_FREE = 'ไม่จำกัด'
+PD_PLAYER = 'PLAYER'
+SEL_PD = {
+    'cat':        'หมวดหมู่',
+    'name_th':    'ชื่อสินค้า (ไทย)',
+    'name_en':    'ชื่อสินค้า (อังกฤษ)',
+    'cur_add':    'เพิ่มสกุลเงิน',
+    'cur':        'สกุลเงิน',
+    'price_full': 'ราคาเต็ม',
+    'price_sale': 'ราคาที่ขายจริง',
+    'order':      'ลำดับการแสดง',
+    'start':      'เวลาเริ่มขาย',
+    'end':        'เวลาหยุดขาย',
+    'limit_type': 'รูปแบบการจำกัดการซื้อ',
+    'limit_qty':  'จำนวนที่จำกัดการซื้อ',
+    'submit':     'สร้าง Product',
+}
+# โน้ตคำสั่งงานในชีท (ไม่ใช่ป้ายหัวคอลัมน์) — ต้องมีคำพวกนี้
+_PD_NOTE_RE = re.compile(r'ขึ้น\s*prod|เคอเรนซ|ลิมิต|เรียงลำดับ|ตามหัวข้อ', re.I)
+_PD_Q = '"“”\'‘’«»'
+_PD_PRICE_WORDS = ('mileage', 'coral', 'price', 'ราคา', 'coin')
+
+
+def pd_dt_str(v):
+    """เซลล์วันที่ -> 'YYYY-MM-DD HH:MM:SS' · อ่านไม่ออก -> ''"""
+    if v is None or v == '':
+        return ''
+    if hasattr(v, 'strftime'):
+        try:
+            return v.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            return ''
+    dt = wr_parse_dt(clean_text(v))
+    return '%04d-%02d-%02d %02d:%02d:%02d' % dt if dt else ''
+
+
+def pd_end_fix(s):
+    """เวลาหยุดขาย: ชีทเขียนแค่วันที่ (00:00:00) = ขายถึงสิ้นวันนั้น -> 23:59:59"""
+    dt = wr_parse_dt(s)
+    if not dt:
+        return ''
+    y, m, d, h, mi, se = dt
+    if (h, mi, se) == (0, 0, 0):
+        h, mi, se = 23, 59, 59
+    return '%04d-%02d-%02d %02d:%02d:%02d' % (y, m, d, h, mi, se)
+
+
+def pd_today():
+    return datetime.now().strftime('%Y-%m-%d') + ' 00:00:00'
+
+
+def pd_dt_ok(s):
+    """ค่าที่คนพิมพ์ -> 'YYYY-MM-DD HH:MM:SS' (ต้องมีทั้งวันที่และเวลา) · ไม่ถูก -> ''"""
+    if not re.fullmatch(r'\s*\d{4}-\d{1,2}-\d{1,2}[ T]\d{1,2}:\d{2}(:\d{2})?\s*', str(s or '')):
+        return ''
+    dt = wr_parse_dt(s)
+    if not dt:
+        return ''
+    try:
+        datetime(*dt)
+    except Exception:
+        return ''
+    return '%04d-%02d-%02d %02d:%02d:%02d' % dt
+
+
+def pd_dates(wb):
+    """เวลาเริ่ม/หยุดขายจากชีท — หาป้าย Start / End แล้วเอาวันที่ที่อยู่ทางขวา
+    ดูชีท “วิธีการเล่น…” ก่อน ไม่เจอค่อยไล่ชีทอื่น"""
+    names = sorted(wb.sheetnames, key=lambda s: 0 if 'วิธีการเล่น' in str(s) else 1)
+    for s in names:
+        try:
+            rows = ou_read_rows(wb, s)[:80]
+        except Exception:
+            continue
+        got = {}
+        for row in rows:
+            row = row or []
+            for c, v in enumerate(row):
+                k = _hkey(v)
+                if k not in ('start', 'end') or k in got:
+                    continue
+                for v2 in row[c + 1:c + 4]:
+                    d = pd_dt_str(v2)
+                    if d:
+                        got[k] = d
+                        break
+        if got.get('start') or got.get('end'):
+            return got.get('start', ''), got.get('end', ''), s
+    return '', '', ''
+
+
+def pd_limit(v):
+    """ค่าในคอลัมน์ limit -> ('ไม่จำกัด' | 'เลข' | '' | ข้อความแปลกๆ ตามเดิม)"""
+    s = num_str(v).strip() if not isinstance(v, str) else clean_text(v).strip()
+    if not s:
+        return ''
+    if re.fullmatch(r'\d+(?:\.0+)?', s):
+        n = int(float(s))
+        return str(n) if n > 0 else PD_FREE
+    low = s.lower()
+    if 'ไม่จำกัด' in s or low in ('-', 'unlimited', 'free', 'none', 'no limit', 'ไม่'):
+        return PD_FREE
+    return s
+
+
+def pd_price(v):
+    s = num_str(v).strip() if not isinstance(v, str) else clean_text(v).replace(',', '').strip()
+    m = re.fullmatch(r'(\d+)\.0+', s)
+    return m.group(1) if m else s
+
+
+def pd_note_info(texts):
+    """อ่านโน้ตคำสั่งงานข้างตาราง -> หมวดหมู่ / สกุลเงิน / คอลัมน์ราคา / ต้องเรียงลำดับไหม"""
+    info = {'cat': '', 'cur': '', 'price_h': '', 'sort': False, 'need_limit': False}
+    for t in texts:
+        t1 = str(t or '')
+        m = re.search(r'ขึ้น\s*prod\s*(?:ใน|ที่|:)?\s*([^\n]+)', t1, re.I)
+        if m and not info['cat']:
+            info['cat'] = m.group(1).strip().strip(_PD_Q + ' ().,')
+        if re.search(r'เคอเรนซ|สกุลเงิน|currency', t1, re.I) and not info['cur']:
+            m = re.search(r'[%s]\s*([^%s]+?)\s*[%s]' % (_PD_Q, _PD_Q, _PD_Q), t1)
+            if m:
+                info['cur'] = m.group(1).strip()
+        m = re.search(r'ตามหัวข้อ\s*[%s]?\s*([^\s%s()]+)' % (_PD_Q, _PD_Q), t1)
+        if m and not info['price_h']:
+            info['price_h'] = m.group(1).strip()
+        if 'เรียงลำดับ' in t1:
+            info['sort'] = True
+        if 'ลิมิต' in t1 or 'limit' in t1.lower():
+            info['need_limit'] = True
+    return info
+
+
+def pd_tables(rows, sheet):
+    """หาตารางสินค้าทุกตารางในชีท (แถวหัวที่มีป้าย bundle + product id)"""
+    sheet = clean_text(sheet) or str(sheet)
+    cell = lambda r, c: _ou_cell(rows, r, c)
+    heads = []
+    for r, row in enumerate(rows):
+        ks = [_hkey(v) for v in (row or [])]
+        if 'bundle' in ks and 'productid' in ks:
+            heads.append(r)
+    out, seen = [], {}
+    for i, r in enumerate(heads):
+        row = rows[r] or []
+        cols, notes = {}, []
+        for c, v in enumerate(row):
+            t = clean_text(v)
+            if not t:
+                continue
+            if _PD_NOTE_RE.search(t):
+                notes.append(t)
+                continue
+            cols.setdefault(_hkey(t), (c, t))
+        cb, cp = cols['bundle'][0], cols['productid'][0]
+        left = sorted(c for c, _ in cols.values() if c < cb)
+        name_c = left[0] if left else 0
+        title = clean_text(row[name_c]) if left else ''
+        hcols = {c for c, _ in cols.values()}
+        stop = heads[i + 1] if i + 1 < len(heads) else len(rows)
+        body = []
+        for x in range(r + 1, stop):
+            rw = rows[x] or []
+            if not any(clean_text(v) for v in rw):
+                break
+            body.append(x)
+            for c, v in enumerate(rw):
+                t = clean_text(v)
+                if t and c not in hcols and _PD_NOTE_RE.search(t):
+                    notes.append(t)
+        info = pd_note_info(notes)
+        price = None
+        if info['price_h']:
+            price = cols.get(_hkey(info['price_h']))
+        if price is None:
+            cand = [v for k, v in cols.items() if k in _PD_PRICE_WORDS]
+            if len(cand) == 1:
+                price = cand[0]
+        limit = cols.get('limit')
+        title = title or 'ตารางแถว %d' % (r + 1)
+        sk = '%s|%s' % (sheet, ou_norm(title))
+        seen[sk] = seen.get(sk, 0) + 1
+        if seen[sk] > 1:
+            sk += '#%d' % seen[sk]
+        sec = {'skey': sk, 'sheet': sheet, 'row': r + 1, 'title': title,
+               'ref': '%s!%s%d' % (sheet, col_letter(name_c), r + 1),
+               'cat': info['cat'], 'cur': info['cur'], 'sort': info['sort'],
+               'need_limit': info['need_limit'], 'notes': notes,
+               'price_h': price[1] if price else '', 'has_price': price is not None,
+               'limit_h': limit[1] if limit else '', 'rows': len(body), 'items': []}
+        ikeys = {}
+        n = 0
+        for x in body:
+            raw = clean_text(cell(x, name_c))
+            bid = src_int(cell(x, cb))
+            if not raw and not bid:
+                continue                           # แถวโน้ตล้วน
+            lines = [ln.strip() for ln in raw.split('\n') if ln.strip()]
+            uniq = list(dict.fromkeys(lines))
+            flag = ''
+            if len(lines) > 1 and len(uniq) == 1:
+                flag = 'ชื่อในชีทเขียนซ้ำ %d บรรทัด — ใช้บรรทัดเดียว ตรวจชื่ออีกที' % len(lines)
+            elif len(uniq) > 1:
+                flag = 'ชื่อในชีทมี %d บรรทัด — รวมเป็นบรรทัดเดียวแล้ว ตรวจชื่ออีกที' % len(uniq)
+            name = ' / '.join(uniq)
+            move = ''
+            for c in range(name_c + 1, cb):
+                mv = clean_text(cell(x, c))
+                if mv and mv.lower() in ('gift', 'storage'):
+                    move = mv
+            pr = pd_price(cell(x, price[0])) if price else ''
+            lim = pd_limit(cell(x, limit[0])) if limit else ''
+            n += 1
+            k = '%s|%s|%s|%s' % (sk, ou_norm(raw), bid or '', pr)
+            ikeys[k] = ikeys.get(k, 0) + 1
+            if ikeys[k] > 1:
+                k += '#%d' % ikeys[k]
+            sec['items'].append({
+                'key': k, 'row': x + 1, 'ref': '%s!%s%d' % (sheet, col_letter(name_c), x + 1),
+                'raw': raw, 'name': name, 'flag': flag, 'move': move, 'bundle': bid or '',
+                'pid': clean_text(cell(x, cp)) if cp is not None else '',
+                'price': pr, 'limit': lim, 'order': str(n) if info['sort'] else ''})
+        out.append(sec)
+    return out
+
+
+def pd_parse_workbook(wb):
+    """อ่านทั้งไฟล์ -> (ตารางสินค้า, (เริ่ม, หยุด, ชีทที่เจอ))"""
+    secs = []
+    for s in wb.sheetnames:
+        try:
+            secs.extend(pd_tables(ou_read_rows(wb, s), s))
+        except Exception:
+            continue
+    return secs, pd_dates(wb)
+
+
+def pd_new_state(path='', sections=None, dates=('', '', '')):
+    return {'file': path, 'read_at': datetime.now().isoformat(timespec='seconds') if path else '',
+            'sections': sections or [], 'sheet_start': dates[0], 'sheet_end': dates[1],
+            'date_sheet': dates[2] if len(dates) > 2 else '',
+            'start_mode': 'today', 'start': '', 'end_mode': 'sheet', 'end': '',
+            'use': {}, 'edit': {}, 'sedit': {}, 'made': {}, 'last': {}}
+
+
+def pd_merge(old, new):
+    """อ่านไฟล์เดิมซ้ำ = เก็บทุกอย่างที่คนแก้/ที่สร้างไปแล้วไว้"""
+    for k in ('use', 'edit', 'sedit', 'made', 'last'):
+        new[k] = dict(old.get(k) or {})
+    for k in ('start_mode', 'start', 'end_mode', 'end'):
+        if old.get(k) not in (None, ''):
+            new[k] = old[k]
+
+
+def pd_cur_prefix(cat):
+    """หมวดหมู่ “Oung Machine 2 …” -> สกุลเงินต้องขึ้นต้นด้วย tr-oung2-"""
+    m = re.search(r'oung\s*machine\s*(\d*)', str(cat or ''), re.I)
+    return ('tr-oung%s-' % m.group(1)) if m else ''
+
+
+def pd_norm(s):
+    return re.sub(r'\s+', ' ', re.sub('[✓✔]', ' ', str(s or ''))).strip().lower()
+
+
+def pd_cur_ok(text, pre, name):
+    """ข้อความในช่องสกุลเงิน = <prefix>xxxx - <ชื่อ> ไหม"""
+    t = pd_norm(text)
+    j = t.find(' - ')
+    return j > 0 and t[:j].startswith(pd_norm(pre)) and t[j + 3:] == pd_norm(name)
+
+
+def pd_check(x):
+    """ปัญหาของสินค้า 1 ตัว (ว่าง = พร้อม)"""
+    p = []
+    if not str(x.get('name') or '').strip():
+        p.append('ไม่มีชื่อสินค้า')
+    if not re.fullmatch(r'\d+', str(x.get('bundle') or '')):
+        p.append('ไม่มีเลข Bundle')
+    pr = str(x.get('price') or '')
+    if not pr:
+        p.append('ไม่มีราคา')
+    elif not re.fullmatch(r'\d+(\.\d+)?', pr) or float(pr) <= 0:
+        p.append('ราคา “%s” ไม่ใช่ตัวเลข' % pr)
+    lim = str(x.get('limit') or '')
+    if not lim:
+        p.append('ไม่มี limit')
+    elif lim != PD_FREE and not re.fullmatch(r'[1-9]\d*', lim):
+        p.append('limit “%s” อ่านไม่ออก' % lim)
+    od = str(x.get('order') or '')
+    if od and not re.fullmatch(r'\d+', od):
+        p.append('ลำดับการแสดงต้องเป็นตัวเลข')
+    return p
+
+
+def pd_view(st):
+    """ชีท + ที่คนแก้ -> ตารางที่จะโชว์/จะสร้าง (หัวข้อ › สินค้า)"""
+    out = []
+    for s in st.get('sections') or []:
+        se = (st.get('sedit') or {}).get(s['skey'], {})
+        v = dict(s)
+        v['cat'] = se.get('cat', s['cat'])
+        v['cur'] = se.get('cur', s['cur'])
+        v['pre'] = pd_cur_prefix(v['cat'])
+        if not s['has_price']:
+            why = 'ชีทไม่ได้บอกว่าราคาอยู่คอลัมน์ไหน — ทำเองบนเว็บ'
+        elif not v['cat']:
+            why = 'ไม่รู้หมวดหมู่ (ชีทไม่มีโน้ต “ขึ้น PROD ใน …”) — ดับเบิลคลิกชื่อหัวข้อเพื่อใส่'
+        elif not v['cur']:
+            why = 'ไม่รู้สกุลเงิน (ชีทไม่มีโน้ต “ใช้เคอเรนซี่ \"…\"”) — ดับเบิลคลิกช่องราคาของหัวข้อเพื่อใส่'
+        else:
+            why = ''
+        v['why'] = why
+        items = []
+        for it in s['items']:
+            x = dict(it)
+            x.update((st.get('edit') or {}).get(it['key'], {}))
+            x['skey'], x['cat'], x['cur'], x['pre'] = s['skey'], v['cat'], v['cur'], v['pre']
+            x['made'] = (st.get('made') or {}).get(it['key'])
+            x['last'] = (st.get('last') or {}).get(it['key'])
+            x['problems'] = pd_check(x)
+            x['ready'] = bool(s['has_price'] and not why and not x['problems'])
+            default = x['ready'] and not x['made'] and not it['pid']
+            x['use'] = bool((st.get('use') or {}).get(it['key'], default))
+            items.append(x)
+        v['items'] = items
+        out.append(v)
+    return out
+
+
+def pd_summary(view):
+    n = {'sections': len(view), 'manual': 0, 'items': 0, 'use': 0, 'ready': 0, 'made': 0, 'unsure': 0,
+         'sheet_pid': 0}
+    for s in view:
+        if not s['has_price']:
+            n['manual'] += 1
+            continue
+        for x in s['items']:
+            n['items'] += 1
+            if x['made']:
+                n['made'] += 1
+                if x['made'].get('unsure'):
+                    n['unsure'] += 1
+                continue
+            if x['pid']:
+                n['sheet_pid'] += 1
+            if x['use']:
+                n['use'] += 1
+                if x['ready']:
+                    n['ready'] += 1
+    return n
+
+
+def pd_dig_id(obj):
+    """เลข/รหัส Product จากคำตอบของเว็บ — ไม่เอา id ของ bundle / สกุลเงิน / หมวดหมู่ที่ซ้อนอยู่ข้างใน"""
+    good = lambda v: isinstance(v, (int, str)) and not isinstance(v, bool) and \
+        re.fullmatch(r'\d+|[0-9a-fA-F][0-9a-fA-F-]{15,}', str(v).strip() or 'x')
+    skip = ('bundle', 'currenc', 'categor', 'tag', 'image', 'thumb', 'banner', 'user', 'game',
+            'wallet', 'item')
+    todo, level = [obj], 0
+    while todo and level < 6:                 # ดูชั้นบนก่อน (กว้างก่อนลึก)
+        nxt = []
+        for o in todo:
+            if isinstance(o, dict):
+                for k in ('productId', 'product_id', 'id', 'uuid'):
+                    if good(o.get(k)):
+                        return str(o[k]).strip()
+                for k, v in o.items():
+                    if isinstance(v, (dict, list)) and not any(w in str(k).lower() for w in skip):
+                        nxt.append(v)
+            elif isinstance(o, list) and len(o) == 1:
+                nxt.append(o[0])
+        todo, level = nxt, level + 1
+    return ''
+
+
+def pd_id_from_url(url):
+    m = re.search(r'/products/([0-9a-fA-F][0-9a-fA-F-]{15,}|\d+)(?:[/?#]|$)', str(url or ''))
+    return m.group(1) if m else ''
+
+
+# ---- JS ของหน้าสร้าง Product (ใช้ตัวช่วยหาจากป้ายชุดเดียวกับ WR Master) ----
+JS_PD = r"""
+([act, a, b]) => {
+""" + _JS_CODE_LIB + r"""
+  const txt = e => (e.textContent || '').replace(/\s+/g, ' ').trim();
+  const norm = s => String(s || '').replace(/[✓✔]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  const POPQ = '[role=dialog],[role=listbox],[data-radix-popper-content-wrapper],[cmdk-root]';
+  if (act === 'trig') {                      // ปุ่มดรอปดาวน์ใต้ป้าย a
+    const s = findBy(a, 'left', pickSel);
+    if (!s) return 'ไม่เจอช่อง';
+    mark(s, 'data-trw-pd');
+    return 'ok|' + selText(s);
+  }
+  if (act === 'opts') {                      // รายการที่เด้งอยู่ -> หาตัวที่ต้องการ (ห้ามเดา)
+    const opts = [...document.querySelectorAll('[role=option],[cmdk-item]')].filter(vis);
+    if (!opts.length) return 'none';
+    let hits;
+    if (a === 'exact') {
+      hits = opts.filter(o => norm(txt(o)) === norm(b));
+    } else {                                 // 'cur' : b = "prefix|ชื่อสกุลเงิน"
+      const i = String(b).indexOf('|');
+      const pre = norm(String(b).slice(0, i)), nm = norm(String(b).slice(i + 1));
+      hits = opts.filter(o => {
+        const t = norm(txt(o)), j = t.indexOf(' - ');
+        return j > 0 && t.slice(0, j).indexOf(pre) === 0 && t.slice(j + 3) === nm;
+      });
+    }
+    hits = hits.filter(h => !hits.some(o => o !== h && h.contains(o)));
+    if (!hits.length) return 'nomatch|' + opts.slice(0, 30).map(txt).join(' ¦ ');
+    if (hits.length > 1) return 'many|' + hits.map(txt).join(' ¦ ');
+    mark(hits[0], 'data-trw-pdo');
+    return 'ok|' + txt(hits[0]);
+  }
+  if (act === 'search') {                    // ช่องค้นหาในรายการที่เด้งอยู่
+    const ins = [...document.querySelectorAll('input')].filter(vis).filter(i =>
+        i.hasAttribute('cmdk-input') || /ค้นหา|search/i.test(i.getAttribute('placeholder') || ''));
+    const inPop = ins.filter(i => i.closest(POPQ));
+    const box = inPop[inPop.length - 1] ||
+        (ins.indexOf(document.activeElement) >= 0 ? document.activeElement : null);
+    if (!box) return 'none';
+    mark(box, 'data-trw-pds');
+    return 'ok';
+  }
+  if (act === 'curblocks') {                 // มีกล่อง "สกุลเงินที่ N" กี่กล่อง
+    let n = 0;
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+    let node;
+    while ((node = w.nextNode()))
+      if (/^สกุลเงินที่\s*\d+/.test((node.textContent || '').trim()) && vis(node.parentElement)) n++;
+    return String(n);
+  }
+  if (act === 'button') {                    // ปุ่มตามข้อความ (ไม่สนเครื่องหมาย + ข้างหน้า)
+    const want = norm(a);
+    const bs = [...document.querySelectorAll('button,[role=button]')].filter(vis)
+        .filter(x => norm(txt(x).replace(/^[+＋]\s*/, '')) === want);
+    if (!bs.length) return 'none';
+    mark(bs[bs.length - 1], 'data-trw-pdb');
+    return 'ok';
+  }
+  if (act === 'bundles') {                   // Bundle ที่เลือกไว้แล้ว ("#เลข" นอกป๊อปอัป)
+    const strict = [], loose = [];
+    for (const el of [...document.querySelectorAll('body *')].filter(vis)) {
+      if (el.closest(POPQ) || el.closest('[data-trw-skip]')) continue;
+      if ([...el.children].some(c => /#\s*\d+/.test(txt(c)))) continue;
+      const t = txt(el);
+      let m = t.match(/^#\s*(\d+)$/);
+      if (m) { strict.push(m[1]); continue; }
+      m = t.match(/(?:^|\s)#\s*(\d+)$/);
+      if (m && t.length < 160) loose.push(m[1]);
+    }
+    return 'ok|' + (strict.length ? strict : loose).join(',');
+  }
+  return 'ไม่รู้จักคำสั่ง';
+}"""
+
+
+# ---- ป๊อปอัปเลือก Bundle ของหน้า Product (หน้าตาเดียวกับหน้า Item Code) ----
+#   ทำแยกจากของ WR Master: ชื่อ bundle ของกิจนี้มีคำว่า "ตั๋วเปลี่ยน" เยอะ
+#   ตัวเดิมกันปุ่ม "เปลี่ยน" ด้วยการหาคำนี้ในแถว -> แถวพวกนี้ถูกข้ามหมด  ตัวนี้เทียบปุ่มแบบตรงเป๊ะแทน
+JS_PD_BUNDLE = r"""
+([act, val]) => {
+  const vis = el => { if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const txt = e => (e.textContent || '').replace(/\s+/g, ' ').trim();
+  const mark = (el, key) => {
+    document.querySelectorAll('[' + key + ']').forEach(e => e.removeAttribute(key));
+    if (el) { el.setAttribute(key, '1'); el.scrollIntoView({block: 'center'}); }
+    return el; };
+  const isOpenBtn = t => /^(เลือก bundle|เพิ่ม bundle|\+ ?เพิ่ม bundle)$/i.test(t);
+  if (act === 'open') {
+    const hit = [...document.querySelectorAll('button,[role=button],a')].filter(vis)
+        .find(b => isOpenBtn(txt(b)));
+    if (!hit) return 'ไม่เจอปุ่มเลือก bundle';
+    mark(hit, 'data-trw-pdb2');
+    return 'ok';
+  }
+  const searchBox = () => {
+    const ins = [...document.querySelectorAll('input[type=text],input[type=search],input:not([type])')]
+        .filter(vis);
+    return ins.find(i => /ค้นหา|search/i.test(i.getAttribute('placeholder') || '') &&
+                         !i.hasAttribute('cmdk-input')) ||
+           (ins.indexOf(document.activeElement) >= 0 ? document.activeElement : null);
+  };
+  if (act === 'search') {
+    const box = searchBox();
+    if (!box) return 'ไม่เจอช่องค้นหา bundle';
+    mark(box, 'data-trw-pdb2');
+    return 'ok';
+  }
+  if (act === 'loading') {
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+    let n;
+    while ((n = w.nextNode()))
+      if (/กำลังโหลด|loading/i.test(n.textContent || '') && vis(n.parentElement)) return '1';
+    return '0';
+  }
+  if (act === 'pick') {
+    const want = String(val);
+    const re = new RegExp('(^|[^0-9])(ID|Id|id)?\\s*:?\\s*#?' + want + '([^0-9]|$)');
+    const sb = searchBox();
+    const CLICK = 'button,[role=option],[role=menuitem],[cmdk-item],li,a,tr,[data-id],' +
+                  '[tabindex]:not([tabindex="-1"])';
+    const cand = [];
+    for (const el of [...document.querySelectorAll('body *')].filter(vis)) {
+      if (el.children.length && [...el.children].some(ch => re.test(txt(ch)))) continue;
+      const t = txt(el);
+      if (!t || t.length > 200 || !re.test(t)) continue;
+      if (/^#/.test(t)) continue;                        // ตัวที่เลือกไปแล้ว ไม่ใช่แถวในรายการ
+      let row = el.closest(CLICK);
+      if (!row) {
+        let c = el;
+        while (c && c !== document.body && getComputedStyle(c).cursor !== 'pointer') c = c.parentElement;
+        row = (c && c !== document.body) ? c : null;
+        while (row && row.parentElement && getComputedStyle(row.parentElement).cursor === 'pointer'
+               && !row.parentElement.contains(sb)) row = row.parentElement;
+      }
+      if (!row || (sb && row.contains(sb)) || isOpenBtn(txt(row)) || txt(row) === 'เปลี่ยน') continue;
+      cand.push(row);
+    }
+    if (!cand.length) return 'ไม่เจอ bundle เลข ' + want + ' ในรายการ';
+    mark(cand[0], 'data-trw-pdb2');
+    return 'ok|' + txt(cand[0]).slice(0, 90);
+  }
+  return 'ไม่รู้จักคำสั่ง';
+}"""
+
+
+class PdRunner:
+    """กรอกหน้าสร้าง Product 1 ตัว — ใช้ตัวช่วยกรอกเดิมของ WR Master (เรียกใช้อย่างเดียว ไม่แก้ของเดิม):
+       _w_text (พิมพ์+อ่านกลับ) · _w_select (ดรอปดาวน์) · _w_date (ปฏิทิน) · _click_confirm
+    ของใหม่: ดรอปดาวน์แบบมีช่องค้นหา (หมวดหมู่ / สกุลเงิน) · เลือก Bundle (ชื่อมีคำว่า “เปลี่ยน” ได้)
+             + ตรวจรอบสุดท้ายทั้งใบก่อนกดสร้าง"""
+
+    # ตัวช่วยเดิมที่ยืมมาใช้ (เรียกใช้อย่างเดียว ไม่ได้แก้)
+    _w_text = App._w_text
+    _w_read = App._w_read
+    _w_select = App._w_select
+    _w_date = App._w_date
+    _w_date_ok = App._w_date_ok
+    _w_cal = App._w_cal
+    _w_cal_dump = App._w_cal_dump
+    _w_cal_close = App._w_cal_close
+    _w_cal_month = App._w_cal_month
+    _w_cal_time = App._w_cal_time
+    _click_confirm = App._click_confirm
+
+    def __init__(self, app):
+        object.__setattr__(self, '_app', app)
+
+    def __getattr__(self, k):
+        app = object.__getattribute__(self, '_app')
+        fn = getattr(App, k, None)
+        if (k.startswith('_w_') or k == '_click_confirm') and callable(fn) \
+                and not isinstance(fn, type):
+            return types.MethodType(fn, self)
+        return getattr(app, k)
+
+    def log(self, msg, kind='INFO'):
+        object.__getattribute__(self, '_app').log(msg, kind)
+
+    async def _pd(self, page, act, a='', b=''):
+        try:
+            return str(await page.evaluate(JS_PD, [act, a, b]))
+        except Exception as ex:
+            return 'error: %s' % str(ex)[:80]
+
+    async def _pd_combo(self, page, label, mode, want, terms, what):
+        """ดรอปดาวน์ที่มีช่องค้นหา: เปิด -> หาในรายการ (ไม่เจอค่อยพิมพ์ค้น) -> คลิก -> อ่านกลับ
+        mode 'exact' = ชื่อตรงเป๊ะ · 'cur' = want 'prefix|ชื่อ' (เจอเกิน 1 ตัว = ไม่เดา หยุด)"""
+        def good(t):
+            if mode == 'exact':
+                return pd_norm(t) == pd_norm(want)
+            pre, nm = want.split('|', 1)
+            return pd_cur_ok(t, pre, nm)
+        show = want if mode == 'exact' else '%sxxxx - %s' % tuple(want.split('|', 1))
+        r = await self._pd(page, 'trig', label)
+        if not r.startswith('ok|'):
+            self.log('   ! เลือก “%s” ไม่ได้ (ไม่เจอช่อง)' % what, 'WARN')
+            return False
+        if good(r[3:]):
+            self.log('   · %s = %s  (เป็นค่านี้อยู่แล้ว)' % (what, r[3:]), 'INFO')
+            return True
+        why = ''
+        for _ in range(2):
+            await self._pd(page, 'trig', label)
+            try:
+                await page.locator('[data-trw-pd="1"]').first.click(timeout=4000)
+            except Exception:
+                why = 'กดเปิดรายการไม่ได้'
+                continue
+            r = 'none'
+            for _ in range(12):
+                await page.wait_for_timeout(200)
+                r = await self._pd(page, 'opts', mode, want)
+                if r.startswith(('ok', 'many')):
+                    break
+            for term in terms:
+                if r.startswith(('ok', 'many')):
+                    break
+                if (await self._pd(page, 'search')) != 'ok':
+                    break
+                try:
+                    await page.locator('[data-trw-pds="1"]').first.fill(term, timeout=3000)
+                except Exception:
+                    break
+                for _ in range(12):
+                    await page.wait_for_timeout(250)
+                    r = await self._pd(page, 'opts', mode, want)
+                    if r.startswith(('ok', 'many')):
+                        break
+            if r.startswith('many'):
+                self.log('   ! %s: เจอตัวเลือกเข้าเงื่อนไขมากกว่า 1 ตัว (%s) — ไม่เดา ต้องเลือกเองบนเว็บ'
+                         % (what, r.split('|', 1)[1][:160]), 'WARN')
+                await page.keyboard.press('Escape')
+                return False
+            if not r.startswith('ok'):
+                why = ('รายการไม่เด้ง' if r == 'none' else
+                       'ไม่มี “%s” ในรายการ (มี: %s)' % (show, r.split('|', 1)[-1][:160]))
+                await page.keyboard.press('Escape')
+                await page.wait_for_timeout(200)
+                continue
+            try:
+                await page.locator('[data-trw-pdo="1"]').first.click(timeout=4000)
+            except Exception:
+                why = 'คลิกตัวเลือกไม่ได้'
+                await page.keyboard.press('Escape')
+                continue
+            now = ''
+            for _ in range(10):
+                await page.wait_for_timeout(200)
+                r2 = await self._pd(page, 'trig', label)
+                now = r2[3:] if r2.startswith('ok|') else ''
+                if good(now):
+                    self.log('   · %s = %s' % (what, now), 'INFO')
+                    return True
+            why = 'เลือกแล้วแต่ช่องยังเป็น “%s”' % (now or 'ว่าง')
+        self.log('   ! เลือก “%s” ไม่ได้ — %s — ต้องเลือกเองบนเว็บ' % (what, why), 'WARN')
+        return False
+
+    async def _pd_blocks(self, page):
+        r = await self._pd(page, 'curblocks')
+        return int(r) if r.isdigit() else -1
+
+    async def _pd_currency(self, page, pre, name):
+        """สกุลเงินที่ 1: ยังไม่มีกล่อง = กด “+ เพิ่มสกุลเงิน” ก่อน (มีแล้วไม่กดซ้ำ) แล้วเลือกตามกติกา"""
+        n = await self._pd_blocks(page)
+        if n == 0:
+            if (await self._pd(page, 'button', SEL_PD['cur_add'])) != 'ok':
+                self.log('   ! ไม่เจอปุ่ม “+ %s”' % SEL_PD['cur_add'], 'WARN')
+                return False
+            try:
+                await page.locator('[data-trw-pdb="1"]').first.click(timeout=4000)
+            except Exception:
+                self.log('   ! กดปุ่ม “+ %s” ไม่ได้' % SEL_PD['cur_add'], 'WARN')
+                return False
+            for _ in range(15):
+                await page.wait_for_timeout(200)
+                n = await self._pd_blocks(page)
+                if n >= 1:
+                    break
+            if n >= 1:
+                self.log('   · กด “+ %s” แล้ว' % SEL_PD['cur_add'], 'INFO')
+        if n != 1:
+            self.log('   ! กล่องสกุลเงินมี %s กล่อง (ต้องมี 1) — ต้องแก้เองบนเว็บ'
+                     % (n if n >= 0 else 'อ่านไม่ได้'), 'WARN')
+            return False
+        terms = [name] + ([pre.rstrip('-')] if pre else [])
+        return await self._pd_combo(page, SEL_PD['cur'], 'cur', '%s|%s' % (pre, name), terms,
+                                    'สกุลเงิน')
+
+    async def _pd_bundle(self, page, bid):
+        """เลือก Bundle จากเลขในชีท — เปิดป๊อปอัป พิมพ์เลข รอโหลด คลิกแถวที่ ID ตรงเป๊ะ
+        แล้วต้องเห็น “#เลข” ในกล่อง Bundle ตัวเดียว ถึงจะนับว่าเลือกแล้ว"""
+        bid = str(bid or '').strip()
+        if not bid:
+            self.log('   ! ไม่มีเลข Bundle — ต้องเลือกเองบนเว็บ', 'WARN')
+            return False
+        now = await self._pd_bundles(page)
+        if now == [bid]:
+            self.log('   · Bundle = #%s  (เลือกไว้อยู่แล้ว)' % bid, 'INFO')
+            return True
+        if now:
+            self.log('   ! ในหน้ามี Bundle อื่นอยู่แล้ว (%s) — ต้องแก้เองบนเว็บ'
+                     % ', '.join('#' + b for b in now), 'WARN')
+            return False
+
+        async def js(act, val=''):
+            try:
+                return str(await page.evaluate(JS_PD_BUNDLE, [act, val]))
+            except Exception as ex:
+                return 'error: %s' % str(ex)[:60]
+
+        async def wait_chosen(n):
+            for _ in range(n):
+                await page.wait_for_timeout(250)
+                if (await self._pd_bundles(page)) == [bid]:
+                    return True
+            return False
+
+        r = await js('open')
+        if r != 'ok':
+            self.log('   ! ' + r, 'WARN')
+            return False
+        try:
+            await page.locator('[data-trw-pdb2="1"]').first.click(timeout=5000)
+        except Exception:
+            self.log('   ! กดปุ่ม “เลือก bundle” ไม่ได้', 'WARN')
+            return False
+        await page.wait_for_timeout(500)
+        r = await js('search')
+        if r != 'ok':
+            self.log('   ! ' + r, 'WARN')
+            await page.keyboard.press('Escape')
+            return False
+        box = page.locator('[data-trw-pdb2="1"]').first
+        try:
+            await box.fill(bid, timeout=4000)
+        except Exception:
+            try:
+                await box.click(timeout=3000)
+                await box.press_sequentially(bid, delay=20)
+            except Exception:
+                pass
+        r = ''
+        for _ in range(30):                     # รอ "กำลังโหลด..." จนแถวผลลัพธ์โผล่ (~9 วิ)
+            await page.wait_for_timeout(300)
+            r = await js('pick', bid)
+            if r.startswith('ok'):
+                break
+        if not r.startswith('ok'):
+            if (await js('loading')) == '1':
+                r = 'รายการ bundle ยังโหลดไม่เสร็จ (เว็บช้า)'
+            self.log('   ! %s — ต้องเลือกเองบนเว็บ' % (r or 'รายการ bundle ไม่โหลด'), 'WARN')
+            await page.keyboard.press('Escape')
+            return False
+        try:
+            await page.locator('[data-trw-pdb2="1"]').first.click(timeout=4000)
+        except Exception:
+            pass
+        if await wait_chosen(12):
+            self.log('   · Bundle = #%s' % bid, 'INFO')
+            return True
+        now = await self._pd_bundles(page)
+        self.log('   ! คลิกแถว Bundle %s แล้ว แต่กล่อง Bundle บนเว็บเป็น %s — ต้องเลือกเองบนเว็บ'
+                 % (bid, ', '.join('#' + b for b in now) if now else 'ว่าง'), 'WARN')
+        await page.keyboard.press('Escape')
+        return False
+
+    async def _pd_bundles(self, page):
+        r = await self._pd(page, 'bundles')
+        return [x for x in r[3:].split(',') if x] if r.startswith('ok|') else None
+
+    async def _pd_limit_now(self, page):
+        r = str(await page.evaluate(JS_CODE_SELECT, [SEL_PD['limit_type'], 'left', 'read', '']))
+        return r.split('|', 1)[1] if r.startswith('ok|') else None
+
+    async def make(self, page, x, start, end, do, hold):
+        """กรอกสินค้า 1 ตัวให้ครบ อ่านกลับทั้งใบ — ช่องไหนไม่ตรง ไม่กดสร้างเด็ดขาด
+        คืน {'ok', 'created', 'unsure', 'id', 'why'}"""
+        res = {'ok': False, 'created': False, 'unsure': False, 'id': '', 'why': ''}
+        await page.goto(PD_CREATE_URL, wait_until='domcontentloaded', timeout=45000)
+        await page.wait_for_timeout(1500)
+        if any(k in page.url.lower() for k in ('login', 'signin', 'auth')):
+            self.log('   ✗ ยังไม่ได้ล็อกอิน — กด “เปิดหน้า Login” ในแท็บสร้าง Item ก่อน', 'ERR')
+            res['why'] = 'ยังไม่ได้ล็อกอิน'
+            return res
+        for _ in range(30):                       # รอฟอร์มโหลด
+            if (await self._pd(page, 'trig', SEL_PD['cat'])).startswith('ok'):
+                break
+            await page.wait_for_timeout(500)
+        bad, texts = [], []
+
+        async def T(label, val, what):
+            texts.append((label, str(val), what))
+            if not await self._w_text(page, label, 'left', val, what):
+                bad.append(what)
+
+        pre = x['pre']
+        if not await self._pd_combo(page, SEL_PD['cat'], 'exact', x['cat'], [x['cat']], 'หมวดหมู่'):
+            bad.append('หมวดหมู่')
+        await T(SEL_PD['name_th'], x['name'], 'ชื่อสินค้า (ไทย)')
+        await T(SEL_PD['name_en'], x['name'], 'ชื่อสินค้า (อังกฤษ)')
+        if not await self._pd_currency(page, pre, x['cur']):
+            bad.append('สกุลเงิน')
+        else:
+            await T(SEL_PD['price_full'], x['price'], 'ราคาเต็ม')
+            await T(SEL_PD['price_sale'], x['price'], 'ราคาที่ขายจริง')
+        if not await self._pd_bundle(page, x['bundle']):
+            bad.append('Bundle')
+        if str(x.get('order') or '') != '':
+            await T(SEL_PD['order'], x['order'], 'ลำดับการแสดง')
+        for key, when, what in (('start', start, 'เวลาเริ่มขาย'), ('end', end, 'เวลาหยุดขาย')):
+            if not await self._w_date(page, SEL_PD[key], when, what):
+                bad.append(what)
+        free = x['limit'] == PD_FREE
+        if not await self._w_select(page, SEL_PD['limit_type'], 'left', PD_FREE if free else PD_PLAYER,
+                                    'รูปแบบการจำกัดการซื้อ'):
+            bad.append('รูปแบบการจำกัดการซื้อ')
+        elif not free:
+            await page.wait_for_timeout(300)      # ช่องจำนวนโผล่หลังเลือก PLAYER
+            await T(SEL_PD['limit_qty'], x['limit'], 'จำนวนที่จำกัดการซื้อ')
+
+        # ---------- ตรวจรอบสุดท้ายทั้งใบ (กันช่องหนึ่งไปทับอีกช่อง) ----------
+        for lbl, want, what in texts:
+            if what in bad:
+                continue
+            got = await self._w_read(page, lbl, 'left')
+            if not wr_same(got, want):
+                self.log('   ! ตรวจรอบสุดท้าย: %s อยากได้ “%s” แต่ในฟอร์มเป็น “%s”'
+                         % (what, want[:40], (got or '')[:40]), 'WARN')
+                bad.append(what)
+        if 'หมวดหมู่' not in bad:
+            r = await self._pd(page, 'trig', SEL_PD['cat'])
+            if not (r.startswith('ok|') and pd_norm(r[3:]) == pd_norm(x['cat'])):
+                self.log('   ! ตรวจรอบสุดท้าย: หมวดหมู่บนเว็บเป็น “%s”' % r[3:][:60], 'WARN')
+                bad.append('หมวดหมู่')
+        if 'สกุลเงิน' not in bad:
+            r = await self._pd(page, 'trig', SEL_PD['cur'])
+            n = await self._pd_blocks(page)
+            if n != 1 or not (r.startswith('ok|') and pd_cur_ok(r[3:], pre, x['cur'])):
+                self.log('   ! ตรวจรอบสุดท้าย: สกุลเงินบนเว็บเป็น “%s” (%s กล่อง)' % (r[3:][:60], n),
+                         'WARN')
+                bad.append('สกุลเงิน')
+        if 'Bundle' not in bad:
+            bl = await self._pd_bundles(page)
+            if bl != [str(x['bundle'])]:
+                self.log('   ! ตรวจรอบสุดท้าย: Bundle บนเว็บเป็น %s (ต้องมี #%s ตัวเดียว)'
+                         % (', '.join('#' + b for b in bl) if bl else 'ว่าง', x['bundle']), 'WARN')
+                bad.append('Bundle')
+        for key, when, what in (('start', start, 'เวลาเริ่มขาย'), ('end', end, 'เวลาหยุดขาย')):
+            if what in bad:
+                continue
+            ok, shown = await self._w_date_ok(page, SEL_PD[key], when)
+            if not ok:
+                self.log('   ! ตรวจรอบสุดท้าย: %s ช่องบนเว็บขึ้น “%s”' % (what, shown[:40]), 'WARN')
+                bad.append(what)
+        if 'รูปแบบการจำกัดการซื้อ' not in bad:
+            now = await self._pd_limit_now(page)
+            want = PD_FREE if free else PD_PLAYER
+            if not (now or '').lower().startswith(want.lower()):
+                self.log('   ! ตรวจรอบสุดท้าย: รูปแบบการจำกัดการซื้อเป็น “%s”' % (now or ''), 'WARN')
+                bad.append('รูปแบบการจำกัดการซื้อ')
+
+        if bad:
+            miss = ', '.join(dict.fromkeys(bad))
+            res['why'] = 'กรอกไม่ครบ: ' + miss
+            if not do:
+                self.log('   ⚠ กรอกไม่ครบ %d ช่อง: %s  (โหมดทดสอบ — ไม่กดสร้าง)'
+                         % (len(dict.fromkeys(bad)), miss), 'WARN')
+                if hold:
+                    await page.wait_for_timeout(hold * 1000)
+            else:
+                self.log('   ✗ ไม่กดสร้าง เพราะกรอกไม่ครบ: %s — แก้แล้วค่อยสั่งใหม่' % miss, 'ERR')
+            return res
+
+        if not do:
+            self.log('   ✓ กรอกครบ ตรวจแล้วทุกช่อง (โหมดทดสอบ — ไม่กดสร้าง)', 'OK')
+            if hold:
+                await page.wait_for_timeout(hold * 1000)
+            res['ok'] = True
+            return res
+
+        # ---------- กด “สร้าง Product” + ป๊อปอัปยืนยัน ----------
+        btn = page.locator('button:has-text("%s")' % SEL_PD['submit']).last
+        if await btn.count() == 0:
+            self.log('   ✗ ไม่เจอปุ่ม “%s”' % SEL_PD['submit'], 'ERR')
+            res['why'] = 'ไม่เจอปุ่ม “%s”' % SEL_PD['submit']
+            return res
+        hits = []
+
+        def _grab(resp):
+            try:
+                if resp.request.method in ('POST', 'PUT', 'PATCH') and 'product' in resp.url.lower():
+                    hits.append(resp)
+            except Exception:
+                pass
+        url0 = page.url
+        page.on('response', _grab)
+        try:
+            await btn.click(timeout=10000)
+            await page.wait_for_timeout(600)
+            await self._click_confirm(page, hits)
+            waited = 0
+            while waited < 20000 and not hits:
+                await page.wait_for_timeout(300)
+                waited += 300
+            await page.wait_for_timeout(1500)
+        finally:
+            try:
+                page.remove_listener('response', _grab)
+            except Exception:
+                pass
+        code, pid, good = 0, '', False
+        for resp in hits:
+            try:
+                st_ = resp.status
+                body = await resp.json()
+            except Exception:
+                st_, body = (getattr(resp, 'status', 0) or 0), None
+            if 200 <= st_ < 300:
+                good, code = True, st_
+                pid = pid or pd_dig_id(body)
+            elif not good:
+                code = st_
+        if hits and good:
+            pid = pid or pd_id_from_url(page.url)
+            res.update(ok=True, created=True, id=pid)
+            self.log('   ✓ สร้าง Product แล้ว%s  (HTTP %d)'
+                     % ('  ·  Product id = %s' % pid if pid else '', code), 'OK')
+        elif hits:
+            res['why'] = 'เว็บตอบ HTTP %d — ยังไม่ได้สร้าง' % code
+            self.log('   ✗ ' + res['why'], 'ERR')
+        else:
+            # กดแล้วไม่เห็นคำตอบจากเว็บ — อาจสร้างไปแล้วก็ได้ ห้ามบอกว่าสำเร็จ และห้ามสั่งซ้ำมั่ว
+            pid = pd_id_from_url(page.url) if page.url != url0 else ''
+            res.update(unsure=True, id=pid,
+                       why='กดสร้างแล้วแต่ไม่เห็นคำตอบจากเว็บ — ตรวจบนเว็บก่อนสั่งใหม่')
+            self.log('   ? ' + res['why'], 'WARN')
+        log_event('create_product', name=x['name'], bundle=x['bundle'], ok=bool(res['created']),
+                  http=code, unsure=res['unsure'])
+        return res
+
+
+class OungProductTab(OungTab):
+    """แถบย่อย 🛒 สร้าง Product ของแท็บ Oung Machine — ของใหม่ทั้งก้อน
+    ยืมแค่ “ช่องแก้ในตาราง” ของแถบ Bundle มาใช้ (edit / _commit / _cancel_edit / _scrolled /
+    _go_next / _visible / _dbl) ที่เหลือเป็นของแถบนี้เองทั้งหมด"""
+    COLS = (('use', 'ใช้', 40, False), ('st', 'สถานะ', 118, False),
+            ('move', 'Itemmove', 66, False), ('bundle', 'Bundle', 64, False),
+            ('price', 'ราคา', 100, False), ('limit', 'จำกัดซื้อ (Player)', 116, False),
+            ('order', 'ลำดับการแสดง', 92, False), ('note', 'หมายเหตุ', 380, True))
+    EDIT = {'#0': 'name', '#4': 'bundle', '#5': 'price', '#6': 'limit', '#7': 'order'}
+
+    def __init__(self, app, tab, hub=None):
+        self.app = app
+        self.tab = tab
+        self.hub = hub
+        self.st = pd_new_state()
+        self._map = {}
+        self._view = []
+        self._ed = None
+        self._next_job = None
+        self._wait_keys = None
+        self.running = False
+        self._build()
+        self._load()
+        self.refresh()
+
+    # ---------- หน้าจอ ----------
+    def _build(self):
+        a, p = self.app, self.tab
+        s1 = a._card(p, '1) ไฟล์ชีท Oung — อ่านแท็บ bundle+id')
+        bar = tk.Frame(s1, bg=C['bg'])
+        bar.pack(fill='x')
+        a._btn(bar, '📂  เปิดไฟล์ชีท (.xlsx)', self.open_file, primary=True).pack(
+            side='left', ipadx=10, ipady=4)
+        a._btn(bar, '↻  อ่านไฟล์เดิมใหม่', self.reread).pack(
+            side='left', padx=(8, 0), ipadx=8, ipady=4)
+        a._btn(bar, '🗑  ล้าง', self.clear).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
+        self.lbl_file = tk.Label(s1, text='ยังไม่ได้เปิดไฟล์', bg=C['bg'], fg=C['fg'], font=FM,
+                                 anchor='w')
+        self.lbl_file.pack(fill='x', pady=(8, 0))
+        tk.Label(s1, text='เปิดไฟล์ที่แถบ “สร้าง Bundle” แล้ว แถบนี้อ่านไฟล์เดียวกันให้เอง  ·  '
+                          'ชื่อสินค้า = คอลัมน์แรก (แถวหัวข้อไม่มีเลข bundle = ไม่เอา)  ·  '
+                          'หมวดหมู่ / สกุลเงิน / คอลัมน์ราคา = ตามโน้ตข้างตาราง (ขึ้น PROD ใน … · ใช้เคอเรนซี่ “…”)',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w', justify='left',
+                 wraplength=1000).pack(fill='x', pady=(8, 0))
+
+        s2 = a._card(p, '2) ตรวจ / แก้  (หัวข้อ › สินค้า)', grow=True)
+        tw = tk.Frame(s2, bg=C['bg'])
+        tw.pack(fill='both', expand=True)
+        self.tree = ttk.Treeview(tw, columns=[c[0] for c in self.COLS], show='tree headings',
+                                 style='TR.Treeview', height=4, selectmode='browse')
+        self.tree.heading('#0', text='หัวข้อ › หมวดหมู่  /  ชื่อสินค้า')
+        self.tree.column('#0', width=330, minwidth=180, stretch=False, anchor='w')
+        for c, t, w, grow in self.COLS:
+            self.tree.heading(c, text=t)
+            self.tree.column(c, width=w, minwidth=36, stretch=grow, anchor='w')
+        for tag, kw in (('topic', {'foreground': C['fg'], 'font': FB}),
+                        ('off', {'foreground': C['dim']}), ('ok', {'foreground': C['ok']}),
+                        ('warn', {'foreground': C['warn']}), ('dup', {'foreground': '#7aa2f7'}),
+                        ('bad', {'foreground': C['err']})):
+            self.tree.tag_configure(tag, **kw)
+        ys = ttk.Scrollbar(tw, orient='vertical', command=self.tree.yview)
+        xs = ttk.Scrollbar(tw, orient='horizontal', command=self.tree.xview)
+        self.tree.configure(yscrollcommand=lambda *a: (self._scrolled(), ys.set(*a)),
+                            xscrollcommand=lambda *a: (self._scrolled(), xs.set(*a)))
+        self.tree.grid(row=0, column=0, sticky='nsew')
+        ys.grid(row=0, column=1, sticky='ns')
+        xs.grid(row=1, column=0, sticky='ew')
+        tw.rowconfigure(0, weight=1)
+        tw.columnconfigure(0, weight=1)
+        self.tree.bind('<Button-1>', self._click, add='+')
+        self.tree.bind('<Double-1>', self._dbl)
+        tk.Label(s2, text='ดับเบิลคลิกเพื่อแก้: ชื่อสินค้า · Bundle · ราคา · จำกัดซื้อ (เลข = PLAYER / ไม่จำกัด) · '
+                          'ลำดับการแสดง (ว่าง = ไม่แตะ)  ·  แถวหัวข้อ: ชื่อ = หมวดหมู่ · ช่องราคา = สกุลเงิน  ·  '
+                          'คลิกช่อง “ใช้” = เลือก/ไม่เลือก',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w', justify='left',
+                 wraplength=1000).pack(fill='x', pady=(6, 0))
+        self.lbl_info = tk.Label(s2, text='', bg=C['bg'], fg=C['fg'], font=('Segoe UI', 9),
+                                 anchor='w', justify='left', wraplength=1000)
+        self.lbl_info.pack(fill='x', pady=(4, 0))
+        self.tree.bind('<<TreeviewSelect>>', lambda e: self._info(), add='+')
+        self.lbl_sum = tk.Label(s2, text='', bg=C['bg'], fg=C['fg'], font=FB, anchor='w',
+                                justify='left', wraplength=1000)
+        self.lbl_sum.pack(fill='x', pady=(4, 0))
+
+        s3 = a._card(p, '3) เวลาขาย แล้วลงมือสร้าง Product')
+        tm = tk.Frame(s3, bg=C['bg'])
+        tm.pack(fill='x', pady=(0, 6))
+        self.e_time = {}
+        self.lbl_time = {}
+        for kind, text, btns in (('start', 'เวลาเริ่มขาย', (('วันนี้ (เทส)', 'today'), ('ตามชีท', 'sheet'))),
+                                 ('end', 'เวลาหยุดขาย', (('ตามชีท', 'sheet'),))):
+            tk.Label(tm, text=text, bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9)).pack(
+                side='left', padx=(0 if kind == 'start' else 18, 6))
+            e = a._entry(tm, width=19)
+            e.pack(side='left', ipady=3)
+            e.bind('<Return>', lambda ev, k=kind: self._time_typed(k))
+            e.bind('<KP_Enter>', lambda ev, k=kind: self._time_typed(k))
+            e.bind('<FocusOut>', lambda ev, k=kind: self._time_typed(k))
+            self.e_time[kind] = e
+            for bt, mode in btns:
+                a._btn(tm, bt, lambda k=kind, m=mode: self.set_time(k, m)).pack(
+                    side='left', padx=(4, 0), ipadx=4, ipady=1)
+            lb = tk.Label(tm, text='', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8))
+            lb.pack(side='left', padx=(6, 0))
+            self.lbl_time[kind] = lb
+        b3 = tk.Frame(s3, bg=C['bg'])
+        b3.pack(fill='x')
+        a._btn(b3, '📋  คัดลอก Product id', self.copy_ids).pack(side='left', ipadx=8, ipady=4)
+        self.btn_stop = a._btn(b3, '■  ยกเลิก', self.stop)
+        self.btn_stop.config(state='disabled')
+        self.btn_stop.pack(side='right', padx=(8, 0), ipadx=10, ipady=4)
+        self.btn_run = a._btn(b3, '▶  เริ่มทำงาน', self.create, primary=True)
+        self.btn_run.pack(side='right', ipadx=16, ipady=4)
+        self.v_do = tk.BooleanVar(value=False)
+        tk.Checkbutton(b3, variable=self.v_do, command=self._do_changed,
+                       text='กดปุ่ม “สร้าง Product” จริง', bg=C['bg'], fg=C['fg'],
+                       selectcolor=C['input'], activebackground=C['bg'], activeforeground=C['fg'],
+                       font=FB, bd=0, highlightthickness=0).pack(side='right', padx=(0, 12))
+        self.lbl_mode = tk.Label(s3, text='', bg=C['bg'], font=('Segoe UI', 9), anchor='w')
+        self.lbl_mode.pack(fill='x', pady=(6, 0))
+        self._do_changed()
+
+    # ---------- เก็บ/โหลด ----------
+    def _path(self):
+        return os.path.join(DATA_DIR, PD_STATE)
+
+    def _load(self):
+        try:
+            if not os.path.exists(self._path()):
+                return
+            with open(self._path(), 'r', encoding='utf-8') as f:
+                d = json.load(f)
+            if not isinstance(d, dict) or not isinstance(d.get('sections'), list):
+                raise ValueError('รูปแบบไฟล์ไม่ถูก')
+            st = pd_new_state()
+            st.update(d)
+            self.st = st
+        except Exception as ex:
+            try:
+                os.replace(self._path(), self._path() + '.bad')
+            except Exception:
+                pass
+            why = str(ex)[:60]
+            self.app.root.after(0, lambda: self.app.log(
+                'ไฟล์ข้อมูลแถบสร้าง Product อ่านไม่ได้ (%s) — เริ่มใหม่' % why, 'WARN'))
+
+    # ---------- เปิดไฟล์ ----------
+    def reread(self):
+        f = self.st.get('file') or (self.hub.st.get('file') if self.hub else '')
+        if not f:
+            return messagebox.showinfo('ยังไม่มีไฟล์', 'กด “เปิดไฟล์ชีท” ก่อนนะ')
+        if not os.path.exists(f):
+            return messagebox.showwarning('หาไฟล์ไม่เจอ', 'ไม่เจอไฟล์เดิมแล้ว:\n%s\n\nเปิดไฟล์ใหม่แทนนะ' % f)
+        self.load_path(f)
+
+    def load_path(self, path, quiet=False):
+        """อ่านแท็บ bundle+id -> ตารางสินค้า (ไฟล์เดิม = เก็บที่แก้/ที่สร้างไว้ · ไฟล์ใหม่ = เริ่มใหม่)"""
+        self._cancel_edit()
+        try:
+            wb = open_workbook(path)
+            try:
+                secs, dates = pd_parse_workbook(wb)
+            finally:
+                wb.close()
+        except Exception as ex:
+            self.app.log('Oung Product: อ่านไฟล์ไม่ได้ — %s' % ex, 'ERR')
+            if not quiet:
+                messagebox.showerror('อ่านไฟล์ไม่ได้', str(ex)[:300])
+            return False
+        new = pd_new_state(path, secs, dates)
+        if os.path.abspath(path) == os.path.abspath(self.st.get('file') or ''):
+            pd_merge(self.st, new)
+        self.st = new
+        self.refresh(keep=False)
+        view = pd_view(new)
+        n = pd_summary(view)
+        a = self.app
+        a.log('Oung Product: อ่าน %s — %d หัวข้อ · สินค้า %d (พร้อม %d) · ทำเองบนเว็บ %d หัวข้อ'
+              % (os.path.basename(path), n['sections'], n['items'], n['ready'], n['manual']),
+              'OK' if n['items'] else 'WARN')
+        for s in view:
+            if s['why']:
+                a.log('   ⊘ %s (%s): %s' % (s['title'], s['ref'], s['why']), 'INFO')
+        if not secs:
+            a.log('   ! ไม่เจอตารางสินค้า (แถวหัวที่มีป้าย bundle + product id) ในไฟล์นี้', 'WARN')
+        log_event('oung_product_read', file=os.path.basename(path), sections=n['sections'],
+                  items=n['items'])
+        return True
+
+    def clear(self):
+        if not self.st['sections']:
+            return
+        if not messagebox.askyesno('ล้าง', 'ล้างข้อมูลแถบสร้าง Product ทั้งหมด (รวม Product id ที่สร้างไว้)?'):
+            return
+        self._cancel_edit()
+        self.st = pd_new_state()
+        self.refresh(keep=False)
+
+    # ---------- เวลาขาย ----------
+    def _time_val(self, kind):
+        st = self.st
+        if kind == 'start':
+            mode = st.get('start_mode') or 'today'
+            if mode == 'today':
+                return pd_today(), 'วันนี้'
+            if mode == 'sheet':
+                return st.get('sheet_start') or '', 'ตามชีท'
+            return st.get('start') or '', 'กำหนดเอง'
+        mode = st.get('end_mode') or 'sheet'
+        if mode == 'sheet':
+            return pd_end_fix(st.get('sheet_end')), 'ตามชีท'
+        return st.get('end') or '', 'กำหนดเอง'
+
+    def _show_times(self):
+        for kind in ('start', 'end'):
+            v, how = self._time_val(kind)
+            e = self.e_time[kind]
+            try:
+                if self.app.root.focus_get() is e:
+                    continue
+            except Exception:
+                pass
+            e.delete(0, 'end')
+            e.insert(0, v)
+            extra = ''
+            if kind == 'end' and how == 'ตามชีท' and self.st.get('sheet_end'):
+                if self.st['sheet_end'] != v:
+                    extra = ' · ชีทเขียน %s = ขายถึงสิ้นวัน' % self.st['sheet_end'][11:]
+            if kind == 'start' and how == 'วันนี้':
+                extra = ' (เทส)' + ((' · ชีทเริ่ม %s' % self.st['sheet_start'][:10])
+                                   if self.st.get('sheet_start') else '')
+            self.lbl_time[kind].config(text=('⚠ ไม่มีในชีท — พิมพ์เอง' if not v else how + extra),
+                                       fg=C['warn'] if not v else C['dim'])
+
+    def set_time(self, kind, mode):
+        self.st['%s_mode' % kind] = mode
+        self._show_times()
+        self._save()
+
+    def _time_typed(self, kind):
+        e = self.e_time[kind]
+        txt = e.get().strip()
+        cur, _ = self._time_val(kind)
+        if txt == cur:
+            return
+        ok = pd_dt_ok(txt)
+        if not ok:
+            self.lbl_time[kind].config(text='⚠ รูปแบบ YYYY-MM-DD HH:MM:SS', fg=C['err'])
+            return
+        self.st['%s_mode' % kind] = 'custom'
+        self.st[kind] = ok
+        self._save()
+        self.app.root.after(0, self._show_times)
+
+    def _times(self):
+        """เวลาที่จะใช้จริง -> (เริ่ม, หยุด, ข้อผิดพลาด)"""
+        for kind in ('start', 'end'):
+            try:
+                self._time_typed(kind)
+            except Exception:
+                pass
+        s, _ = self._time_val('start')
+        e, _ = self._time_val('end')
+        if not pd_dt_ok(s):
+            return s, e, 'เวลาเริ่มขายไม่ถูก (YYYY-MM-DD HH:MM:SS)'
+        if not pd_dt_ok(e):
+            return s, e, 'เวลาหยุดขายไม่ถูก — ชีทไม่มี End ให้พิมพ์เอง (YYYY-MM-DD HH:MM:SS)'
+        if pd_dt_ok(e) <= pd_dt_ok(s):
+            return s, e, 'เวลาหยุดขาย (%s) ต้องหลังเวลาเริ่มขาย (%s)' % (e, s)
+        return pd_dt_ok(s), pd_dt_ok(e), ''
+
+    # ---------- วาดตาราง ----------
+    @staticmethod
+    def _short(x):
+        m = x['made']
+        if m:
+            return '? ตรวจบนเว็บ' if m.get('unsure') else '✓ สร้างแล้ว'
+        if not x['use']:
+            return '— ไม่เลือก'
+        if x['problems']:
+            return '⚠ ' + x['problems'][0]
+        if not x['ready']:
+            return '⚠ ยังทำไม่ได้'
+        la = x['last']
+        if la and not la.get('ok'):
+            return '✗ ไม่ผ่าน'
+        if la and la.get('ok') and not la.get('do'):
+            return '✓ ทดสอบผ่าน'
+        return '✓ พร้อม'
+
+    @staticmethod
+    def _note(x):
+        """หมายเหตุ = เฉพาะเรื่องที่ต้องรู้/ต้องแก้ · Product id ที่ได้ (ไว้กรอกกลับลงชีท)"""
+        p = []
+        m = x['made']
+        if m:
+            if m.get('id'):
+                p.append('Product id %s' % m['id'])
+            if m.get('unsure'):
+                p.append('กดสร้างแล้วไม่เห็นคำตอบจากเว็บ — ตรวจบนเว็บก่อนสั่งใหม่')
+            elif not m.get('id'):
+                p.append('สร้างแล้ว แต่เว็บไม่ส่ง Product id กลับมา')
+            return p
+        if x['pid']:
+            p.append('ชีทมี Product id แล้ว (%s)' % x['pid'][:40])
+        p.extend(x['problems'][1:] if x['use'] else x['problems'])
+        if x['flag']:
+            p.append(x['flag'])
+        la = x['last']
+        if la and not la.get('ok') and la.get('why'):
+            p.append('✗ ' + la['why'])
+        return p
+
+    def refresh(self, keep=True):
+        tr = self.tree
+        opened, sel, top = {}, None, 0.0
+        if keep:
+            for iid in list(self._map):
+                try:
+                    opened[iid] = bool(tr.item(iid, 'open'))
+                except Exception:
+                    pass
+            s = tr.selection()
+            sel = s[0] if s else None
+            try:
+                top = tr.yview()[0]
+            except Exception:
+                top = 0.0
+        tr.delete(*tr.get_children())
+        self._map = {}
+        view = pd_view(self.st)
+        self._view = view
+        for i, s in enumerate(view):
+            siid = 'PS%d' % i
+            items = s['items']
+            n_use = sum(1 for x in items if x['use'] and not x['made'])
+            n_made = sum(1 for x in items if x['made'])
+            manual = not s['has_price']
+            if manual:
+                stt, mark = '⊘ ทำเองบนเว็บ', '—'
+            else:
+                stt = 'เลือก %d/%d' % (n_use, len(items)) + ('  ✓%d' % n_made if n_made else '')
+                mark = '✔' if n_use else '✗'
+            tr.insert('', 'end', iid=siid,
+                      text='🛒  %s  ›  %s' % (s['title'], s['cat'] or '❓ ไม่รู้หมวดหมู่'),
+                      values=(mark, stt, '', '', s['cur'] or ('—' if manual else '❓ สกุลเงิน'),
+                              '', ('เรียงตามชีท' if s['sort'] else ''), s['why']),
+                      open=opened.get(siid, not manual),
+                      tags=('topic', 'off') if manual else ('topic',))
+            self._map[siid] = ('s', i)
+            if manual:
+                continue
+            for j, x in enumerate(items):
+                iid = 'PI%d_%d' % (i, j)
+                if x['made']:
+                    tag = 'dup' if not x['made'].get('unsure') else 'warn'
+                elif not x['use']:
+                    tag = 'off'
+                elif x['ready'] and not (x['last'] and not x['last'].get('ok')):
+                    tag = 'ok'
+                elif x['ready']:
+                    tag = 'bad'
+                else:
+                    tag = 'warn'
+                lim = x['limit'] or '⚠ ใส่ limit'
+                tr.insert(siid, 'end', iid=iid, text='   %d. %s' % (j + 1, x['name'] or '⚠ ไม่มีชื่อ'),
+                          values=('✔' if (x['use'] and not x['made']) else ('✓' if x['made'] else '✗'),
+                                  self._short(x), x['move'], x['bundle'] or '⚠ ใส่เลข',
+                                  x['price'] or '⚠ ใส่ราคา', lim, x['order'] or '—',
+                                  '  ·  '.join(self._note(x))),
+                          tags=(tag,))
+                self._map[iid] = ('p', i, j)
+        if sel and tr.exists(sel):
+            tr.selection_set(sel)
+        try:
+            tr.update_idletasks()
+            tr.yview_moveto(top)
+        except Exception:
+            pass
+        self._summary(view)
+        self._show_times()
+        self._save()
+
+    def _summary(self, view):
+        f = self.st.get('file')
+        self.lbl_file.config(text=('📄 %s  ·  อ่านเมื่อ %s' % (os.path.basename(f),
+                                                          str(self.st.get('read_at', '')).replace('T', ' ')))
+                             if f else 'ยังไม่ได้เปิดไฟล์')
+        if not self.st['sections']:
+            self.lbl_sum.config(text='ยังไม่มีข้อมูล — เปิดไฟล์ชีทก่อนนะ', fg=C['dim'])
+            return
+        n = pd_summary(view)
+        txt = ('%d หัวข้อ  ·  สินค้า %d  ·  เลือกไว้ %d (พร้อม %d)'
+               % (n['sections'] - n['manual'], n['items'], n['use'], n['ready']))
+        if n['made']:
+            txt += '  ·  ✓ สร้างแล้ว %d' % n['made']
+        if n['unsure']:
+            txt += '  ·  ? ต้องตรวจบนเว็บ %d' % n['unsure']
+        if n['sheet_pid']:
+            txt += '  ·  มี Product id ในชีทแล้ว %d (ไม่ได้ติ๊กไว้ให้)' % n['sheet_pid']
+        if n['manual']:
+            txt += '  ·  ⊘ ทำเองบนเว็บ %d หัวข้อ' % n['manual']
+        self.lbl_sum.config(text=txt, fg=C['ok'] if n['use'] and n['ready'] == n['use']
+                            else C['warn'] if n['use'] else C['dim'])
+
+    def _info(self):
+        s = self.tree.selection()
+        m = self._map.get(s[0]) if s else None
+        txt = ''
+        if m:
+            sec = self._view[m[1]] if m[1] < len(self._view) else None
+            if sec and m[0] == 's':
+                parts = ['📍 %s' % sec['ref'], 'หมวดหมู่: %s' % (sec['cat'] or '❓'),
+                         'สกุลเงิน: %s%s' % (('%sxxxx - ' % sec['pre']) if sec['pre'] else '',
+                                             sec['cur'] or '❓')]
+                if sec['has_price']:
+                    parts.append('ราคาจากคอลัมน์ “%s”' % sec['price_h'])
+                if sec['limit_h']:
+                    parts.append('limit จากคอลัมน์ “%s”' % sec['limit_h'])
+                if sec['sort']:
+                    parts.append('เรียงลำดับตามแถวในชีท (ลำดับการแสดง 1, 2, 3 …)')
+                if sec['notes']:
+                    parts.append('โน้ตในชีท: ' + ' / '.join(n.replace('\n', ' ') for n in sec['notes'])[:220])
+                txt = '  ·  '.join(parts)
+            elif sec and m[0] == 'p' and m[2] < len(sec['items']):
+                x = sec['items'][m[2]]
+                parts = ['📍 %s' % x['ref'], 'ชื่อในชีท: %s' % x['raw'].replace('\n', ' ⏎ ')]
+                parts.append('Bundle %s' % (x['bundle'] or '-'))
+                parts.append('ราคา %s %s' % (x['price'] or '-', sec['cur'] or ''))
+                lim = x['limit']
+                parts.append('จำกัดซื้อ: ' + ('ไม่จำกัด' if lim == PD_FREE else
+                                              ('PLAYER %s' % lim) if lim else '-'))
+                if x['made']:
+                    parts.append('สร้างเมื่อ %s' % x['made'].get('at', ''))
+                elif x['last']:
+                    la = x['last']
+                    parts.append('รอบล่าสุด %s %s%s' % (la.get('at', ''), 'สร้างจริง' if la.get('do') else 'ทดสอบ',
+                                                        ' ผ่าน' if la.get('ok') else (' ไม่ผ่าน — ' + la.get('why', ''))))
+                txt = '  ·  '.join(parts)
+        self.lbl_info.config(text=txt)
+
+    def expand(self, on):
+        for iid, m in self._map.items():
+            if m[0] == 's':
+                try:
+                    self.tree.item(iid, open=on)
+                except Exception:
+                    pass
+
+    # ---------- เลือก / แก้ ----------
+    def _click(self, ev):
+        if self._ed:
+            self._commit(False, quiet=True)
+        if self.tree.identify_region(ev.x, ev.y) != 'cell' or self.tree.identify_column(ev.x) != '#1':
+            return
+        m = self._map.get(self.tree.identify_row(ev.y))
+        if not m or m[1] >= len(self._view):
+            return
+        self._cancel_edit()
+        sec = self._view[m[1]]
+        if m[0] == 'p':
+            x = sec['items'][m[2]]
+            if x['made']:
+                return
+            self.st['use'][x['key']] = not x['use']
+        else:
+            live = [x for x in sec['items'] if not x['made']]
+            if not live:
+                return
+            on = not any(x['use'] for x in live)
+            for x in live:
+                self.st['use'][x['key']] = on
+        self.refresh()
+        return 'break'
+
+    def _target(self, iid, col):
+        what = self.EDIT.get(col)
+        m = self._map.get(iid)
+        if not what or not m or m[1] >= len(self._view):
+            return None
+        sec = self._view[m[1]]
+        st = self.st
+        if m[0] == 's':
+            if not sec['has_price']:
+                return None
+            src = next((s for s in st['sections'] if s['skey'] == sec['skey']), None)
+            if what == 'name':
+                def setc(v):
+                    v = v.strip()
+                    if not v:
+                        return 'หมวดหมู่ห้ามว่าง'
+                    d = st['sedit'].setdefault(sec['skey'], {})
+                    if src and v == src['cat']:
+                        d.pop('cat', None)
+                    else:
+                        d['cat'] = v
+                return {'kind': 'name', 'get': lambda: sec['cat'], 'set': setc}
+            if what == 'price':
+                def setu(v):
+                    v = v.strip().strip(_PD_Q).strip()
+                    if not v:
+                        return 'ชื่อสกุลเงินห้ามว่าง (เช่น รางวัลสะสม)'
+                    d = st['sedit'].setdefault(sec['skey'], {})
+                    if src and v == src['cur']:
+                        d.pop('cur', None)
+                    else:
+                        d['cur'] = v
+                return {'kind': 'cur', 'get': lambda: sec['cur'], 'set': setu}
+            return None
+        if m[0] != 'p' or m[2] >= len(sec['items']):
+            return None
+        x = sec['items'][m[2]]
+        if x['made']:
+            return None
+        src = next((i for s in st['sections'] if s['skey'] == sec['skey']
+                    for i in s['items'] if i['key'] == x['key']), {})
+
+        def put(field, v):
+            d = st['edit'].setdefault(x['key'], {})
+            if v == src.get(field):
+                d.pop(field, None)
+            else:
+                d[field] = v
+            if not d:
+                st['edit'].pop(x['key'], None)
+
+        if what == 'name':
+            def f(v):
+                v = re.sub(r'\s+', ' ', v).strip()
+                if not v:
+                    return 'ชื่อสินค้าห้ามว่าง'
+                put('name', v)
+        elif what == 'bundle':
+            def f(v):
+                v = v.strip().lstrip('#')
+                if not re.fullmatch(r'\d+', v):
+                    return 'เลข Bundle ต้องเป็นตัวเลขล้วน'
+                put('bundle', v)
+        elif what == 'price':
+            def f(v):
+                v = v.replace(',', '').strip()
+                if not re.fullmatch(r'\d+(\.\d+)?', v) or float(v) <= 0:
+                    return 'ราคาต้องเป็นตัวเลขมากกว่า 0'
+                put('price', pd_price(v))
+        elif what == 'limit':
+            def f(v):
+                v2 = pd_limit(v.strip())
+                if v2 != PD_FREE and not re.fullmatch(r'[1-9]\d*', v2):
+                    return 'จำกัดซื้อ = เลข 1 ขึ้นไป (PLAYER) หรือพิมพ์ “ไม่จำกัด”'
+                put('limit', v2)
+        else:
+            def f(v):
+                v = v.strip()
+                if v and not re.fullmatch(r'\d+', v):
+                    return 'ลำดับการแสดงต้องเป็นตัวเลข (เว้นว่าง = ไม่แตะ)'
+                put('order', v)
+        return {'kind': 'name' if what == 'name' else what,
+                'get': lambda: x.get(what) or '', 'set': f}
+
+    def _live(self, iid):
+        m = self._map.get(iid)
+        if not m or m[1] >= len(self._view):
+            return False
+        if m[0] == 's':
+            return True
+        x = self._view[m[1]]['items'][m[2]]
+        return bool(x['use'] and not x['made'])
+
+    # ---------- คัดลอก ----------
+    def copy_ids(self):
+        """Product id ของหัวข้อที่เลือก เรียงตามแถวในชีท (วางลงคอลัมน์ product id ได้เลย)"""
+        s = self.tree.selection()
+        m = self._map.get(s[0]) if s else None
+        secs = [self._view[m[1]]] if m and m[1] < len(self._view) else \
+            [v for v in self._view if any(x['made'] for x in v['items'])]
+        if not secs:
+            return messagebox.showinfo('ยังไม่มี', 'ยังไม่มี Product id ที่สร้างจากโปรแกรมนะ')
+        sec = secs[0]
+        lines = [((x['made'] or {}).get('id') or x['pid'] or '') for x in sec['items']]
+        if not any(lines):
+            return messagebox.showinfo('ยังไม่มี', 'หัวข้อ “%s” ยังไม่มี Product id' % sec['title'])
+        self.app.root.clipboard_clear()
+        self.app.root.clipboard_append('\n'.join(lines))
+        self.app.log('Oung Product: คัดลอก Product id ของ “%s” %d แถว (เรียงตามแถวในชีท — วางที่คอลัมน์ '
+                     'product id ได้เลย · แถวที่ยังไม่มี = ว่าง)' % (sec['title'], len(lines)), 'OK')
+
+    # ---------- ลงมือสร้าง ----------
+    def _do_changed(self):
+        if self.v_do.get():
+            self.lbl_mode.config(text='⚠  จะสร้าง Product จริงบนเว็บ — ช่องไหนกรอกไม่เข้า / อ่านกลับไม่ตรง = '
+                                      'หยุด ไม่กดสร้างตัวนั้น', fg=C['err'])
+        else:
+            self.lbl_mode.config(text='โหมดทดสอบ — กรอกให้ดูครบทุกช่องแล้วไม่กดสร้าง  ·  '
+                                      'ค้างหน้าไว้ตามที่ตั้งในแท็บสร้าง Bundle', fg=C['ok'])
+
+    def _busy(self):
+        a, h = self.app, self.hub
+        return bool(self.running or (h is not None and (h.running or h._wait_keys))
+                    or a.running or a.b_running or getattr(a, 'c_running', False)
+                    or getattr(a, 'w_running', False)
+                    or getattr(getattr(a, 'gen', None), 'w_running', False))
+
+    def create(self):
+        a = self.app
+        self._cancel_edit()
+        if chrome_held_ask(a, self.create):
+            return
+        if self._busy():
+            return messagebox.showinfo('กำลังทำงาน', 'รองานที่ทำอยู่ให้เสร็จก่อนนะ (ใช้ Chrome ตัวเดียวกัน)')
+        start, end, err = self._times()
+        if err:
+            return messagebox.showwarning('เวลาขาย', err)
+        view = pd_view(self.st)
+        use = [x for s in view if s['has_price'] for x in s['items'] if x['use'] and not x['made']]
+        if not use:
+            return messagebox.showwarning('ยังไม่ได้เลือก', 'ติ๊กเลือกสินค้าที่จะสร้างก่อนนะ')
+        ready = [x for x in use if x['ready']]
+        bad = [x for x in use if not x['ready']]
+        if bad:
+            msg = 'ยังไม่พร้อม %d ตัว:\n%s%s' % (
+                len(bad), '\n'.join('  • %s — %s' % (x['name'][:34], (x['problems'] or ['ยังทำไม่ได้'])[0])
+                                    for x in bad[:8]), '\n  …' if len(bad) > 8 else '')
+            if not ready:
+                return messagebox.showwarning('ยังทำไม่ได้', msg)
+            if not messagebox.askyesno('ทำเฉพาะที่พร้อม', msg + '\n\nทำเฉพาะที่พร้อม %d ตัวไปก่อนไหม?'
+                                       % len(ready)):
+                return
+        do = bool(self.v_do.get())
+        if do:
+            by = {}
+            for x in ready:
+                by.setdefault((x['cat'], x['cur']), []).append(x)
+            msg = 'จะสร้าง Product จริงบนเว็บ %d ตัว\n\n' % len(ready)
+            for (cat, cur), xs in by.items():
+                msg += '• %s  ·  สกุลเงิน %s  ·  %d ตัว\n' % (cat, cur, len(xs))
+            msg += '\nเวลาขาย  %s  →  %s\n' % (start, end)
+            dup = sum(1 for x in ready if x['pid'])
+            if dup:
+                msg += '\n⚠ ในจำนวนนี้มี %d ตัวที่ชีทมี Product id แล้ว (อาจสร้างซ้ำ)\n' % dup
+            msg += '\nตรวจชื่อ / Bundle / ราคา / limit เรียบร้อยแล้วใช่ไหม?'
+            if not messagebox.askyesno('ยืนยัน', msg):
+                return
+        rows = [dict(x) for x in ready]
+        self.running = True
+        a.b_running = True              # กันแท็บอื่นใช้ Chrome ชนกัน (เหมือนแถบ Bundle)
+        a.b_cancel = False
+        self.btn_run.config(state='disabled')
+        self.btn_stop.config(state='normal')
+        a.nb.select(a.tab_log)
+        a.log('=' * 46, 'STEP')
+        a.log('Oung Product: %s %d ตัว  ·  เวลาขาย %s → %s'
+              % ('เริ่มสร้างจริง' if do else 'เริ่มทดสอบกรอก', len(rows), start, end), 'STEP')
+        log_event('oung_product_start', count=len(rows), commit=do)
+        threading.Thread(target=self._thread, args=(rows, start, end, do), daemon=True).start()
+
+    def stop(self):
+        self.app.b_cancel = True
+        self.app.log('Oung Product: กำลังยกเลิก (จบตัวที่ทำอยู่ก่อน)...', 'WARN')
+
+    def _thread(self, rows, start, end, do):
+        try:
+            asyncio.run(self._work(rows, start, end, do))
+        except Exception as ex:
+            log_event('error', where='oung_product', message=str(ex)[:300])
+            self.app.log('ผิดพลาด: ' + str(ex), 'ERR')
+            self.app.log(traceback.format_exc(), 'ERR')
+        finally:
+            self.running = False
+            self.app.b_running = False
+
+            def _rst():
+                try:
+                    self.btn_run.config(state='normal')
+                    self.btn_stop.config(state='disabled')
+                    self.refresh()
+                except Exception:
+                    pass
+            self.app.root.after(0, _rst)
+
+    async def _work(self, rows, start, end, do):
+        a = self.app
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch_persistent_context(**launch_kwargs(False))
+            page = browser.pages[0] if browser.pages else await browser.new_page()
+            try:
+                await self._run_rows(page, rows, start, end, do)
+            finally:
+                try:
+                    await finish_chrome(a, browser, 'Oung Machine — สร้าง Product')
+                except Exception:
+                    pass
+
+    async def _run_rows(self, page, rows, start, end, do):
+        """สร้างทีละตัว (แยกออกมาให้เทสกับหน้าเว็บจำลองได้)"""
+        a = self.app
+        try:
+            hold = max(0, int(float(a.bv_hold.get() or 0)))
+        except Exception:
+            hold = 4
+        run = PdRunner(a)
+        okc = errc = 0
+        for i, x in enumerate(rows, 1):
+            if a.b_cancel:
+                a.log('ยกเลิกแล้ว', 'WARN')
+                break
+            a.set_progress(i - 1, len(rows), x['name'][:30])
+            a.log('[%d/%d] %s  (Bundle %s · %s %s · %s)'
+                  % (i, len(rows), x['name'], x['bundle'], x['price'], x['cur'],
+                     'ไม่จำกัดการซื้อ' if x['limit'] == PD_FREE else 'PLAYER %s' % x['limit']), 'STEP')
+            try:
+                res = await run.make(page, x, start, end, do, hold)
+            except Exception as ex:
+                res = {'ok': False, 'created': False, 'unsure': False, 'id': '', 'why': str(ex)[:160]}
+                a.log('   ✗ ' + str(ex)[:200], 'ERR')
+                log_event('error', where='oung_product_one', name=x['name'], message=str(ex)[:200])
+            at = datetime.now().strftime('%d/%m %H:%M')
+            if do and (res.get('created') or res.get('unsure')):
+                self.st['made'][x['key']] = {'id': res.get('id') or '', 'at': at,
+                                             'unsure': bool(res.get('unsure'))}
+            self.st['last'][x['key']] = {'ok': bool(res.get('ok')), 'do': bool(do), 'at': at,
+                                         'why': res.get('why') or ''}
+            if res.get('ok'):
+                okc += 1
+            else:
+                errc += 1
+            a.root.after(0, self.refresh)
+        a.set_progress(len(rows), len(rows), 'เสร็จ')
+        a.log('Oung Product: จบ — %s %d · ไม่ผ่าน %d' % ('สร้างแล้ว' if do else 'ทดสอบผ่าน', okc, errc),
+              'OK' if not errc else 'WARN')
+        log_event('oung_product_done', ok=okc, fail=errc, commit=bool(do))
         return okc, errc
 
 
