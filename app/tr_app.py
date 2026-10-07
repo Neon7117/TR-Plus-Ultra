@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.1.1 : สร้าง Product — ช่องติ๊ก ☑/☐ · ลบแถวออกจากคิว · แก้ชื่อสินค้าทั้งหมด (แม่แบบชื่อ) · ลำดับการแสดงจากคอลัมน์ “ลำดับ”
 V1.1.0 : แท็บ Oung มีแถบย่อย — 📦 สร้าง Bundle (ของเดิม) · 🛒 สร้าง Product ใหม่ (อ่านแท็บ bundle+id กรอกหน้าสร้าง Product)
 V1.0.9 : แท็บ Oung — ช่องหมายเหตุบอกเฉพาะเรื่องที่ต้องแก้/ผิดปกติ · รายละเอียดเต็มขึ้นใต้ตารางตอนคลิกเลือก
 V1.0.8 : ทำงานเสร็จแล้วไม่ปิด Chrome — เด้ง popup แล้วเปิดหน้าเว็บค้างไว้ให้ตรวจ (ทุกแท็บ)
@@ -11446,6 +11447,7 @@ PD_STATE = 'oung_product.json'
 PD_CREATE_URL = BASE + '/hof/talesrunner/shop/products/create'
 PD_FREE = 'ไม่จำกัด'
 PD_PLAYER = 'PLAYER'
+PD_CB_ON, PD_CB_OFF, PD_CB_PART, PD_CB_DONE = '☑', '☐', '▣', '✓'     # ช่องติ๊กในตาราง
 SEL_PD = {
     'cat':        'หมวดหมู่',
     'name_th':    'ชื่อสินค้า (ไทย)',
@@ -11465,6 +11467,9 @@ SEL_PD = {
 _PD_NOTE_RE = re.compile(r'ขึ้น\s*prod|เคอเรนซ|ลิมิต|เรียงลำดับ|ตามหัวข้อ', re.I)
 _PD_Q = '"“”\'‘’«»'
 _PD_PRICE_WORDS = ('mileage', 'coral', 'price', 'ราคา', 'coin')
+# ป้ายคอลัมน์ "ลำดับ" (ลำดับการแสดงบนเว็บ) — ทีมใส่ไว้ข้างตารางร้านค้า หรือในตาราง bundle+id ก็ได้
+_PD_ORDER_KEYS = ('ลำดับ', 'ลำดับการแสดง', 'order', 'displayorder', 'sortorder')
+PD_PARSER = 2              # เปลี่ยนกติกาการอ่าน -> ข้อมูลเก่าที่เก็บไว้ต้องอ่านไฟล์ใหม่
 
 
 def pd_dt_str(v):
@@ -11599,7 +11604,8 @@ def pd_tables(rows, sheet):
                 continue
             cols.setdefault(_hkey(t), (c, t))
         cb, cp = cols['bundle'][0], cols['productid'][0]
-        left = sorted(c for c, _ in cols.values() if c < cb)
+        oc = next((cols[k][0] for k in _PD_ORDER_KEYS if k in cols), None)
+        left = sorted(c for k, (c, _) in cols.items() if c < cb and k not in _PD_ORDER_KEYS)
         name_c = left[0] if left else 0
         title = clean_text(row[name_c]) if left else ''
         hcols = {c for c, _ in cols.values()}
@@ -11633,7 +11639,10 @@ def pd_tables(rows, sheet):
                'cat': info['cat'], 'cur': info['cur'], 'sort': info['sort'],
                'need_limit': info['need_limit'], 'notes': notes,
                'price_h': price[1] if price else '', 'has_price': price is not None,
-               'limit_h': limit[1] if limit else '', 'rows': len(body), 'items': []}
+               'limit_h': limit[1] if limit else '', 'rows': len(body), 'items': [],
+               'order_in_table': oc is not None,
+               'order_src': ('คอลัมน์ “%s” ในตาราง (%s)' % (clean_text(row[oc]), col_letter(oc))
+                             if oc is not None else '')}
         ikeys = {}
         n = 0
         for x in body:
@@ -11665,19 +11674,114 @@ def pd_tables(rows, sheet):
                 'key': k, 'row': x + 1, 'ref': '%s!%s%d' % (sheet, col_letter(name_c), x + 1),
                 'raw': raw, 'name': name, 'flag': flag, 'move': move, 'bundle': bid or '',
                 'pid': clean_text(cell(x, cp)) if cp is not None else '',
-                'price': pr, 'limit': lim, 'order': str(n) if info['sort'] else ''})
+                'price': pr, 'limit': lim,
+                'order': (src_int(cell(x, oc)) or '') if oc is not None else ''})
         out.append(sec)
     return out
 
 
+def pd_order_maps(sheets, bundles):
+    """หาคอลัมน์ป้าย “ลำดับ” ที่อยู่ติดกับคอลัมน์เลข Bundle (ในชีทไหนก็ได้)
+    เช่นชีท Paid: [ลำดับ 33, 32, … 1] [4460, 4461, … 4494] [fdItemNum …]
+    คืน [{'ref', 'map': {เลข Bundle: ลำดับ}}] — Bundle ซ้ำแต่ลำดับไม่ตรงกัน = ไม่เอาตัวนั้น (ไม่เดา)"""
+    bundles = set(b for b in bundles if b)
+    out = []
+    if not bundles:
+        return out
+    for sheet, rows in sheets:
+        for r, row in enumerate(rows):
+            for c, v in enumerate(row or []):
+                if _hkey(v) not in _PD_ORDER_KEYS:
+                    continue
+                body, gap = [], 0
+                for x in range(r + 1, min(len(rows), r + 400)):
+                    o = src_int(_ou_cell(rows, x, c))
+                    if o is None:
+                        gap += 1                       # ช่องว่างเดี่ยวๆ (ลืมใส่) ข้ามได้ ว่างติดกัน 3 = จบตาราง
+                        if body and gap >= 3:
+                            break
+                        continue
+                    gap = 0
+                    body.append((x, o))
+                if len(body) < 2:
+                    continue
+                best = None
+                for d in (1, -1, 2, -2, 3, -3):
+                    cc = c + d
+                    if cc < 0:
+                        continue
+                    pairs = [(src_int(_ou_cell(rows, x, cc)), o) for x, o in body]
+                    hit = sum(1 for b, _ in pairs if b in bundles)
+                    if hit >= 2 and hit * 10 >= len(body) * 6 and (best is None or hit > best[0]):
+                        best = (hit, cc, pairs)
+                if not best:
+                    continue
+                m, bad = {}, set()
+                for b, o in best[2]:
+                    if not b:
+                        continue
+                    if b in m and m[b] != str(o):
+                        bad.add(b)
+                    m[b] = str(o)
+                for b in bad:
+                    m.pop(b, None)
+                out.append({'ref': '%s!%s%d:%s%d' % (sheet, col_letter(c), body[0][0] + 1,
+                                                     col_letter(c), body[-1][0] + 1), 'map': m})
+    return out
+
+
+def pd_apply_orders(secs, maps):
+    """ลำดับการแสดงของแต่ละหัวข้อ
+       · ตารางมีคอลัมน์ “ลำดับ” ในตัว = ใช้ตามนั้น
+       · โน้ตสั่ง “เรียงลำดับ” = เอาจากคอลัมน์ “ลำดับ” ข้างตารางร้านค้า (จับคู่ด้วยเลข Bundle)
+         ไม่เจอคอลัมน์ = ใส่ N … 1 ตามแถวให้ (แบบที่ทีมเรียง: แถวบนสุด = เลขมากสุด) แล้วเตือนให้ตรวจ
+       · ไม่ได้สั่งเรียง = ใส่ 1 ทุกตัว"""
+    for sec in secs:
+        items = sec['items']
+        sec['order_guess'] = False
+        if sec.get('order_in_table'):
+            for it in items:
+                it['need_order'] = True
+            continue
+        if not sec['sort']:
+            for it in items:
+                it['order'], it['need_order'] = '1', False
+            sec['order_src'] = 'ไม่มีโน้ตให้เรียง — ใส่ 1 ทุกตัว'
+            continue
+        best = None
+        for m in maps:
+            hit = sum(1 for it in items if it['bundle'] and it['bundle'] in m['map'])
+            if hit and (best is None or hit > best[0]):
+                best = (hit, m)
+        if best and best[0] * 10 >= len(items) * 6:
+            for it in items:
+                it['order'], it['need_order'] = best[1]['map'].get(it['bundle'], ''), True
+            sec['order_src'] = 'คอลัมน์ “ลำดับ” ที่ %s (จับคู่ด้วยเลข Bundle %d/%d แถว)' % (
+                best[1]['ref'], best[0], len(items))
+        else:
+            for j, it in enumerate(items):
+                it['order'], it['need_order'] = str(len(items) - j), True
+            sec['order_src'] = 'ไม่เจอคอลัมน์ “ลำดับ” ในชีท — ใส่ %d … 1 ตามแถวให้ (ตรวจอีกที)' % len(items)
+            sec['order_guess'] = True
+    return secs
+
+
 def pd_parse_workbook(wb):
     """อ่านทั้งไฟล์ -> (ตารางสินค้า, (เริ่ม, หยุด, ชีทที่เจอ))"""
-    secs = []
+    secs, sheets = [], []
     for s in wb.sheetnames:
         try:
-            secs.extend(pd_tables(ou_read_rows(wb, s), s))
+            rows = ou_read_rows(wb, s)
         except Exception:
             continue
+        sheets.append((clean_text(s) or str(s), rows))
+        try:
+            secs.extend(pd_tables(rows, s))
+        except Exception:
+            continue
+    need = [it['bundle'] for sec in secs if sec['sort'] and not sec.get('order_in_table')
+            for it in sec['items']]
+    pd_apply_orders(secs, pd_order_maps(sheets, need))
     return secs, pd_dates(wb)
 
 
@@ -11686,12 +11790,13 @@ def pd_new_state(path='', sections=None, dates=('', '', '')):
             'sections': sections or [], 'sheet_start': dates[0], 'sheet_end': dates[1],
             'date_sheet': dates[2] if len(dates) > 2 else '',
             'start_mode': 'today', 'start': '', 'end_mode': 'sheet', 'end': '',
-            'use': {}, 'edit': {}, 'sedit': {}, 'made': {}, 'last': {}}
+            'use': {}, 'edit': {}, 'sedit': {}, 'made': {}, 'last': {}, 'removed': {},
+            'parser': PD_PARSER}
 
 
 def pd_merge(old, new):
     """อ่านไฟล์เดิมซ้ำ = เก็บทุกอย่างที่คนแก้/ที่สร้างไปแล้วไว้"""
-    for k in ('use', 'edit', 'sedit', 'made', 'last'):
+    for k in ('use', 'edit', 'sedit', 'made', 'last', 'removed'):
         new[k] = dict(old.get(k) or {})
     for k in ('start_mode', 'start', 'end_mode', 'end'):
         if old.get(k) not in (None, ''):
@@ -11735,6 +11840,8 @@ def pd_check(x):
     od = str(x.get('order') or '')
     if od and not re.fullmatch(r'\d+', od):
         p.append('ลำดับการแสดงต้องเป็นตัวเลข')
+    elif not od and x.get('need_order'):
+        p.append('ไม่มีลำดับการแสดง (ไม่เจอในคอลัมน์ “ลำดับ”)')
     return p
 
 
@@ -11756,9 +11863,11 @@ def pd_view(st):
         else:
             why = ''
         v['why'] = why
-        items = []
+        items, alls = [], []
+        gone = st.get('removed') or {}
         for it in s['items']:
             x = dict(it)
+            x['sheet_name'] = it['name']
             x.update((st.get('edit') or {}).get(it['key'], {}))
             x['skey'], x['cat'], x['cur'], x['pre'] = s['skey'], v['cat'], v['cur'], v['pre']
             x['made'] = (st.get('made') or {}).get(it['key'])
@@ -11767,19 +11876,27 @@ def pd_view(st):
             x['ready'] = bool(s['has_price'] and not why and not x['problems'])
             default = x['ready'] and not x['made'] and not it['pid']
             x['use'] = bool((st.get('use') or {}).get(it['key'], default))
-            items.append(x)
-        v['items'] = items
+            x['removed'] = bool(gone.get(it['key']))
+            if x['removed']:
+                x['use'] = False
+            else:
+                items.append(x)
+            alls.append(x)
+        v['items'] = items              # แถวที่โชว์ในตาราง (ไม่รวมที่ลบออกจากคิว)
+        v['all'] = alls                 # ทุกแถวตามชีท (ไว้คัดลอก Product id ให้ตรงแถว)
+        v['n_removed'] = len(alls) - len(items)
         out.append(v)
     return out
 
 
 def pd_summary(view):
     n = {'sections': len(view), 'manual': 0, 'items': 0, 'use': 0, 'ready': 0, 'made': 0, 'unsure': 0,
-         'sheet_pid': 0}
+         'sheet_pid': 0, 'removed': 0}
     for s in view:
         if not s['has_price']:
             n['manual'] += 1
             continue
+        n['removed'] += s.get('n_removed', 0)
         for x in s['items']:
             n['items'] += 1
             if x['made']:
@@ -12405,25 +12522,40 @@ class OungProductTab(OungTab):
         a._btn(bar, '↻  อ่านไฟล์เดิมใหม่', self.reread).pack(
             side='left', padx=(8, 0), ipadx=8, ipady=4)
         a._btn(bar, '🗑  ล้าง', self.clear).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
+        a._btn(bar, '❓  วิธีใช้', self.help).pack(side='right', ipadx=10, ipady=4)
         self.lbl_file = tk.Label(s1, text='ยังไม่ได้เปิดไฟล์', bg=C['bg'], fg=C['fg'], font=FM,
                                  anchor='w')
         self.lbl_file.pack(fill='x', pady=(8, 0))
         tk.Label(s1, text='เปิดไฟล์ที่แถบ “สร้าง Bundle” แล้ว แถบนี้อ่านไฟล์เดียวกันให้เอง  ·  '
-                          'ชื่อสินค้า = คอลัมน์แรก (แถวหัวข้อไม่มีเลข bundle = ไม่เอา)  ·  '
-                          'หมวดหมู่ / สกุลเงิน / คอลัมน์ราคา = ตามโน้ตข้างตาราง (ขึ้น PROD ใน … · ใช้เคอเรนซี่ “…”)',
+                          'อ่านจากแท็บ bundle+id: ชื่อสินค้า · Bundle · ราคา · limit · หมวดหมู่/สกุลเงินจากโน้ตข้างตาราง',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w', justify='left',
-                 wraplength=1000).pack(fill='x', pady=(8, 0))
+                 wraplength=1000).pack(fill='x', pady=(6, 0))
 
-        s2 = a._card(p, '2) ตรวจ / แก้  (หัวข้อ › สินค้า)', grow=True)
+        s2 = a._card(p, '2) ตรวจ / แก้  — ติ๊ก ☑ ตัวที่จะสร้าง', grow=True)
+        tb = tk.Frame(s2, bg=C['bg'])
+        tb.pack(fill='x', pady=(0, 6))
+        a._btn(tb, '☑  ติ๊กทั้งหมด', lambda: self.tick_all(True)).pack(side='left', ipadx=6, ipady=2)
+        a._btn(tb, '☐  เอาติ๊กออกทั้งหมด', lambda: self.tick_all(False)).pack(
+            side='left', padx=(6, 0), ipadx=6, ipady=2)
+        a._btn(tb, '✏️  แก้ชื่อสินค้าทั้งหมด', self.rename_all).pack(
+            side='left', padx=(6, 0), ipadx=6, ipady=2)
+        a._btn(tb, '🗑  ลบแถวที่ไม่ได้ติ๊กออกจากคิว', self.remove_unticked).pack(
+            side='left', padx=(6, 0), ipadx=6, ipady=2)
+        self.btn_restore = a._btn(tb, '↺  เอาแถวที่ลบกลับมา', self.restore_removed)
+        self.btn_restore.pack(side='left', padx=(6, 0), ipadx=6, ipady=2)
+        a._btn(tb, '⌃  หุบ', lambda: self.expand(False)).pack(side='right', ipadx=6, ipady=2)
+        a._btn(tb, '⌄  กาง', lambda: self.expand(True)).pack(
+            side='right', padx=(0, 6), ipadx=6, ipady=2)
         tw = tk.Frame(s2, bg=C['bg'])
         tw.pack(fill='both', expand=True)
         self.tree = ttk.Treeview(tw, columns=[c[0] for c in self.COLS], show='tree headings',
-                                 style='TR.Treeview', height=4, selectmode='browse')
+                                 style='TR.Treeview', height=4, selectmode='extended')
         self.tree.heading('#0', text='หัวข้อ › หมวดหมู่  /  ชื่อสินค้า')
         self.tree.column('#0', width=330, minwidth=180, stretch=False, anchor='w')
         for c, t, w, grow in self.COLS:
             self.tree.heading(c, text=t)
             self.tree.column(c, width=w, minwidth=36, stretch=grow, anchor='w')
+        self.tree.column('use', anchor='center')
         for tag, kw in (('topic', {'foreground': C['fg'], 'font': FB}),
                         ('off', {'foreground': C['dim']}), ('ok', {'foreground': C['ok']}),
                         ('warn', {'foreground': C['warn']}), ('dup', {'foreground': '#7aa2f7'}),
@@ -12440,9 +12572,11 @@ class OungProductTab(OungTab):
         tw.columnconfigure(0, weight=1)
         self.tree.bind('<Button-1>', self._click, add='+')
         self.tree.bind('<Double-1>', self._dbl)
-        tk.Label(s2, text='ดับเบิลคลิกเพื่อแก้: ชื่อสินค้า · Bundle · ราคา · จำกัดซื้อ (เลข = PLAYER / ไม่จำกัด) · '
-                          'ลำดับการแสดง (ว่าง = ไม่แตะ)  ·  แถวหัวข้อ: ชื่อ = หมวดหมู่ · ช่องราคา = สกุลเงิน  ·  '
-                          'คลิกช่อง “ใช้” = เลือก/ไม่เลือก',
+        self.tree.bind('<Delete>', lambda e: self.remove_selected())
+        self.tree.bind('<space>', lambda e: self.tick_selected())
+        self.tree.bind('<Button-3>', self._menu)
+        tk.Label(s2, text='คลิก ☐/☑ = ติ๊ก/เอาออก  ·  ดับเบิลคลิกช่องที่จะแก้ (ชื่อ · Bundle · ราคา · จำกัดซื้อ · ลำดับ)  ·  '
+                          'คลิกขวาที่แถว = เมนู  ·  เลือกหลายแถว: Ctrl/Shift + คลิก แล้วกด Delete = ลบออกจากคิว',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w', justify='left',
                  wraplength=1000).pack(fill='x', pady=(6, 0))
         self.lbl_info = tk.Label(s2, text='', bg=C['bg'], fg=C['fg'], font=('Segoe UI', 9),
@@ -12505,6 +12639,13 @@ class OungProductTab(OungTab):
                 raise ValueError('รูปแบบไฟล์ไม่ถูก')
             st = pd_new_state()
             st.update(d)
+            if d.get('parser') != PD_PARSER:
+                # ข้อมูลจากรุ่นก่อน: ลำดับการแสดงยังเป็นกติกาเก่า -> ใช้กติกาใหม่ทันที แล้วอ่านไฟล์ซ้ำ
+                pd_apply_orders(st['sections'], [])
+                st['parser'] = PD_PARSER
+                f = st.get('file') or ''
+                if f and os.path.exists(f):
+                    self.app.root.after(200, lambda: self._upgrade_read(f))
             self.st = st
         except Exception as ex:
             try:
@@ -12514,6 +12655,12 @@ class OungProductTab(OungTab):
             why = str(ex)[:60]
             self.app.root.after(0, lambda: self.app.log(
                 'ไฟล์ข้อมูลแถบสร้าง Product อ่านไม่ได้ (%s) — เริ่มใหม่' % why, 'WARN'))
+
+    def _upgrade_read(self, f):
+        if self.running:
+            return
+        self.app.log('Oung Product: อ่านไฟล์เดิมซ้ำให้ (กติกาลำดับการแสดงเปลี่ยน) — ของที่แก้ไว้อยู่ครบ', 'INFO')
+        self.load_path(f, quiet=True)
 
     # ---------- เปิดไฟล์ ----------
     def reread(self):
@@ -12552,6 +12699,9 @@ class OungProductTab(OungTab):
         for s in view:
             if s['why']:
                 a.log('   ⊘ %s (%s): %s' % (s['title'], s['ref'], s['why']), 'INFO')
+            elif s.get('order_src'):
+                a.log('   · %s: ลำดับการแสดง = %s' % (s['title'], s['order_src']),
+                      'WARN' if s.get('order_guess') else 'INFO')
         if not secs:
             a.log('   ! ไม่เจอตารางสินค้า (แถวหัวที่มีป้าย bundle + product id) ในไฟล์นี้', 'WARN')
         log_event('oung_product_read', file=os.path.basename(path), sections=n['sections'],
@@ -12704,18 +12854,22 @@ class OungProductTab(OungTab):
         for i, s in enumerate(view):
             siid = 'PS%d' % i
             items = s['items']
-            n_use = sum(1 for x in items if x['use'] and not x['made'])
-            n_made = sum(1 for x in items if x['made'])
+            live = [x for x in items if not x['made']]
+            n_use = sum(1 for x in live if x['use'])
+            n_made = len(items) - len(live)
             manual = not s['has_price']
             if manual:
                 stt, mark = '⊘ ทำเองบนเว็บ', '—'
             else:
-                stt = 'เลือก %d/%d' % (n_use, len(items)) + ('  ✓%d' % n_made if n_made else '')
-                mark = '✔' if n_use else '✗'
+                stt = 'ติ๊ก %d/%d' % (n_use, len(live)) + ('  ✓%d' % n_made if n_made else '') + \
+                      ('  · ลบ %d' % s['n_removed'] if s.get('n_removed') else '')
+                mark = PD_CB_ON if live and n_use == len(live) else PD_CB_PART if n_use else PD_CB_OFF
             tr.insert('', 'end', iid=siid,
                       text='🛒  %s  ›  %s' % (s['title'], s['cat'] or '❓ ไม่รู้หมวดหมู่'),
                       values=(mark, stt, '', '', s['cur'] or ('—' if manual else '❓ สกุลเงิน'),
-                              '', ('เรียงตามชีท' if s['sort'] else ''), s['why']),
+                              '', ('⚠ เดาลำดับ' if s.get('order_guess') else
+                                   'ตามคอลัมน์ลำดับ' if s['sort'] or s.get('order_in_table') else ''),
+                              s['why']),
                       open=opened.get(siid, not manual),
                       tags=('topic', 'off') if manual else ('topic',))
             self._map[siid] = ('s', i)
@@ -12735,7 +12889,7 @@ class OungProductTab(OungTab):
                     tag = 'warn'
                 lim = x['limit'] or '⚠ ใส่ limit'
                 tr.insert(siid, 'end', iid=iid, text='   %d. %s' % (j + 1, x['name'] or '⚠ ไม่มีชื่อ'),
-                          values=('✔' if (x['use'] and not x['made']) else ('✓' if x['made'] else '✗'),
+                          values=(PD_CB_DONE if x['made'] else PD_CB_ON if x['use'] else PD_CB_OFF,
                                   self._short(x), x['move'], x['bundle'] or '⚠ ใส่เลข',
                                   x['price'] or '⚠ ใส่ราคา', lim, x['order'] or '—',
                                   '  ·  '.join(self._note(x))),
@@ -12748,6 +12902,9 @@ class OungProductTab(OungTab):
             tr.yview_moveto(top)
         except Exception:
             pass
+        n_gone = sum(v.get('n_removed', 0) for v in view)
+        self.btn_restore.config(text='↺  เอาแถวที่ลบกลับมา (%d)' % n_gone if n_gone else '↺  เอาแถวที่ลบกลับมา',
+                                state='normal' if n_gone else 'disabled')
         self._summary(view)
         self._show_times()
         self._save()
@@ -12769,6 +12926,8 @@ class OungProductTab(OungTab):
             txt += '  ·  ? ต้องตรวจบนเว็บ %d' % n['unsure']
         if n['sheet_pid']:
             txt += '  ·  มี Product id ในชีทแล้ว %d (ไม่ได้ติ๊กไว้ให้)' % n['sheet_pid']
+        if n['removed']:
+            txt += '  ·  🗑 ลบออกจากคิว %d' % n['removed']
         if n['manual']:
             txt += '  ·  ⊘ ทำเองบนเว็บ %d หัวข้อ' % n['manual']
         self.lbl_sum.config(text=txt, fg=C['ok'] if n['use'] and n['ready'] == n['use']
@@ -12788,10 +12947,8 @@ class OungProductTab(OungTab):
                     parts.append('ราคาจากคอลัมน์ “%s”' % sec['price_h'])
                 if sec['limit_h']:
                     parts.append('limit จากคอลัมน์ “%s”' % sec['limit_h'])
-                if sec['sort']:
-                    parts.append('เรียงลำดับตามแถวในชีท (ลำดับการแสดง 1, 2, 3 …)')
-                if sec['notes']:
-                    parts.append('โน้ตในชีท: ' + ' / '.join(n.replace('\n', ' ') for n in sec['notes'])[:220])
+                if sec.get('order_src'):
+                    parts.append('ลำดับการแสดง: ' + sec['order_src'])
                 txt = '  ·  '.join(parts)
             elif sec and m[0] == 'p' and m[2] < len(sec['items']):
                 x = sec['items'][m[2]]
@@ -12832,7 +12989,9 @@ class OungProductTab(OungTab):
         if m[0] == 'p':
             x = sec['items'][m[2]]
             if x['made']:
-                return
+                self.lbl_sum.config(text='ℹ  แถวนี้สร้างไปแล้ว — ถ้าจะสร้างใหม่ คลิกขวา › ล้างสถานะ “สร้างแล้ว”',
+                                    fg=C['warn'])
+                return 'break'
             self.st['use'][x['key']] = not x['use']
         else:
             live = [x for x in sec['items'] if not x['made']]
@@ -12883,17 +13042,9 @@ class OungProductTab(OungTab):
         x = sec['items'][m[2]]
         if x['made']:
             return None
-        src = next((i for s in st['sections'] if s['skey'] == sec['skey']
-                    for i in s['items'] if i['key'] == x['key']), {})
 
         def put(field, v):
-            d = st['edit'].setdefault(x['key'], {})
-            if v == src.get(field):
-                d.pop(field, None)
-            else:
-                d[field] = v
-            if not d:
-                st['edit'].pop(x['key'], None)
+            self._put(x['key'], field, v)
 
         if what == 'name':
             def f(v):
@@ -12928,6 +13079,18 @@ class OungProductTab(OungTab):
         return {'kind': 'name' if what == 'name' else what,
                 'get': lambda: x.get(what) or '', 'set': f}
 
+    def _put(self, key, field, v):
+        """เก็บค่าที่คนแก้ — ถ้าแก้กลับเท่าค่าในชีท = ล้างค่าที่แก้ทิ้ง (ไม่ค้างเป็นของแก้)"""
+        st = self.st
+        src = next((i for s in st['sections'] for i in s['items'] if i['key'] == key), {})
+        d = st['edit'].setdefault(key, {})
+        if v == src.get(field):
+            d.pop(field, None)
+        else:
+            d[field] = v
+        if not d:
+            st['edit'].pop(key, None)
+
     def _live(self, iid):
         m = self._map.get(iid)
         if not m or m[1] >= len(self._view):
@@ -12937,17 +13100,161 @@ class OungProductTab(OungTab):
         x = self._view[m[1]]['items'][m[2]]
         return bool(x['use'] and not x['made'])
 
+    # ---------- ติ๊ก / ลบออกจากคิว ----------
+    def _live_items(self):
+        return [x for s in self._view if s['has_price'] for x in s['items'] if not x['made']]
+
+    def tick_all(self, on):
+        xs = self._live_items()
+        if not xs:
+            return
+        self._cancel_edit()
+        for x in xs:
+            self.st['use'][x['key']] = bool(on)
+        self.refresh()
+
+    def _sel_items(self):
+        """แถวที่คลุมไว้ในตาราง -> สินค้า (คลุมแถวหัวข้อ = ทุกแถวในหัวข้อนั้น)"""
+        out, seen = [], set()
+        for iid in self.tree.selection():
+            m = self._map.get(iid)
+            if not m or m[1] >= len(self._view):
+                continue
+            sec = self._view[m[1]]
+            if m[0] == 's':
+                xs = sec['items']
+            else:
+                xs = [sec['items'][m[2]]] if m[2] < len(sec['items']) else []
+            for x in xs:
+                if x['key'] not in seen:
+                    seen.add(x['key'])
+                    out.append(x)
+        return out
+
+    def tick_selected(self):
+        xs = [x for x in self._sel_items() if not x['made']]
+        if xs:
+            self._cancel_edit()
+            on = not all(x['use'] for x in xs)
+            for x in xs:
+                self.st['use'][x['key']] = on
+            self.refresh()
+        return 'break'
+
+    def _remove(self, xs):
+        names = '\n'.join('  • %s' % x['name'][:44] for x in xs[:8]) + ('\n  …' if len(xs) > 8 else '')
+        if not messagebox.askyesno('ลบออกจากคิว', 'ลบ %d แถวนี้ออกจากคิว?\n\n%s\n\n'
+                                                  '(ไม่ได้ลบในชีท · กด “↺ เอาแถวที่ลบกลับมา” ได้)' % (len(xs), names)):
+            return False
+        self._cancel_edit()
+        for x in xs:
+            self.st['removed'][x['key']] = True
+        self.app.log('Oung Product: ลบออกจากคิว %d แถว' % len(xs), 'INFO')
+        self.refresh()
+        return True
+
+    def remove_unticked(self):
+        xs = [x for x in self._live_items() if not x['use']]
+        if not xs:
+            return messagebox.showinfo('ไม่มีแถวให้ลบ', 'ทุกแถวติ๊ก ☑ ไว้หมดแล้ว\n\n'
+                                                        'แถวไหนไม่ใช้ คลิกเอาติ๊กออกก่อน แล้วค่อยกดปุ่มนี้')
+        self._remove(xs)
+
+    def remove_selected(self):
+        xs = self._sel_items()
+        if not xs:
+            messagebox.showinfo('เลือกแถวก่อน', 'คลิกเลือกแถวที่จะลบก่อน (หลายแถว: Ctrl หรือ Shift + คลิก)')
+        else:
+            self._remove(xs)
+        return 'break'
+
+    def restore_removed(self):
+        n = len(self.st.get('removed') or {})
+        if not n:
+            return
+        if not messagebox.askyesno('เอากลับมา', 'เอาแถวที่ลบออกจากคิวกลับมาทั้งหมด %d แถว?' % n):
+            return
+        self.st['removed'] = {}
+        self.refresh()
+
+    def _reset_made(self, xs):
+        xs = [x for x in xs if x['made']]
+        if not xs or not messagebox.askyesno(
+                'ล้างสถานะ', 'ล้างสถานะ “สร้างแล้ว” %d แถว ให้สั่งสร้างใหม่ได้?\n\n'
+                             '⚠ ตรวจบนเว็บก่อนนะว่ายังไม่มี Product นี้ ไม่งั้นจะได้ของซ้ำ\n'
+                             '(ล้างแล้วยังไม่ติ๊กให้ — ติ๊กเองอีกทีถึงจะสร้าง)' % len(xs)):
+            return
+        for x in xs:
+            self.st['made'].pop(x['key'], None)
+            self.st['last'].pop(x['key'], None)
+            self.st['use'][x['key']] = False
+        self.refresh()
+
+    def _menu(self, ev):
+        """คลิกขวาที่แถว = เมนูสั้นๆ"""
+        iid = self.tree.identify_row(ev.y)
+        if not iid:
+            return
+        if iid not in self.tree.selection():
+            self.tree.selection_set(iid)
+        xs = self._sel_items()
+        m = self._map.get(iid) or ('', 0)
+        menu = tk.Menu(self.tree, tearoff=0, bg=C['card'], fg=C['fg'], activebackground=C['accent'],
+                       activeforeground='white', font=FM)
+        menu.add_command(label='☑  ติ๊ก / ☐ เอาติ๊กออก   (Space)', command=self.tick_selected)
+        if len(self.tree.selection()) == 1 and self._target(iid, '#0'):
+            menu.add_command(label='✏️  แก้หมวดหมู่' if m[0] == 's' else '✏️  แก้ชื่อสินค้า',
+                             command=lambda: self.edit(iid, '#0'))
+        menu.add_command(label='🗑  ลบออกจากคิว   (Delete)', command=self.remove_selected)
+        if any(x['made'] for x in xs):
+            menu.add_separator()
+            menu.add_command(label='↺  ล้างสถานะ “สร้างแล้ว” (ให้สร้างใหม่ได้)',
+                             command=lambda: self._reset_made(xs))
+        self._last_menu = menu
+        try:
+            menu.tk_popup(ev.x_root, ev.y_root)
+        finally:
+            menu.grab_release()
+        return 'break'
+
+    def rename_all(self):
+        if not any(s['has_price'] and any(not x['made'] for x in s['items']) for s in self._view):
+            return messagebox.showinfo('ยังไม่มีสินค้า', 'เปิดไฟล์ชีทก่อนนะ (หรือทุกตัวสร้างไปแล้ว)')
+        self._cancel_edit()
+        self._name_dlg = PdNameDialog(self)
+
+    def help(self):
+        messagebox.showinfo(
+            'วิธีใช้ — สร้าง Product',
+            '1) เปิดไฟล์ชีท Oung (เปิดที่แถบ “สร้าง Bundle” ก็ได้ อ่านให้เอง)\n\n'
+            '2) ดูตาราง:  ☑ = จะสร้าง  ·  ☐ = ไม่สร้าง\n'
+            '    คลิกช่อง ☑/☐ = ติ๊ก/เอาออก  ·  คลิกช่องของหัวข้อ = ทั้งหัวข้อ\n'
+            '    แถวไหนไม่ใช้ → เอาติ๊กออก แล้วกด “🗑 ลบแถวที่ไม่ได้ติ๊กออกจากคิว”\n\n'
+            '3) แก้ค่า: ดับเบิลคลิกช่องที่จะแก้ (ชื่อ · Bundle · ราคา · จำกัดซื้อ · ลำดับ)\n'
+            '    แก้ชื่อหลายแถวพร้อมกัน → “✏️ แก้ชื่อสินค้าทั้งหมด”\n\n'
+            '4) ดูเวลาขายในกล่องข้อ 3 (เริ่ม = วันนี้ไว้เทส · หยุด = ตามชีท)\n\n'
+            '5) กด ▶ เริ่มทำงาน ตอนยังไม่ติ๊ก “สร้างจริง” = ลองกรอกให้ดูบนเว็บเฉยๆ ไม่กดสร้าง\n\n'
+            '6) ดูแล้วถูกต้อง → ติ๊ก “กดปุ่ม สร้าง Product จริง” แล้วกด ▶ อีกครั้ง\n\n'
+            '7) เสร็จแล้วคลิกหัวข้อ → “📋 คัดลอก Product id” ไปวางคอลัมน์ product id ในชีท\n\n'
+            'สถานะ:  ✓ พร้อม · ⚠ ยังขาดอะไร (ดูหมายเหตุ) · ✓ ทดสอบผ่าน · ✗ ไม่ผ่าน\n'
+            '            ✓ สร้างแล้ว · ? ตรวจบนเว็บ (กดแล้วเว็บไม่ตอบ)')
+
     # ---------- คัดลอก ----------
     def copy_ids(self):
         """Product id ของหัวข้อที่เลือก เรียงตามแถวในชีท (วางลงคอลัมน์ product id ได้เลย)"""
         s = self.tree.selection()
         m = self._map.get(s[0]) if s else None
         secs = [self._view[m[1]]] if m and m[1] < len(self._view) else \
-            [v for v in self._view if any(x['made'] for x in v['items'])]
+            [v for v in self._view if any(x['made'] for x in v['all'])]
         if not secs:
             return messagebox.showinfo('ยังไม่มี', 'ยังไม่มี Product id ที่สร้างจากโปรแกรมนะ')
         sec = secs[0]
-        lines = [((x['made'] or {}).get('id') or x['pid'] or '') for x in sec['items']]
+        rows = sec['all']
+        if not rows:
+            return messagebox.showinfo('ยังไม่มี', 'หัวข้อ “%s” ไม่มีสินค้า' % sec['title'])
+        by_row = {x['row']: ((x['made'] or {}).get('id') or x['pid'] or '') for x in rows}
+        # 1 บรรทัด = 1 แถวในชีท (แถวแรกถึงแถวสุดท้ายของตาราง) จะได้วางลงคอลัมน์ product id ตรงแถว
+        lines = [by_row.get(r, '') for r in range(rows[0]['row'], rows[-1]['row'] + 1)]
         if not any(lines):
             return messagebox.showinfo('ยังไม่มี', 'หัวข้อ “%s” ยังไม่มี Product id' % sec['title'])
         self.app.root.clipboard_clear()
@@ -13100,6 +13407,167 @@ class OungProductTab(OungTab):
               'OK' if not errc else 'WARN')
         log_event('oung_product_done', ok=okc, fail=errc, commit=bool(do))
         return okc, errc
+
+
+
+class PdNameDialog:
+    """หน้าต่าง ✏️ แก้ชื่อสินค้าทั้งหมด — ช่องพิมพ์ชื่อเรียงตามตาราง แก้ได้ทีละหลายแถว
+    + แม่แบบชื่อต่อหัวข้อ เช่น  รางวัลสะสม {ราคา} ครั้ง  -> ใส่ให้ทุกแถวในหัวข้อนั้นทีเดียว"""
+    TAGS = (('{ชื่อ}', 'ชื่อในชีท'), ('{ราคา}', 'ราคา'), ('{bundle}', 'เลข Bundle'), ('{ที่}', 'แถวที่ 1, 2, 3 …'))
+
+    def __init__(self, tab):
+        self.t = tab
+        a = tab.app
+        self.rows = []                      # [(สินค้า, ช่องพิมพ์)]
+        w = tk.Toplevel(a.root)
+        self.win = w
+        w.title('แก้ชื่อสินค้าทั้งหมด')
+        w.configure(bg=C['bg'])
+        w.geometry('1060x640')
+        try:
+            w.transient(a.root)
+        except Exception:
+            pass
+        tk.Label(w, text='แก้ชื่อในช่องขวามือได้เลยทุกแถว แล้วกด “💾 บันทึกชื่อ”  ·  '
+                         'ชื่อเหมือนกันหลายแถว: พิมพ์ “แม่แบบชื่อ” ของหัวข้อนั้น แล้วกด “ใส่ให้ทุกแถว”',
+                 bg=C['bg'], fg=C['fg'], font=FM, anchor='w', justify='left',
+                 wraplength=1000).pack(fill='x', padx=14, pady=(12, 2))
+        tk.Label(w, text='คำพิเศษในแม่แบบ:  ' + '   '.join('%s = %s' % t for t in self.TAGS) +
+                         '     เช่น  รางวัลสะสม {ราคา} ครั้ง  →  รางวัลสะสม 10 ครั้ง, รางวัลสะสม 30 ครั้ง …',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w', justify='left',
+                 wraplength=1000).pack(fill='x', padx=14, pady=(0, 6))
+        bot = tk.Frame(w, bg=C['bg'])
+        bot.pack(side='bottom', fill='x', padx=14, pady=10)
+        self.lbl = tk.Label(bot, text='', bg=C['bg'], fg=C['err'], font=FB, anchor='w')
+        self.lbl.pack(side='left', fill='x', expand=True)
+        a._btn(bot, '💾  บันทึกชื่อ', self.save, primary=True).pack(side='right', ipadx=14, ipady=4)
+        a._btn(bot, 'ยกเลิก', self.close).pack(side='right', padx=(0, 8), ipadx=12, ipady=4)
+
+        outer = tk.Frame(w, bg=C['bg'])
+        outer.pack(fill='both', expand=True, padx=14)
+        cv = tk.Canvas(outer, bg=C['bg'], highlightthickness=0)
+        sb = ttk.Scrollbar(outer, orient='vertical', command=cv.yview)
+        inner = tk.Frame(cv, bg=C['bg'])
+        inner.bind('<Configure>', lambda e: cv.configure(scrollregion=cv.bbox('all')))
+        cv.create_window((0, 0), window=inner, anchor='nw')
+        cv.configure(yscrollcommand=sb.set)
+        cv.pack(side='left', fill='both', expand=True)
+        sb.pack(side='right', fill='y')
+        self.cv = cv
+        self.sections = []
+        for sec in pd_view(tab.st):
+            live = [x for x in sec['items'] if not x['made']] if sec['has_price'] else []
+            if not live:
+                continue
+            hd = tk.Frame(inner, bg=C['bg'])
+            hd.pack(fill='x', pady=(10, 2))
+            tk.Label(hd, text='🛒  %s  ›  %s' % (sec['title'], sec['cat'] or '-'), bg=C['bg'], fg=C['fg'],
+                     font=FB, anchor='w').pack(side='left')
+            tf = tk.Frame(inner, bg=C['bg'])
+            tf.pack(fill='x', pady=(2, 4))
+            tk.Label(tf, text='แม่แบบชื่อ:', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9)).pack(side='left')
+            te = a._entry(tf, width=34)
+            te.pack(side='left', padx=(6, 6), ipady=3)
+            ents = []
+            a._btn(tf, '⇣  ใส่ให้ทุกแถวของหัวข้อนี้', lambda te=te, ents=ents: self.apply(te, ents)).pack(
+                side='left', ipadx=6, ipady=1)
+            a._btn(tf, '↺  คืนชื่อตามชีท', lambda ents=ents: self.reset(ents)).pack(
+                side='left', padx=(6, 0), ipadx=6, ipady=1)
+            gr = tk.Frame(inner, bg=C['bg'])
+            gr.pack(fill='x')
+            wid = (3, 7, 7, 40)                 # กว้างเท่ากันทุกหัวข้อ ช่องพิมพ์จะได้ตรงกัน
+            for c, t in enumerate(('#', 'Bundle', 'ราคา', 'ชื่อในชีท', 'ชื่อสินค้าที่จะใช้ (แก้ได้)')):
+                tk.Label(gr, text=t, bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w',
+                         width=wid[c] if c < 4 else 0).grid(row=0, column=c, sticky='w', padx=4)
+            for j, x in enumerate(live, 1):
+                for c, t in enumerate((str(j), x['bundle'], x['price'], x['sheet_name'][:42])):
+                    tk.Label(gr, text=t, bg=C['bg'], fg=C['fg'] if c != 3 else C['dim'], font=FM,
+                             anchor='w', width=wid[c]).grid(row=j, column=c, sticky='w', padx=4)
+                e = a._entry(gr, width=48)
+                e.insert(0, x['name'])
+                e.grid(row=j, column=4, sticky='we', padx=4, pady=1, ipady=2)
+                ents.append((x, e, j))
+                self.rows.append((x, e))
+            self.sections.append((sec, te, ents))
+        for wd in (cv, inner):
+            wd.bind('<Enter>', lambda e: self._wheel(True))
+            wd.bind('<Leave>', lambda e: self._wheel(False))
+        w.protocol('WM_DELETE_WINDOW', self.close)
+        w.bind('<Escape>', lambda e: self.close())
+        try:
+            w.grab_set()
+        except Exception:
+            pass
+
+    def _wheel(self, on):
+        try:
+            if on:
+                self.cv.bind_all('<MouseWheel>', lambda e: self.cv.yview_scroll(int(-e.delta / 120) or
+                                                                                 (-1 if e.delta > 0 else 1), 'units'))
+                self.cv.bind_all('<Button-4>', lambda e: self.cv.yview_scroll(-1, 'units'))
+                self.cv.bind_all('<Button-5>', lambda e: self.cv.yview_scroll(1, 'units'))
+            else:
+                for k in ('<MouseWheel>', '<Button-4>', '<Button-5>'):
+                    self.cv.unbind_all(k)
+        except Exception:
+            pass
+
+    @classmethod
+    def fill(cls, tmpl, x, j):
+        out = tmpl
+        for tag, v in (('{ชื่อ}', x['sheet_name']), ('{ราคา}', x['price']), ('{bundle}', x['bundle']),
+                       ('{ที่}', str(j))):
+            out = out.replace(tag, str(v or ''))
+        return re.sub(r'\s+', ' ', out).strip()
+
+    def apply(self, te, ents):
+        tmpl = te.get().strip()
+        if not tmpl:
+            self.lbl.config(text='พิมพ์แม่แบบชื่อก่อน เช่น  รางวัลสะสม {ราคา} ครั้ง')
+            return
+        if not any(t in tmpl for t, _ in self.TAGS) and len(ents) > 1 and not messagebox.askyesno(
+                'ชื่อซ้ำกันหมด', 'แม่แบบนี้ไม่มีคำพิเศษ {…} → ทุกแถวจะได้ชื่อ “%s” เหมือนกันหมด\n\nใส่แบบนี้เลยไหม?'
+                % tmpl, parent=self.win):
+            return
+        for x, e, j in ents:
+            e.delete(0, 'end')
+            e.insert(0, self.fill(tmpl, x, j))
+        self.lbl.config(text='')
+
+    def reset(self, ents):
+        for x, e, j in ents:
+            e.delete(0, 'end')
+            e.insert(0, x['sheet_name'])
+
+    def save(self):
+        bad = 0
+        for x, e in self.rows:
+            empty = not e.get().strip()
+            e.config(highlightbackground=C['err'] if empty else C['line'])
+            bad += empty
+        if bad:
+            self.lbl.config(text='⚠ ชื่อว่าง %d ช่อง (กรอบแดง) — ใส่ชื่อก่อนนะ' % bad)
+            return
+        n = 0
+        for x, e in self.rows:
+            v = re.sub(r'\s+', ' ', e.get()).strip()
+            if v != x['name']:
+                n += 1
+            self.t._put(x['key'], 'name', v)
+        self.t.app.log('Oung Product: แก้ชื่อสินค้า %d แถว' % n, 'OK' if n else 'INFO')
+        self.close()
+        self.t.refresh()
+
+    def close(self):
+        self._wheel(False)
+        try:
+            self.win.grab_release()
+        except Exception:
+            pass
+        try:
+            self.win.destroy()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':
