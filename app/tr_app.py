@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.1.3 : เวลาสิ้นสุด / หยุดขาย ต้องถึงวินาทีสุดท้าย 23:59:59 ทุกแท็บ (เดิมบางทีเข้าเว็บเป็น 23:59:00) · ตรวจช่องบนเว็บรวมวินาทีด้วย
 V1.1.2 : สร้าง Product — แก้สกุลเงินไม่ถูกเลือก (หากล่อง “สกุลเงินที่ 1” ไม่เจอ) · พิมพ์ค้น mileage / coral แบบในคลิป
 V1.1.1 : สร้าง Product — ช่องติ๊ก ☑/☐ · ลบแถวออกจากคิว · แก้ชื่อสินค้าทั้งหมด (แม่แบบชื่อ) · ลำดับการแสดงจากคอลัมน์ “ลำดับ”
 V1.1.0 : แท็บ Oung มีแถบย่อย — 📦 สร้าง Bundle (ของเดิม) · 🛒 สร้าง Product ใหม่ (อ่านแท็บ bundle+id กรอกหน้าสร้าง Product)
@@ -1873,21 +1874,34 @@ JS_CODE_CAL = r"""
     t.setAttribute('data-trw-day', '1');
     return 'ok';
   }
+  // ช่องวินาทีบางแบบไม่ใช่ <input> แต่เป็นกล่องพิมพ์ตัวเลข [role=spinbutton] -> ต้องนับด้วย
+  // (ไม่งั้นเจอแค่ ชม.+นาที แล้ววินาทีค้าง 00 เงียบๆ)
+  const isSpin = x => x.tagName !== 'INPUT' && x.getAttribute('role') === 'spinbutton';
   if (act === 'time') {           // ติดป้ายช่องเวลา (ชม./นาที/วินาที) ที่อยู่ใต้ตารางวัน
     const q = 'select,input:not([type=hidden]):not([type=checkbox]):not([type=radio]),' +
-              '[role=combobox]';
-    const ctl = [...rt.querySelectorAll(q)].filter(vis).filter(x => after(x, gr));
+              '[role=combobox],[role=spinbutton]';
+    const ctl = [...rt.querySelectorAll(q)].filter(vis).filter(x => after(x, gr))
+        .filter((x, i, all) => !all.some(o => o !== x && o.contains(x)));
     document.querySelectorAll('[data-trw-t]').forEach(e => e.removeAttribute('data-trw-t'));
     ctl.forEach((x, i) => x.setAttribute('data-trw-t', String(i)));
     return 'ok|' + ctl.map(x => x.tagName === 'SELECT' ? 'select'
-        : x.tagName === 'INPUT' ? ('input:' + (x.getAttribute('type') || 'text')) : 'combo').join(',');
+        : x.tagName === 'INPUT' ? ('input:' + (x.getAttribute('type') || 'text'))
+        : isSpin(x) ? 'spin' : 'combo').join(',');
   }
   if (act === 'timeval') {
     const ctl = [...rt.querySelectorAll('[data-trw-t]')];
     ctl.sort((p, q) => Number(p.getAttribute('data-trw-t')) - Number(q.getAttribute('data-trw-t')));
     return 'ok|' + ctl.map(x => x.tagName === 'SELECT'
         ? (x.selectedIndex >= 0 ? x.options[x.selectedIndex].text.trim() : '')
-        : x.tagName === 'INPUT' ? String(x.value || '') : txt(x)).join('|');
+        : x.tagName === 'INPUT' ? String(x.value || '')
+        : isSpin(x) ? String(x.getAttribute('aria-valuenow') || txt(x)) : txt(x)).join('|');
+  }
+  if (act === 'nextedit') {       // ช่องที่โฟกัสอยู่ตอนนี้ = ช่องพิมพ์ในปฏิทินที่ยังไม่ได้ติดป้ายไหม
+    const a = document.activeElement;
+    if (!a || !rt.contains(a) || a.hasAttribute('data-trw-t')) return 'no';
+    const ok = (a.tagName === 'INPUT' && !/checkbox|radio|hidden/.test(a.type || '')) ||
+               a.isContentEditable || a.getAttribute('role') === 'spinbutton';
+    return ok ? 'ok|' + (a.tagName === 'INPUT' ? String(a.value || '') : txt(a)) : 'no';
   }
   if (act === 'optval') {         // a = ลำดับช่อง, b = ตัวเลขที่อยากได้ -> value ของ option
     const s = rt.querySelector('[data-trw-t="' + a + '"]');
@@ -3513,6 +3527,8 @@ def wr_time(v, end=False):
         return None
     hh, mm = int(m.group(1)), int(m.group(2))
     ss = int(m.group(3)) if m.group(3) else (59 if end else 0)
+    if end and mm == 59 and ss == 0:
+        ss = 59                     # ช่องเวลาใน Excel (23:59) อ่านมาได้ 23:59:00 -> ถึงวินาทีสุดท้าย
     if hh > 23 or mm > 59:
         return None
     return '%02d:%02d:%02d' % (hh, mm, ss)
@@ -3569,7 +3585,48 @@ def wr_dt_shown_ok(text, dt):
     hh = [h]
     if 'am' in low or 'pm' in low:
         hh.append(h % 12 or 12)
-    return any(re.search(r'(^|\D)0?%d\s*[:.]\s*%02d(\D|$)' % (x, mi), t) for x in hh)
+    if not any(re.search(r'(^|\D)0?%d\s*[:.]\s*%02d(\D|$)' % (x, mi), t) for x in hh):
+        return False
+    # ช่องบนเว็บโชว์วินาทีด้วย (23:59:00) -> วินาทีต้องตรงด้วย
+    # เคยพลาด: เช็กแค่ ชม.:นาที เลยปล่อย 23:59:00 ผ่าน ทั้งที่ต้องเป็น 23:59:59
+    if len(dt) > 5:
+        for x in hh:
+            m3 = re.search(r'(?:^|\D)0?%d\s*[:.]\s*%02d\s*[:.]\s*(\d{2})(?!\d)' % (x, mi), t)
+            if m3:
+                return int(m3.group(1)) == int(dt[5] or 0)
+    return True
+
+
+def wr_end_fix(s):
+    """เวลาสิ้นสุด / หยุดขาย: ทีมใช้ “ถึงวินาทีสุดท้าย” เสมอ
+    เอกสารเขียน 23.59 (ไม่มีวินาที) หรือ Excel เก็บเป็น 23:59:00 -> 23:59:59 · มีแต่วันที่ -> 23:59:59
+    เวลาอื่นที่ใส่วินาทีมาเอง (เช่น 18:30:15) ไม่ยุ่ง"""
+    t = str(s or '').strip()
+    m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?)?$', t)
+    if not m:
+        return t
+    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if m.group(4) is None:
+        h, mi, se = 23, 59, 59
+    else:
+        h, mi = int(m.group(4)), int(m.group(5))
+        se = int(m.group(6)) if m.group(6) is not None else 59
+        if mi == 59 and se == 0:
+            se = 59
+    return '%04d-%02d-%02d %02d:%02d:%02d' % (y, mo, d, h, mi, se)
+
+
+def wr_start_fix(s):
+    """เวลาเริ่ม: มีแต่วันที่ -> 00:00:00 · ไม่มีวินาที -> :00 (อย่างอื่นไม่ยุ่ง)"""
+    t = str(s or '').strip()
+    m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?)?$', t)
+    if not m:
+        return t
+    h = int(m.group(4) or 0)
+    mi = int(m.group(5) or 0)
+    se = int(m.group(6) or 0)
+    return '%04d-%02d-%02d %02d:%02d:%02d' % (int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                                             h, mi, se)
 
 
 def wr_test_rows(rows, now=None):
@@ -6129,6 +6186,13 @@ class App:
                         await loc.click(timeout=3000)
                         await loc.press('Control+A')
                         await loc.press_sequentially('%02d' % num, delay=20)
+                    # ออกจากช่อง = เว็บบางแบบรับค่าตอนนี้ (ช่องสุดท้ายคือวินาที เคยหายเพราะปิดปฏิทินก่อน)
+                    await loc.evaluate('e => e.blur && e.blur()')
+                elif k == 'spin':
+                    await loc.click(timeout=3000)
+                    await loc.press('Control+A')
+                    await loc.press_sequentially('%02d' % num, delay=40)
+                    await loc.evaluate('e => e.blur && e.blur()')
                 else:
                     await loc.click(timeout=3000)
                     await page.wait_for_timeout(250)
@@ -6198,6 +6262,16 @@ class App:
         why = await self._w_cal_time(page, h, mi, se)
         if why:
             return await fail(why)
+        await page.wait_for_timeout(150)
+        live_ok, live = await self._w_date_ok(page, label, when)
+        if not live_ok and wr_dt_shown_ok(live, dt[:5]):
+            # ชม.:นาที ถูกแล้ว แต่วินาทีไม่ตรง (เช่น 23:59:00) -> ช่องวินาทีอาจหาไม่เจอ
+            # ลองกด Tab จากช่องสุดท้ายที่ตั้งไว้ แล้วพิมพ์วินาทีลงช่องถัดไป (เฉพาะช่องพิมพ์ในปฏิทิน)
+            await self._w_cal_secs_kb(page, se)
+            await page.wait_for_timeout(200)
+            live_ok, live = await self._w_date_ok(page, label, when)
+            if not live_ok:
+                await self._w_cal_dump(page, '%s | วินาทีไม่เข้า: ช่องบนเว็บ %s อยากได้ %s' % (what, live, when))
         await self._w_cal_close(page)
         await page.wait_for_timeout(200)
         r = str(await page.evaluate(JS_CODE_MARK, [label, 'left', 'trig']))
@@ -6205,9 +6279,31 @@ class App:
         if wr_dt_shown_ok(shown, dt):
             self.log('   · %s = %s  (ช่องบนเว็บขึ้น “%s”)' % (what, when, shown[:40]), 'INFO')
             return True
-        self.log('   ! %s: เลือกแล้วแต่ช่องบนเว็บขึ้น “%s” ไม่ตรงกับ %s — ต้องเช็กเองบนเว็บ'
-                 % (what, shown[:40] or 'ว่าง', when), 'WARN')
+        sec = ' (วินาทีไม่ตรง)' if wr_dt_shown_ok(shown, dt[:5]) else ''
+        self.log('   ! %s: เลือกแล้วแต่ช่องบนเว็บขึ้น “%s” ไม่ตรงกับ %s%s — ต้องเช็กเองบนเว็บ'
+                 % (what, shown[:40] or 'ว่าง', when, sec), 'WARN')
         return False
+
+    async def _w_cal_secs_kb(self, page, se):
+        """ทางสำรองตั้งวินาที: โฟกัสช่องเวลาช่องสุดท้ายที่หาเจอ -> Tab -> ถ้าไปตกช่องพิมพ์ในปฏิทิน
+        ที่ยังไม่ได้ตั้ง (= ช่องวินาทีที่หาไม่เจอ) ค่อยพิมพ์ ไม่ใช่ช่องพิมพ์ = ไม่ทำอะไร (ไม่เดา)"""
+        r = await self._w_cal(page, 'time')
+        kinds = r.split('|', 1)[1].split(',') if r.startswith('ok|') and r != 'ok|' else []
+        if not kinds:
+            return False
+        try:
+            await page.locator('[data-trw-t="%d"]' % (len(kinds) - 1)).first.focus(timeout=2000)
+            await page.keyboard.press('Tab')
+            await page.wait_for_timeout(120)
+            if not (await self._w_cal(page, 'nextedit')).startswith('ok'):
+                return False
+            await page.keyboard.press('Control+A')
+            await page.keyboard.type('%02d' % se, delay=40)
+            await page.keyboard.press('Tab')
+            self.log('     (ตั้งวินาทีด้วยคีย์บอร์ดอีกทาง)', 'INFO')
+            return True
+        except Exception:
+            return False
 
     async def _w_date_ok(self, page, label, when):
         r = str(await page.evaluate(JS_CODE_MARK, [label, 'left', 'trig']))
@@ -6478,6 +6574,10 @@ class App:
             self.log('   ✗ ยังไม่ได้ล็อกอิน — กด “เปิดหน้า Login” ด้านบนก่อน', 'ERR')
             return False
 
+        e0 = str(d.get('end') or '')
+        if e0 and wr_end_fix(e0) != e0:
+            d['end'] = wr_end_fix(e0)
+            self.log('   · เวลาสิ้นสุด %s -> %s (ถึงวินาทีสุดท้าย)' % (e0, d['end']), 'INFO')
         cap = str(d.get('cap') or '').strip()
         limited = bool(cap)
         per = str(d.get('per_user') or '1')
@@ -8508,6 +8608,10 @@ class App:
         def _save():
             for key, v in vs.items():
                 d[key] = v.get().strip()
+            if d.get('end'):
+                d['end'] = wr_end_fix(d['end'])       # 23:59 / 23:59:00 -> 23:59:59
+            if d.get('start'):
+                d['start'] = wr_start_fix(d['start'])
             d['unlimited'] = not d.get('cap')
             if d.get('kind') == 'gen':
                 # ใส่ CODE = Fix Codes ใช้โค้ดนั้น · เว้นว่าง = โค้ดสุ่ม เว็บเจนเอง
@@ -8636,11 +8740,23 @@ class App:
                         d['per_user'] = new
                     d['cap'] = d['gen_count'] = new
             return d
+        nfix = [0]
+
+        def _endfix(d):
+            # เวลาสิ้นสุดต้องถึงวินาทีสุดท้าย (23:59 / 23:59:00 -> 23:59:59) — คิวเก่าที่ค้างไว้ปรับให้
+            e = str(d.get('end') or '')
+            if e and wr_end_fix(e) != e:
+                d['end'] = wr_end_fix(e)
+                nfix[0] += 1
+            return d
         for m in (data.get('made') or []):
             if isinstance(m, dict):
                 _fix_old(m.get('d'))
-        self.wq = [_respare(_fix_old(d)) for d in (data.get('queue') or [])
+        self.wq = [_endfix(_respare(_fix_old(d))) for d in (data.get('queue') or [])
                    if isinstance(d, dict) and wr_ident(d)]
+        if nfix[0]:
+            self.log('⏱  ปรับเวลาสิ้นสุดในคิว %s %d โค้ด เป็น “ถึงวินาทีสุดท้าย” (เช่น 23:59:00 -> 23:59:59)'
+                     % (self.W_NAME, nfix[0]), 'INFO')
         self.made_codes = []
         self.tree_code.delete(*self.tree_code.get_children())
         for m in (data.get('made') or []):
@@ -11487,14 +11603,15 @@ def pd_dt_str(v):
 
 
 def pd_end_fix(s):
-    """เวลาหยุดขาย: ชีทเขียนแค่วันที่ (00:00:00) = ขายถึงสิ้นวันนั้น -> 23:59:59"""
+    """เวลาหยุดขาย: ชีทเขียนแค่วันที่ (00:00:00) = ขายถึงสิ้นวันนั้น -> 23:59:59
+    23:59 / 23:59:00 -> 23:59:59 ด้วย (ทีมใช้ถึงวินาทีสุดท้าย)"""
     dt = wr_parse_dt(s)
     if not dt:
         return ''
     y, m, d, h, mi, se = dt
     if (h, mi, se) == (0, 0, 0):
         h, mi, se = 23, 59, 59
-    return '%04d-%02d-%02d %02d:%02d:%02d' % (y, m, d, h, mi, se)
+    return wr_end_fix('%04d-%02d-%02d %02d:%02d:%02d' % (y, m, d, h, mi, se))
 
 
 def pd_today():
@@ -12122,6 +12239,7 @@ class PdRunner:
     _w_cal_close = App._w_cal_close
     _w_cal_month = App._w_cal_month
     _w_cal_time = App._w_cal_time
+    _w_cal_secs_kb = App._w_cal_secs_kb
     _click_confirm = App._click_confirm
 
     def __init__(self, app):
@@ -12800,6 +12918,9 @@ class OungProductTab(OungTab):
         if not ok:
             self.lbl_time[kind].config(text='⚠ รูปแบบ YYYY-MM-DD HH:MM:SS', fg=C['err'])
             return
+        if kind == 'end':
+            ok = wr_end_fix(txt if not re.search(r':\d{2}:\d{2}', txt) else ok)  # 23:59 -> 23:59:59
+            ok = pd_dt_ok(ok) or ok
         self.st['%s_mode' % kind] = 'custom'
         self.st[kind] = ok
         self._save()
@@ -12820,7 +12941,7 @@ class OungProductTab(OungTab):
             return s, e, 'เวลาหยุดขายไม่ถูก — ชีทไม่มี End ให้พิมพ์เอง (YYYY-MM-DD HH:MM:SS)'
         if pd_dt_ok(e) <= pd_dt_ok(s):
             return s, e, 'เวลาหยุดขาย (%s) ต้องหลังเวลาเริ่มขาย (%s)' % (e, s)
-        return pd_dt_ok(s), pd_dt_ok(e), ''
+        return pd_dt_ok(s), wr_end_fix(pd_dt_ok(e)), ''
 
     # ---------- วาดตาราง ----------
     @staticmethod
