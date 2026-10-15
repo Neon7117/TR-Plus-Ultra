@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.1.4 : WR Master — กด ↺ รีเซ็ตเวลาเริ่ม แล้วกด Actions > ล็อก ให้ด้วย (โหมดทดสอบบนเว็บคนปิดเองตอนรีเช็ก)
 V1.1.3 : เวลาสิ้นสุด / หยุดขาย ต้องถึงวินาทีสุดท้าย 23:59:59 ทุกแท็บ (เดิมบางทีเข้าเว็บเป็น 23:59:00) · ตรวจช่องบนเว็บรวมวินาทีด้วย
 V1.1.2 : สร้าง Product — แก้สกุลเงินไม่ถูกเลือก (หากล่อง “สกุลเงินที่ 1” ไม่เจอ) · พิมพ์ค้น mileage / coral แบบในคลิป
 V1.1.1 : สร้าง Product — ช่องติ๊ก ☑/☐ · ลบแถวออกจากคิว · แก้ชื่อสินค้าทั้งหมด (แม่แบบชื่อ) · ลำดับการแสดงจากคอลัมน์ “ลำดับ”
@@ -138,6 +139,8 @@ ITEMCODE_LIST_URL = BASE + '/hof/talesrunner/itemcodes'      # หน้าแ�
 # ปุ่มยืนยันในป๊อปอัป "ปลดล็อก" / "บันทึก" (เทียบชื่อปุ่มตรงๆ ห้ามโดนปุ่มยกเลิก)
 UNLOCK_YES = CONFIRM_YES + ['ปลดล็อก', 'ปลดล็อค', 'ยืนยันปลดล็อก', 'ยืนยันปลดล็อค', 'Unlock']
 SAVE_YES = CONFIRM_YES + ['บันทึก', 'ยืนยันการบันทึก', 'บันทึกการเปลี่ยนแปลง', 'Save']
+# ป๊อปอัป "ยืนยันการล็อก" — ปุ่ม [ยกเลิก] [ล็อก]  (เทียบชื่อปุ่มตรงเป๊ะ “ปลดล็อก” ไม่นับ)
+LOCK_YES = CONFIRM_YES + ['ล็อก', 'ล็อค', 'ยืนยันการล็อก', 'ยืนยันล็อก', 'Lock']
 WR_KEEP = 500              # เก็บประวัติ “สร้างแล้ว” ไว้กี่แถวล่าสุด
 WR_SPARE = 2               # ชีทบอก 550 -> ใส่ 552 เผื่อไว้เทสเอง
 SEL_CODE = {
@@ -2073,6 +2076,28 @@ JS_IC_LIST = r"""
     return 'ok|' + txt(hit);
   }
   return 'ไม่รู้จักคำสั่ง';
+}"""
+
+# เมนูที่เด้งหลังกด Actions -> หาข้อ "ล็อก" (ตรงเป๊ะ — ห้ามโดน "ปลดล็อก" / ลบ / แก้ไข)
+JS_IC_LOCKMENU = r"""
+() => {
+  const vis = el => { if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const txt = e => (e.textContent || '').replace(/\s+/g, ' ').trim();
+  const items = [...document.querySelectorAll('[role=menuitem],[role=menu] button,[role=menu] a,' +
+                                              '[role=option]')].filter(vis);
+  if (!items.length) return 'none';
+  const word = x => txt(x).replace(/[^\u0E00-\u0E7Fa-zA-Z]/g, '').toLowerCase();
+  const hit = items.find(x => ['ล็อก', 'ล็อค', 'lock'].indexOf(word(x)) >= 0);
+  if (!hit) {
+    if (items.some(x => /^ปลดล็อ|^unlock/.test(word(x)))) return 'locked';
+    return 'ไม่มีเมนูล็อก (มี: ' + items.map(txt).join(', ') + ')';
+  }
+  document.querySelectorAll('[data-trw-mi]').forEach(e => e.removeAttribute('data-trw-mi'));
+  hit.setAttribute('data-trw-mi', '1');
+  return 'ok|' + txt(hit);
 }"""
 
 JS_IC_EDIT = r"""
@@ -6474,6 +6499,108 @@ class App:
         self.log('   ! กดปลดล็อกแล้ว แต่แถวนี้ยังขึ้น “ล็อก” อยู่ — ต้องปลดเองบนเว็บ', 'WARN')
         return False
 
+    def _w_autolock(self):
+        """รีเซ็ตเวลาเริ่มแล้วกดล็อกให้ด้วย — เฉพาะ WR Master"""
+        return getattr(self, 'W_NAME', '') == 'WR Master'
+
+    async def _w_relock(self, page, d, slug, do):
+        """รีเซ็ตเวลาเริ่มเสร็จ (หรือตรงอยู่แล้ว) -> กด Actions > ล็อก ให้ (คนไม่ต้องไล่กดเอง)
+        เวลาเริ่มแก้ได้แล้ว = นับว่ารีเซ็ตสำเร็จ · ล็อกไม่ได้ = เตือน + สรุปท้ายรอบว่าตัวไหนต้องกดเอง
+        โหมดทดสอบของเว็บ (สวิตช์ในตาราง) ไม่แตะ — คนปิดเองตอนรีเช็กรอบสุดท้าย
+        ใช้เฉพาะแท็บ WR Master (แท็บ Item Code ทำงานเหมือนเดิม ไม่ล็อกให้)"""
+        if not self._w_autolock():
+            return True
+        if not do:
+            self.log('   · โหมดทดสอบ — ตอนทำจริงจะกด Actions > ล็อก ให้ด้วย', 'INFO')
+            return True
+        ok = False
+        try:
+            ok = await self._w_lock(page, d, slug)
+        except Exception as ex:
+            self.log('   ! ล็อกไม่ได้: %s' % str(ex)[:120], 'WARN')
+        if not ok:
+            self.log('   ⚠ เวลาเริ่มเรียบร้อย แต่ล็อกไม่ได้ — ต้องกด Actions > ล็อก เองบนเว็บ', 'WARN')
+            fails = getattr(self, '_w_lock_fails', None)
+            if isinstance(fails, list):
+                fails.append(wr_ident(d))
+        log_event('lock_itemcode', code=wr_ident(d), ok=bool(ok))
+        return True
+
+    async def _w_lock(self, page, d, slug):
+        """หน้ารายการ -> แถวของโค้ดนี้ -> Actions -> ล็อก -> ป๊อปอัป “ยืนยันการล็อก” กด [ล็อก]
+        แล้วต้องเห็นป้าย “ล็อก” ขึ้นที่แถวนั้นจริงๆ ถึงจะนับว่าล็อกแล้ว"""
+        await page.goto(ITEMCODE_LIST_URL, wait_until='domcontentloaded', timeout=45000)
+        await page.wait_for_timeout(1500)
+
+        async def find_row():
+            for _ in range(12):
+                r = str(await page.evaluate(JS_IC_LIST, ['row', slug]))
+                if r.startswith('ok|'):
+                    return r
+                await page.wait_for_timeout(250)
+            return 'none'
+
+        r = await find_row()
+        if r == 'none' and str(await page.evaluate(JS_IC_LIST, ['search', ''])) == 'ok':
+            try:
+                q = page.locator('[data-trw-q="1"]').first
+                await q.fill(wr_ident(d), timeout=4000)
+                await q.press('Enter')
+                await page.wait_for_timeout(1200)
+            except Exception:
+                pass
+            r = await find_row()
+        pages = 1
+        while r == 'none' and pages < 40:
+            if str(await page.evaluate(JS_IC_LIST, ['next', ''])) != 'ok':
+                break
+            await page.locator('[data-trw-nx="1"]').first.click(timeout=4000)
+            await page.wait_for_timeout(900)
+            pages += 1
+            r = await find_row()
+        if r == 'none':
+            self.log('   ! หาแถว “%s” ในหน้ารายการ Item Code ไม่เจอ — ล็อกไม่ได้' % slug, 'WARN')
+            return False
+        if r == 'ok|1':
+            self.log('   · ล็อกอยู่แล้ว', 'INFO')
+            return True
+        await page.locator('[data-trw-act="1"]').first.click(timeout=5000)
+        m = 'none'
+        for _ in range(12):
+            await page.wait_for_timeout(200)
+            m = str(await page.evaluate(JS_IC_LOCKMENU))
+            if m != 'none':
+                break
+        if m == 'locked':
+            await page.keyboard.press('Escape')
+            self.log('   · ล็อกอยู่แล้ว (เมนูมีแต่ปลดล็อก)', 'INFO')
+            return True
+        if not m.startswith('ok'):
+            self.log('   ! %s' % ('กด Actions แล้วเมนูไม่เด้ง' if m == 'none' else m), 'WARN')
+            await page.keyboard.press('Escape')
+            return False
+        await page.locator('[data-trw-mi="1"]').first.click(timeout=4000)
+        await page.wait_for_timeout(400)
+        last = ''
+        for _ in range(16):
+            r2 = str(await page.evaluate(JS_CONFIRM_POPUP, [LOCK_YES, CONFIRM_NO]))
+            if r2.startswith('ok'):
+                self.log('   · กดยืนยันล็อกแล้ว (%s)' % r2.split('|', 1)[1], 'INFO')
+                break
+            last = r2
+            await page.wait_for_timeout(250)
+        else:
+            if last and last != 'ไม่มีป๊อปอัป':
+                self.log('   ! ' + last, 'WARN')
+        for _ in range(24):                              # รอป้าย "ล็อก" ขึ้นที่แถว
+            await page.wait_for_timeout(250)
+            r = str(await page.evaluate(JS_IC_LIST, ['row', slug]))
+            if r == 'ok|1':
+                self.log('   ✓ ล็อกแล้ว', 'OK')
+                return True
+        self.log('   ! กดล็อกแล้ว แต่แถวนี้ยังไม่ขึ้นป้าย “ล็อก”', 'WARN')
+        return False
+
     async def _w_reset_one(self, page, d, do):
         """เข้าไปแก้ "เวลาเริ่มใช้งาน" ของโค้ดที่สร้างไว้แล้ว ให้กลับเป็นเวลาตามเอกสาร
         ไม่สร้างใหม่เด็ดขาด — ถ้าหาหน้าแก้ไขไม่เจอก็แค่เตือน"""
@@ -6495,10 +6622,14 @@ class App:
         same, shown = await self._w_date_ok(page, SEL_CODE['start'], want)
         if same:
             self.log('   · เวลาเริ่มบนเว็บ = “%s” ตรงเอกสารอยู่แล้ว ไม่ต้องแก้' % shown, 'OK')
-            return True
+            if st == 'locked' and self._w_autolock():   # หน้าแก้ไขขึ้นว่าล็อกอยู่แล้ว -> ไม่ต้องไปหน้ารายการ
+                self.log('   · ล็อกอยู่แล้ว', 'INFO')
+                return True
+            return await self._w_relock(page, d, slug, do)
         self.log('   · ตอนนี้เวลาเริ่มบนเว็บ = “%s” -> จะแก้เป็น %s' % (shown or '?', want), 'INFO')
         if not do:
-            self.log('   ✓ โหมดทดสอบ — ดูเฉยๆ ไม่ได้ปลดล็อก/ไม่ได้แก้', 'OK')
+            self.log('   ✓ โหมดทดสอบ — ดูเฉยๆ ไม่ได้ปลดล็อก/ไม่ได้แก้%s'
+                     % ('/ไม่ได้ล็อก' if self._w_autolock() else ''), 'OK')
             return True
         if st == 'locked':
             if not await self._w_unlock(page, d, slug):
@@ -6558,7 +6689,7 @@ class App:
         if same:
             self.log('   ✓ แก้เวลาเริ่มแล้ว — เปิดหน้าใหม่เช็กแล้วขึ้น “%s”' % shown, 'OK')
             log_event('reset_itemcode_start', code=wr_ident(d), start=want, ok=True)
-            return True
+            return await self._w_relock(page, d, slug, do)
         self.log('   ✗ กดบันทึกแล้ว แต่เปิดหน้าใหม่เวลาเริ่มยังเป็น “%s” (ไม่ใช่ %s)'
                  % (shown or '?', want), 'ERR')
         log_event('reset_itemcode_start', code=wr_ident(d), start=want, ok=False)
@@ -9002,8 +9133,11 @@ class App:
         msg = ('รีเซ็ตเวลาเริ่มใช้งานกลับเป็นเวลาตามเอกสาร %d โค้ด\n(%s)\n\n'
                'จะเข้าไปแก้ของที่สร้างไว้แล้วเท่านั้น ไม่สร้างใหม่\n' % (len(rows), src))
         if do:
-            msg += ('ตัวที่ล็อกอยู่จะกด Actions > ปลดล็อก ให้ก่อน แล้วค่อยแก้เวลา\n\n'
-                    'ยืนยันแก้จริงบนเว็บ?')
+            msg += 'ตัวที่ล็อกอยู่จะกด Actions > ปลดล็อก ให้ก่อน แล้วค่อยแก้เวลา\n'
+            if self._w_autolock():
+                msg += ('แก้เสร็จแล้วกด Actions > ล็อก ให้ด้วย\n'
+                        '(“โหมดทดสอบ” บนเว็บไม่แตะ — ปิดเองตอนรีเช็ก)\n')
+            msg += '\nยืนยันแก้จริงบนเว็บ?'
         else:
             msg += ('\nตอนนี้เป็นโหมดทดสอบ — แค่เปิดดูว่าเวลาบนเว็บเป็นเท่าไหร่ '
                     'ไม่ปลดล็อก ไม่แก้\n(ติ๊ก “กดปุ่ม สร้าง Item Code จริง” ก่อน ถ้าจะแก้จริง)\n\nไปต่อ?')
@@ -9048,6 +9182,8 @@ class App:
                 except Exception:
                     hold = 3
                 okc = errc = 0
+                if mode == 'reset':
+                    self._w_lock_fails = []
                 for i, d in enumerate(rows, 1):
                     if self.w_cancel:
                         self.log('ยกเลิกแล้ว', 'WARN')
@@ -9074,6 +9210,13 @@ class App:
                 self.set_progress(len(rows), len(rows), 'เสร็จ')
                 self.log('จบ — สำเร็จ %d · ไม่ผ่าน %d' % (okc, errc),
                          'OK' if not errc else 'WARN')
+                lf = getattr(self, '_w_lock_fails', None) if mode == 'reset' else None
+                if mode == 'reset' and do and self._w_autolock():
+                    if lf:
+                        self.log('⚠ ล็อกไม่ได้ %d โค้ด — ต้องกด Actions > ล็อก เองบนเว็บ: %s'
+                                 % (len(lf), ', '.join(lf[:12]) + (' …' if len(lf) > 12 else '')),
+                                 'WARN')
+                    self.log('เหลือแค่ปิด “โหมดทดสอบ” บนเว็บเอง แล้วรีเช็กอีกรอบ', 'INFO')
                 log_event('wr_done', ok=okc, fail=errc, commit=bool(do))
             finally:
                 try:
