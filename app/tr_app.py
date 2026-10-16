@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.1.5 : สร้าง Bundle — อ่าน Tier จากหัว “ระดับ” ได้ (+ดูจากค่าในช่อง / เตือนถ้าไม่เจอ) · แก้ในตาราง ตั้ง Tier ทีละหลายแถว เพิ่ม/ลบไอเทม ลบบันเดิล
 V1.1.4 : WR Master — กด ↺ รีเซ็ตเวลาเริ่ม แล้วกด Actions > ล็อก ให้ด้วย (โหมดทดสอบบนเว็บคนปิดเองตอนรีเช็ก)
 V1.1.3 : เวลาสิ้นสุด / หยุดขาย ต้องถึงวินาทีสุดท้าย 23:59:59 ทุกแท็บ (เดิมบางทีเข้าเว็บเป็น 23:59:00) · ตรวจช่องบนเว็บรวมวินาทีด้วย
 V1.1.2 : สร้าง Product — แก้สกุลเงินไม่ถูกเลือก (หากล่อง “สกุลเงินที่ 1” ไม่เจอ) · พิมพ์ค้น mileage / coral แบบในคลิป
@@ -2781,6 +2782,36 @@ def is_move_header(h):
     return 'itemmove' in k
 
 
+# หัวคอลัมน์ Tier ที่ชีทใช้จริง: Rank / Tier / ยศ / ระดับ (เคยมีชีทเขียน “ระดับ” แล้วอ่านไม่เจอ = General หมด)
+# “ระดับ (Tier)” / “Rank/Tier” ก็นับ — ตัดคำพวกนี้ออกแล้วต้องไม่เหลืออะไร
+_TIER_WORDS = ('ระดับ', 'เทียร์', 'แรงค์', 'rank', 'tier', 'ยศ')
+
+
+def is_tier_head(h):
+    k = _hkey(h)
+    if not k:
+        return False
+    for w in _TIER_WORDS:
+        k = k.replace(w, '')
+    return k == ''
+
+
+def guess_tier_cols(rows, drows, cols):
+    """ไม่มีหัวคอลัมน์ Tier ที่รู้จัก -> หาคอลัมน์ที่ "ค่าในช่อง" เป็นชื่อ Tier ทั้งหมด (General/A/S/SS/SS+/SSS)
+    ต้องมีค่าอย่างน้อยครึ่งหนึ่งของแถว (เผื่อเซลล์รวม) · คืน list คอลัมน์ที่เข้าเกณฑ์"""
+    hits = []
+    for c in cols:
+        vals = []
+        for r in drows:
+            row = rows[r] or []
+            v = clean_text(row[c]) if c < len(row) else ''
+            if v and v != '-':
+                vals.append(v)
+        if vals and len(vals) * 2 >= len(drows) and all(v.lower() in _SRC_TIER for v in vals):
+            hits.append(c)
+    return hits
+
+
 def move_to_trade(v):
     """ค่าในคอลัมน์ Itemmove -> ('yes'|'no'|'any', รู้จักค่านี้ไหม)
        Storage/Yes = ได้ · Gift/No/ว่าง = ไม่ได้ (ว่าง = No ตามเครื่องมือเดิม)
@@ -3069,7 +3100,7 @@ def parse_master_rows(rows, seen=None):
 #        เลข Bundle    = เลขในคอลัมน์เดียวกันนั้น ที่อยู่เหนือหัวตาราง 1-2 แถว
 #        ชื่อบันเดิล    = Product Name > แถวหัวข้อเดี่ยวๆ > หัวคอลัมน์ Id > ชื่อชีท#n
 #        จำนวน         = Amt / Amount / จำนวน
-#        Tier          = Rank / ยศ / Tier
+#        Tier          = Rank / ยศ / Tier / ระดับ  (ไม่มีหัวที่รู้จัก = ดูจากค่าในช่องว่าเป็น S/A/SS… ไหม)
 #        famepoint/exp = กล่อง "ได้รับ famepoint กับ exp" เหนือหัวตาราง
 # ============================================================================
 _SRC_TIER = {t.lower(): t for t in TIERS}
@@ -3172,6 +3203,7 @@ def parse_bundle_sheet(rows, sheet_name, force_col=None):
     sheet_name = clean_text(sheet_name) or str(sheet_name or '')
     bundles = []
     warns = []
+    no_tier = 0                            # ตารางที่หาคอลัมน์ Tier ไม่เจอเลย (ใช้ General หมด)
     # หัวเรื่องบนสุดของชีท เช่น "Master Code 01/10/2026"
     # ใช้เฉพาะกับชีทแพทเทิร์น CODE เท่านั้น (ดูที่ _bundle_code ด้านล่าง)
     top_title = ''
@@ -3208,7 +3240,7 @@ def parse_bundle_sheet(rows, sheet_name, force_col=None):
                     return j
             return None
         kindc = col([lambda h: 'fditemnum' in h])
-        rankc = col([lambda h: h == 'rank', lambda h: h == 'ยศ', lambda h: h == 'tier'])
+        rankc = col([is_tier_head])
         amtc = col([lambda h: h == 'amount', lambda h: h == 'amt', lambda h: h == 'จำนวน'])
         posc = col([lambda h: 'fdposition' in h])
         ikc = col([lambda h: 'fditemkind' in h])
@@ -3294,6 +3326,15 @@ def parse_bundle_sheet(rows, sheet_name, force_col=None):
             while c < ncols and col_used(c):
                 block.add(c)
                 c += 1
+
+        # Tier: หัวคอลัมน์ไม่ใช่ชื่อที่รู้จัก -> ดูค่าในช่องของตารางนี้ (S / A / SS / SS+ …)
+        tier_guess = None
+        if rankc is None and kindc is not None:
+            near = sorted(block or range(ncols), key=lambda j: abs(j - kindc))
+            hits = guess_tier_cols(rows, drows, [j for j in near
+                                                 if j not in (kindc, posc, ikc, amtc, namec)])
+            if hits:
+                rankc = tier_guess = hits[0]
 
         # (1) มีป้ายบอก ("Bundle" / Aztek / Item Id) ในหัวตาราง หรือเหนือหัวตาราง 1-2 แถว
         #     บางชีทป้าย Bundle อยู่แถวเดียวกับชื่อหัวข้อรางวัล ไม่ได้อยู่แถว fdItemNum
@@ -3465,6 +3506,13 @@ def parse_bundle_sheet(rows, sheet_name, force_col=None):
                 ikind = src_int(row[kindc]) or ''
             items.append({'id': iid, 'qty': qty, 'tier': tier, 'disp': disp,
                           'kind': ikind})
+        if tier_guess is not None:
+            hd = clean_text(header[tier_guess]) if tier_guess < len(header) else ''
+            warns.append('%s "%s": ไม่มีหัวคอลัมน์ Tier ที่รู้จัก — ใช้คอลัมน์ %s%s เพราะค่าในช่องเป็น %s'
+                         ' (ตรวจ Tier อีกทีก่อนสร้าง)'
+                         % (sheet_name, name, col_letter(tier_guess),
+                            (' (หัว “%s”)' % hd) if hd else '',
+                            '/'.join(sorted({i['tier'] for i in items}, key=TIERS.index))))
         # กันพลาดซ้ำรอย: อ่านไอเทมได้ไม่ครบทุกแถวในตาราง = มีอะไรผิดแน่ๆ ต้องดังไว้ก่อน
         if len(items) < len(drows):
             warns.append('%s "%s": ตารางมี %d แถว แต่อ่านมาได้ %d — '
@@ -3490,9 +3538,14 @@ def parse_bundle_sheet(rows, sheet_name, force_col=None):
                              'อาจหยิบผิดคอลัมน์ ตรวจก่อนสร้าง'
                              % (sheet_name, name, ', '.join(str(n) for n in nums[:4])))
         if items:
+            if rankc is None:
+                no_tier += 1
             bundles.append({'name': name, 'type': DEFAULT_BUNDLE_TYPE, 'deliver': True,
                             'items': items, 'rewards': bundle_rewards(rows, hr),
                             'sheet': sheet_name, 'src_bundle_id': bid})
+    if no_tier:
+        warns.append('%s: ไม่เจอคอลัมน์ Tier (Rank / Tier / ระดับ) ใน %d บันเดิล -> ใช้ General ทั้งหมด'
+                     ' · ถ้าไม่ใช่ แก้ในตารางได้ (ดับเบิลคลิกช่อง Tier)' % (sheet_name, no_tier))
     return bundles, warns
 
 
@@ -4392,7 +4445,7 @@ class BundleImportDialog:
     TITLE = 'นำเข้าบันเดิลจาก Excel'
     PICK_ALL = 'เลือกชีทที่มีบันเดิลทั้งหมด'
     HINT = ('อ่านให้อัตโนมัติ — Aztek Item Id เอาจากคอลัมน์ข้างตารางไอเทม (ป้าย Bundle / คอลัมน์เลขหน้า fdItemNum) · '
-            'จำนวนเอาจาก Amt/Amount · Tier เอาจาก Rank · '
+            'จำนวนเอาจาก Amt/Amount · Tier เอาจาก Rank / ระดับ · '
             'famepoint/exp เอาจากกล่อง “ได้รับ famepoint กับ exp”')
     TREE_TITLE = 'บันเดิลที่เจอ'
     TREE_HEAD = 'บันเดิล / ไอเทม'
@@ -7118,6 +7171,8 @@ class App:
         self.b_cancel = False
         self._b_rowmap = {}          # iid ของ treeview -> ('b', i) หรือ ('i', i, j)
         self.b_open_new = False      # นำเข้ามาใหม่ = หุบไว้ก่อน จะได้เห็นรายชื่อครบๆ
+        self._b_ed = None            # ช่องที่กำลังแก้ในตาราง
+        self._b_next_job = None
 
         s1 = self._card(p, 'นำเข้าจากไฟล์ต้นฉบับ')
         bar = tk.Frame(s1, bg=C['bg'])
@@ -7140,12 +7195,29 @@ class App:
             side='left', padx=(8, 0), ipadx=8, ipady=3)
         self._btn(bar2, '⌃  หุบทั้งหมด', lambda: self._b_expand_all(False)).pack(
             side='left', padx=(8, 0), ipadx=8, ipady=3)
-        tk.Label(s1, text='คลิกช่อง “ใช้” เพื่อเลือก/ไม่เลือกบันเดิล · ดับเบิลคลิกเพื่อแก้ '
-                          '(ชื่อบันเดิล / จำนวน / Tier / famepoint / exp)',
+        tk.Label(s1, text='คลิกช่อง “ใช้” เพื่อเลือก/ไม่เลือกบันเดิล · ดับเบิลคลิกช่องที่จะแก้ได้เลย '
+                          '(ชื่อบันเดิล · จำนวน · Tier · Aztek Item Id ในช่องรายละเอียด) · '
+                          'Enter = บันทึกแล้วไปแถวถัดไป · Esc = ยกเลิก',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(
             fill='x', pady=(8, 0))
 
         s2 = self._card(p, 'บันเดิลที่จะสร้าง', grow=True)
+        # ---- แถบแก้ไข: แก้ / เพิ่มไอเทม / ลบ / ตั้ง Tier ทีละหลายแถว ----
+        eb = tk.Frame(s2, bg=C['bg'])
+        eb.pack(fill='x', pady=(0, 8))
+        self._btn(eb, '✏  แก้ไข', self.b_edit).pack(side='left', ipadx=8, ipady=2)
+        self._btn(eb, '➕  เพิ่มไอเทม', self.b_add_item).pack(side='left', padx=(8, 0), ipadx=8, ipady=2)
+        self._btn(eb, '🗑  ลบที่เลือก', self.b_delete).pack(side='left', padx=(8, 0), ipadx=8, ipady=2)
+        tk.Label(eb, text='   ตั้ง Tier ให้แถวที่เลือก', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9)).pack(side='left', padx=(10, 6))
+        self.bv_tier = ttk.Combobox(eb, values=TIERS, width=9, state='readonly', font=FM)
+        self.bv_tier.set('S')
+        self.bv_tier.pack(side='left')
+        self._btn(eb, '✔  ตั้ง Tier', self.b_set_tier, primary=True).pack(
+            side='left', padx=(6, 0), ipadx=8, ipady=2)
+        self.b_edit_msg = tk.Label(eb, text='Ctrl / Shift = เลือกหลายแถว · เลือกแถวบันเดิล = ทุกไอเทมในบันเดิลนั้น',
+                                   bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w')
+        self.b_edit_msg.pack(side='left', padx=(12, 0), fill='x', expand=True)
         tw = tk.Frame(s2, bg=C['bg'])
         tw.pack(fill='both', expand=True)
         cols = ('use', 'qty', 'tier', 'info')
@@ -7164,7 +7236,10 @@ class App:
         self.b_tree.pack(side='left', fill='both', expand=True)
         bsb.pack(side='right', fill='y')
         self.b_tree.bind('<Button-1>', self._b_click)
-        self.b_tree.bind('<Double-1>', lambda e: self.b_edit())
+        self.b_tree.bind('<Double-1>', self._b_dbl)
+        self.b_tree.bind('<Delete>', lambda e: self.b_delete())
+        for sq in ('<MouseWheel>', '<Button-4>', '<Button-5>'):
+            self.b_tree.bind(sq, lambda e: self._b_commit(False, quiet=True), add='+')
 
         s3 = self._card(p, 'ลงมือสร้าง')
         self.bv_do = tk.BooleanVar(value=False)
@@ -7231,9 +7306,11 @@ class App:
             self.b_mode.config(text='โหมดทดสอบ — กรอกให้ดูเฉยๆ ไม่กดสร้าง', fg=C['ok'])
 
     # ---------- ตาราง ----------
-    def _b_refresh(self):
+    def _b_refresh(self, remap=None):
+        """remap = {เลขบันเดิลเดิม: เลขใหม่} หลังลบบันเดิล (ใบที่กางอยู่จะได้ยังกางอยู่ถูกใบ)"""
         # จำไว้ก่อนว่าใบไหนกางอยู่ · เลื่อนอยู่ตรงไหน · เลือกอะไรไว้
         # ไม่งั้นแก้ชื่อทีเดียวแล้วทุกใบกางออกหมด ต้องมาไล่หุบใหม่ทุกครั้ง
+        self._b_cancel_edit()
         was_open = {}
         for row, m in getattr(self, '_b_rowmap', {}).items():
             if m[0] == 'b':
@@ -7241,13 +7318,16 @@ class App:
                     was_open[m[1]] = bool(self.b_tree.item(row, 'open'))
                 except Exception:
                     pass
-        sel_key = None
+        sel_keys = []
         try:
-            cur = self.b_tree.selection()
-            if cur:
-                sel_key = getattr(self, '_b_rowmap', {}).get(cur[0])
+            sel_keys = [getattr(self, '_b_rowmap', {}).get(r) for r in self.b_tree.selection()]
+            sel_keys = [k for k in sel_keys if k]
         except Exception:
             pass
+        sel_key = sel_keys[0] if sel_keys else None
+        if remap is not None:
+            was_open = {remap[i]: v for i, v in was_open.items() if i in remap}
+            sel_keys, sel_key = [], None
         try:
             top_frac = self.b_tree.yview()[0]
         except Exception:
@@ -7284,16 +7364,17 @@ class App:
                                          values=('', r['qty'], DEFAULT_TIER, extra),
                                          tags=('rw',) if on else ('off',))
                 self._b_rowmap[rid] = ('r', i, r['type'])
-        # กลับไปอยู่ที่เดิม ทั้งแถวที่เลือกและจุดที่เลื่อนค้างไว้
+        # กลับไปอยู่ที่เดิม ทั้งแถวที่เลือก (หลายแถวก็ได้) และจุดที่เลื่อนค้างไว้
         if sel_key:
-            for row, m in self._b_rowmap.items():
-                if m == sel_key:
-                    try:
-                        self.b_tree.selection_set(row)
-                        self.b_tree.see(row)
-                    except Exception:
-                        pass
-                    break
+            back = [row for row, m in self._b_rowmap.items() if m in sel_keys]
+            first = [row for row, m in self._b_rowmap.items() if m == sel_key]
+            try:
+                if back:
+                    self.b_tree.selection_set(back)
+                if first:
+                    self.b_tree.see(first[0])
+            except Exception:
+                pass
         try:
             self.b_tree.update_idletasks()
             self.b_tree.yview_moveto(top_frac)
@@ -7307,6 +7388,8 @@ class App:
 
     def _b_click(self, ev):
         """คลิกที่ช่อง "ใช้" ของแถวบันเดิล = สลับเลือก/ไม่เลือก"""
+        if self._b_ed:                       # กำลังแก้ช่องไหนอยู่ คลิกที่อื่น = บันทึกช่องนั้นก่อน
+            self._b_commit(False, quiet=True)
         if self.b_running:
             return
         if self.b_tree.identify_region(ev.x, ev.y) != 'cell':
@@ -7332,6 +7415,325 @@ class App:
         if messagebox.askyesno('ล้าง', 'ลบบันเดิลทั้งหมด %d อันออกจากรายการ?' % len(self.bq)):
             self.bq = []
             self._b_refresh()
+
+    # ---------- แก้ในตาราง (ดับเบิลคลิกช่อง) ----------
+    #  แถวบันเดิล : ชื่อบันเดิล (#0)
+    #  แถวไอเทม   : จำนวน (#2) · Tier (#3 ช่องเลือก) · Aztek Item Id (#4 ช่องรายละเอียด)
+    #  famepoint/exp : จำนวน (#2)
+    #  ช่องอื่น = เปิดหน้าต่างแก้ไขแบบเดิม
+    def _b_target(self, row, col):
+        m = self._b_rowmap.get(row)
+        if not m or self.b_running:
+            return None
+        if m[0] == 'b':
+            if col != '#0' or m[1] >= len(self.bq):
+                return None
+            b = self.bq[m[1]]
+
+            def setn(v):
+                if not v.strip():
+                    return 'ชื่อบันเดิลห้ามว่าง'
+                b['name'] = v.strip()
+            return {'kind': 'name', 'get': lambda: b['name'], 'set': setn}
+        if m[0] == 'i':
+            try:
+                it = self.bq[m[1]]['items'][m[2]]
+            except (IndexError, KeyError):
+                return None
+            if col == '#2':
+                def setq(v):
+                    if not re.fullmatch(r'[1-9]\d*', v.strip()):
+                        return 'จำนวนต้องเป็นเลข 1 ขึ้นไป'
+                    it['qty'] = v.strip()
+                return {'kind': 'qty', 'get': lambda: it['qty'], 'set': setq}
+            if col == '#3':
+                def sett(v):
+                    if v not in TIERS:
+                        return 'Tier ต้องเป็นหนึ่งใน ' + ', '.join(TIERS)
+                    it['tier'] = v
+                return {'kind': 'tier', 'get': lambda: it['tier'], 'set': sett}
+            if col == '#4':
+                def seta(v):
+                    if not re.fullmatch(r'\d+', v.strip()):
+                        return 'Aztek Item Id ต้องเป็นตัวเลขล้วน'
+                    it['id'] = v.strip()
+                return {'kind': 'aid', 'get': lambda: it['id'], 'set': seta}
+            return None
+        if m[0] == 'r' and col == '#2':
+            r = next((x for x in self.bq[m[1]].get('rewards', []) if x['type'] == m[2]), None)
+            if not r:
+                return None
+
+            def setr(v):
+                if not re.fullmatch(r'\d+(\.\d+)?', v.strip()) or float(v.strip()) <= 0:
+                    return 'จำนวนต้องเป็นตัวเลขมากกว่า 0'
+                r['qty'] = v.strip()
+            return {'kind': 'qty', 'get': lambda: r['qty'], 'set': setr}
+        return None
+
+    def _b_dbl(self, ev):
+        if self.b_running:
+            return 'break'
+        reg = self.b_tree.identify_region(ev.x, ev.y)
+        if reg not in ('cell', 'tree'):
+            return
+        row = self.b_tree.identify_row(ev.y)
+        col = self.b_tree.identify_column(ev.x)
+        if not row or col == '#1':              # ช่อง “ใช้” คลิกเดียวพอ
+            return 'break'
+        if self._b_target(row, col):
+            self._b_inline(row, col)
+        else:
+            self.b_tree.selection_set(row)
+            self.b_edit()
+        return 'break'
+
+    def _b_inline(self, row, col):
+        self._b_cancel_edit()
+        tg = self._b_target(row, col)
+        if not tg:
+            return False
+        self.b_tree.see(row)
+        self.b_tree.update_idletasks()
+        bb = self.b_tree.bbox(row, col)
+        if bb and bb[1] + bb[3] * 2 > self.b_tree.winfo_height():
+            self.b_tree.yview_scroll(3, 'units')     # แถวอยู่ขอบล่าง เลื่อนขึ้นอีกนิด
+            self.b_tree.update_idletasks()
+            bb = self.b_tree.bbox(row, col)
+        if not bb:
+            return False
+        x, y, w, h = bb
+        if tg['kind'] == 'tier':
+            ed = ttk.Combobox(self.b_tree, values=TIERS, state='readonly', font=FM)
+            ed.set(tg['get']())
+            ed.bind('<<ComboboxSelected>>', lambda e: self._b_commit(True))
+        else:
+            ed = tk.Entry(self.b_tree, bg=C['input'], fg=C['fg'], insertbackground=C['fg'],
+                          relief='flat', font=FM, highlightthickness=1,
+                          highlightbackground=C['accent'], highlightcolor=C['accent'])
+            ed.insert(0, str(tg['get']() or ''))
+            ed.select_range(0, 'end')
+        if tg['kind'] == 'name':
+            x, w = x + 20, max(w - 20, 200)
+        ed.place(x=x, y=y, width=max(w, 90), height=h)
+        ed.focus_set()
+        ed.bind('<Return>', lambda e: self._b_commit(True))
+        ed.bind('<KP_Enter>', lambda e: self._b_commit(True))
+        ed.bind('<Tab>', lambda e: self._b_commit(True))
+        ed.bind('<Escape>', lambda e: self._b_cancel_edit())
+        if tg['kind'] != 'tier':        # ช่องเลือก Tier เปิดรายการแล้วโฟกัสหลุดเอง ห้ามบันทึกตอนนั้น
+            ed.bind('<FocusOut>', lambda e: self._b_commit(False, quiet=True))
+        self._b_ed = {'w': ed, 'row': row, 'col': col, 'tg': tg,
+                      'key': self._b_rowmap.get(row)}
+        self.b_tree.selection_set(row)
+        self._b_msg('แก้ %s — Enter = บันทึกแล้วไปแถวถัดไป · Esc = ยกเลิก'
+                    % {'name': 'ชื่อบันเดิล', 'qty': 'จำนวน', 'tier': 'Tier',
+                       'aid': 'Aztek Item Id'}[tg['kind']])
+        return True
+
+    def _b_cancel_edit(self):
+        if self._b_next_job:
+            try:
+                self.b_tree.after_cancel(self._b_next_job)
+            except Exception:
+                pass
+            self._b_next_job = None
+        ed, self._b_ed = self._b_ed, None
+        if ed:
+            try:
+                ed['w'].destroy()
+            except Exception:
+                pass
+        return 'break'
+
+    def _b_commit(self, nxt=False, quiet=False):
+        ed = self._b_ed
+        if not ed:
+            return 'break'
+        try:
+            v = ed['w'].get()
+        except Exception:
+            v = ''
+        old = str(ed['tg']['get']() or '')
+        err = ed['tg']['set'](v)
+        if err:
+            if quiet:                   # คลิกไปที่อื่นทั้งที่ค่าไม่ถูก = ยกเลิก ไม่บันทึก
+                self._b_cancel_edit()
+                self._b_msg('ไม่ได้บันทึก — ' + err, 'err')
+                return 'break'
+            try:
+                self.root.bell()
+            except Exception:
+                pass
+            self._b_msg(err, 'err')
+            return 'break'
+        new = str(ed['tg']['get']() or '')
+        key, col = ed['key'], ed['col']
+        self._b_cancel_edit()
+        self._b_refresh()
+        if new != old:
+            self._b_msg('✓ แก้แล้ว: %s → %s' % (old or '—', new), 'ok')
+        if nxt:
+            order = self._b_visible()
+            cur = next((r for r in order if self._b_rowmap.get(r) == key), None)
+            if cur in order:
+                for nx in order[order.index(cur) + 1:]:
+                    if self._b_target(nx, col):
+                        self._b_next_job = self.b_tree.after(10, lambda n=nx: self._b_go_next(n, col))
+                        break
+        return 'break'
+
+    def _b_go_next(self, row, col):
+        self._b_next_job = None
+        if self.b_tree.exists(row):
+            self._b_inline(row, col)
+
+    def _b_visible(self):
+        out = []
+
+        def walk(p):
+            for c in self.b_tree.get_children(p):
+                out.append(c)
+                if self.b_tree.item(c, 'open'):
+                    walk(c)
+        walk('')
+        return out
+
+    def _b_msg(self, text, kind='dim'):
+        try:
+            self.b_edit_msg.config(text=text, fg={'err': C['err'], 'ok': C['ok']}.get(kind, C['dim']))
+        except Exception:
+            pass
+
+    def _b_sel_keys(self):
+        keys = []
+        for r in self.b_tree.selection():
+            k = self._b_rowmap.get(r)
+            if k and k not in keys:
+                keys.append(k)
+        return keys
+
+    def b_set_tier(self):
+        """ตั้ง Tier ให้ทุกแถวที่เลือก — เลือกแถวบันเดิล = ทุกไอเทมในบันเดิลนั้น"""
+        if self.b_running:
+            return
+        self._b_commit(False, quiet=True)
+        t = self.bv_tier.get()
+        if t not in TIERS:
+            return
+        its, seen = [], set()
+        for k in self._b_sel_keys():
+            if k[0] == 'b':
+                pairs = [(k[1], j) for j in range(len(self.bq[k[1]]['items']))]
+            elif k[0] == 'i':
+                pairs = [(k[1], k[2])]
+            else:
+                pairs = []
+            for p in pairs:
+                if p not in seen:
+                    seen.add(p)
+                    its.append(p)
+        if not its:
+            self._b_msg('เลือกแถวไอเทม (หรือแถวบันเดิล) ก่อน — Ctrl / Shift เลือกหลายแถวได้', 'err')
+            return messagebox.showinfo('ตั้ง Tier', 'เลือกแถวไอเทม หรือแถวบันเดิลก่อนนะ\n'
+                                                   '(กด Ctrl / Shift ค้างไว้แล้วคลิก = เลือกหลายแถว)')
+        ch = 0
+        for i, j in its:
+            it = self.bq[i]['items'][j]
+            if it['tier'] != t:
+                it['tier'] = t
+                ch += 1
+        nb = len({i for i, _ in its})
+        self._b_refresh()
+        self._b_msg('✓ ตั้ง Tier = %s ให้ %d ไอเทม (%d บันเดิล)%s'
+                    % (t, len(its), nb, '' if ch == len(its) else ' · เปลี่ยนจริง %d' % ch), 'ok')
+        self.log('ตั้ง Tier = %s ให้ %d ไอเทม ใน %d บันเดิล' % (t, len(its), nb), 'OK')
+
+    def b_add_item(self):
+        """เพิ่มไอเทมเข้าบันเดิลที่เลือกอยู่ (เลือกแถวไหนของบันเดิลก็ได้)"""
+        if self.b_running:
+            return
+        self._b_commit(False, quiet=True)
+        ks = self._b_sel_keys()
+        bis = sorted({k[1] for k in ks})
+        if not bis and len(self.bq) == 1:
+            bis = [0]
+        if len(bis) != 1:
+            return messagebox.showinfo('เพิ่มไอเทม', 'เลือกบันเดิลที่จะเพิ่มไอเทม 1 อันก่อนนะ\n'
+                                                    '(คลิกแถวบันเดิล หรือแถวไอเทมในบันเดิลนั้น)'
+                                       if self.bq else 'นำเข้าไฟล์ต้นฉบับก่อนนะ')
+        i = bis[0]
+        b = self.bq[i]
+        it = {'id': '', 'qty': '1', 'tier': DEFAULT_TIER, 'disp': '(เพิ่มเอง)', 'kind': ''}
+        if not self._b_form_item(it, 'เพิ่มไอเทมเข้า “%s”' % b['name'][:40]):
+            return
+        b['items'].append(it)
+        for row, m in self._b_rowmap.items():          # กางบันเดิลนั้นไว้ จะได้เห็นตัวที่เพิ่ม
+            if m == ('b', i):
+                self.b_tree.item(row, open=True)
+        self._b_refresh()
+        new = ('i', i, len(b['items']) - 1)
+        for row, m in self._b_rowmap.items():
+            if m == new:
+                self.b_tree.selection_set(row)
+                self.b_tree.see(row)
+        self._b_msg('✓ เพิ่มไอเทม %s เข้า “%s”' % (it['id'], b['name'][:30]), 'ok')
+        self.log('เพิ่มไอเทม %s (qty=%s tier=%s) เข้าบันเดิล %s'
+                 % (it['id'], it['qty'], it['tier'], b['name']), 'OK')
+
+    def b_delete(self):
+        """ลบแถวที่เลือกออกจากรายการ (บันเดิลทั้งอัน / ไอเทม / famepoint · exp) — ไม่แตะไฟล์ ไม่แตะเว็บ"""
+        if self.b_running:
+            return
+        self._b_commit(False, quiet=True)
+        ks = self._b_sel_keys()
+        if not ks:
+            return messagebox.showinfo('ลบ', 'เลือกแถวที่จะลบก่อนนะ\n(กด Ctrl / Shift ค้างไว้แล้วคลิก = เลือกหลายแถว)')
+        dead_b = {k[1] for k in ks if k[0] == 'b'}
+        dead_i = {(k[1], k[2]) for k in ks if k[0] == 'i' and k[1] not in dead_b}
+        dead_r = {(k[1], k[2]) for k in ks if k[0] == 'r' and k[1] not in dead_b}
+        empty = set()
+        for i, b in enumerate(self.bq):
+            if i in dead_b or not any(x[0] == i for x in dead_i | dead_r):
+                continue
+            left_i = [j for j in range(len(b['items'])) if (i, j) not in dead_i]
+            left_r = [r for r in b.get('rewards', []) if (i, r['type']) not in dead_r]
+            if not left_i and not left_r:
+                empty.add(i)
+        n_i = len([x for x in dead_i if x[0] not in empty])
+        n_r = len([x for x in dead_r if x[0] not in empty])
+        gone = sorted(dead_b | empty)
+        lines = []
+        if gone:
+            lines.append('· บันเดิลทั้งอัน %d อัน: %s%s' % (
+                len(gone), ', '.join(self.bq[i]['name'][:24] for i in gone[:4]),
+                ' …' if len(gone) > 4 else ''))
+        if n_i:
+            lines.append('· ไอเทม %d ตัว' % n_i)
+        if n_r:
+            lines.append('· famepoint / exp %d รายการ' % n_r)
+        if empty - dead_b:
+            lines.append('(บันเดิลที่ไม่เหลือของข้างในเลย ลบทั้งอันให้ด้วย)')
+        if not messagebox.askyesno('ลบออกจากรายการ',
+                                   'ลบออกจากรายการที่จะสร้าง:\n\n%s\n\n'
+                                   'ไม่แตะไฟล์ Excel / ไม่แตะเว็บ · อยากได้คืนก็นำเข้าไฟล์ใหม่'
+                                   % '\n'.join(lines)):
+            return
+        keep, remap = [], {}
+        for i, b in enumerate(self.bq):
+            if i in gone:
+                continue
+            b['items'] = [it for j, it in enumerate(b['items']) if (i, j) not in dead_i]
+            b['rewards'] = [r for r in b.get('rewards', []) if (i, r['type']) not in dead_r]
+            remap[i] = len(keep)
+            keep.append(b)
+        self.bq = keep
+        self._b_refresh(remap)
+        what = ', '.join(x for x in (('บันเดิล %d' % len(gone)) if gone else '',
+                                      ('ไอเทม %d' % n_i) if n_i else '',
+                                      ('famepoint/exp %d' % n_r) if n_r else '') if x)
+        self._b_msg('✓ ลบแล้ว: ' + what, 'ok')
+        self.log('ลบออกจากรายการบันเดิล: ' + what, 'OK')
 
     # ---------- นำเข้า ----------
     def b_import(self):
@@ -7369,8 +7771,12 @@ class App:
     def b_edit(self):
         if self.b_running:
             return
+        self._b_commit(False, quiet=True)
         sel = self.b_tree.selection()
         if not sel:
+            if self.bq:
+                messagebox.showinfo('แก้ไข', 'เลือกแถวที่จะแก้ก่อนนะ\n'
+                                             '(หรือดับเบิลคลิกช่องที่จะแก้ในตารางได้เลย)')
             return
         m = self._b_rowmap.get(sel[0])
         if not m:
@@ -7540,11 +7946,13 @@ class App:
         self._btn(foot, 'ยกเลิก', top.destroy).pack(side='right', pady=12, ipadx=14, ipady=4)
         self.root.wait_window(top)
 
-    def _b_form_item(self, it):
-        top = self._b_dialog('แก้ไขไอเทมในบันเดิล', 290)
+    def _b_form_item(self, it, title='แก้ไขไอเทมในบันเดิล'):
+        """คืน True ถ้ากดบันทึก"""
+        top = self._b_dialog(title, 330)
         body = tk.Frame(top, bg=C['bg'])
         body.pack(fill='both', expand=True, padx=18, pady=14)
         vs = {}
+        ok = {'v': False}
         for r, (lbl, key, w) in enumerate((('Aztek Item Id (เลขที่เอาไปค้น)', 'id', 18),
                                            ('จำนวน (Quantity)', 'qty', 12))):
             tk.Label(body, text=lbl, bg=C['bg'], fg=C['dim'],
@@ -7559,18 +7967,32 @@ class App:
         cb = ttk.Combobox(body, values=TIERS, width=12, state='readonly', font=FM)
         cb.set(it.get('tier', DEFAULT_TIER))
         cb.grid(row=2, column=1, sticky='w', padx=(12, 0))
+        tk.Label(body, text='ItemKind (ไม่บังคับ — ช่วยค้นเร็วขึ้น)', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9)).grid(row=3, column=0, sticky='w', pady=5)
+        vs['kind'] = tk.StringVar(value=str(it.get('kind') or ''))
+        ek = self._entry(body, width=18)
+        ek.config(textvariable=vs['kind'])
+        ek.grid(row=3, column=1, sticky='w', padx=(12, 0), ipady=3)
         tk.Label(body, text='ชื่อที่ชีทเขียนไว้: ' + (it.get('disp') or '—'),
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), wraplength=500,
-                 anchor='w', justify='left').grid(row=3, column=0, columnspan=2,
+                 anchor='w', justify='left').grid(row=4, column=0, columnspan=2,
                                                   sticky='w', pady=(10, 0))
 
         def _save():
             nid = vs['id'].get().strip()
             if not nid.isdigit():
                 return messagebox.showwarning('ไม่ถูกต้อง', 'Aztek Item Id ต้องเป็นตัวเลข')
+            q = vs['qty'].get().strip() or '1'
+            if not re.fullmatch(r'[1-9]\d*', q):
+                return messagebox.showwarning('ไม่ถูกต้อง', 'จำนวนต้องเป็นเลข 1 ขึ้นไป')
+            k = vs['kind'].get().strip()
+            if k and not k.isdigit():
+                return messagebox.showwarning('ไม่ถูกต้อง', 'ItemKind ต้องเป็นตัวเลข (หรือเว้นว่าง)')
             it['id'] = nid
-            it['qty'] = vs['qty'].get().strip() or '1'
+            it['qty'] = q
             it['tier'] = cb.get()
+            it['kind'] = k
+            ok['v'] = True
             top.destroy()
         foot = tk.Frame(top, bg=C['card'], height=58)
         foot.pack(fill='x', side='bottom')
@@ -7579,6 +8001,7 @@ class App:
                                                             ipadx=20, ipady=4)
         self._btn(foot, 'ยกเลิก', top.destroy).pack(side='right', pady=12, ipadx=14, ipady=4)
         self.root.wait_window(top)
+        return ok['v']
 
     def _b_form_reward(self, r):
         nm = FAME_NAME if r['type'] == 'CREDIT' else 'Player Experience'
@@ -10117,7 +10540,7 @@ def ou_tables(rows, sheet):
             return None
         namec = find(lambda h: h in ('itemname', 'name', 'displayname') or h.startswith('itemname'))
         amtc = find(lambda h: h in ('amt', 'amount', 'จำนวน'))
-        rankc = find(lambda h: h in ('rank', 'tier', 'ยศ'))
+        rankc = find(is_tier_head)
         durc = find(lambda h: h.startswith('duration') or h.startswith('ระยะเวลา'))
         movec = find(lambda h: 'itemmove' in h)
         aidc = find(lambda h: 'aztek' in h or h in ('itemid', 'aztekitemid'))
@@ -10125,6 +10548,18 @@ def ou_tables(rows, sheet):
         realc = find(lambda h: h == 'realchance')
         chance = [j for j, h in keys.items() if h and 'chance' in h]
         shopcol = [j for j, h in keys.items() if h and ('coin' in h or h.startswith('ราคาไอเทม'))]
+        # Tier: หัวคอลัมน์ไม่ใช่ชื่อที่รู้จัก -> ดูค่าในช่อง (S / A / SS …) · ไม่เจอเลย = บอกไว้ในเหตุผล
+        tier_note = ''
+        if rankc is None:
+            skip = {c, namec, amtc, durc, movec, aidc, limc, realc} | set(chance) | set(shopcol)
+            near = sorted(range(bl, br + 1), key=lambda j: abs(j - c))
+            hits = guess_tier_cols(rows, drows, [j for j in near if j not in skip])
+            if hits:
+                rankc = hits[0]
+                tier_note = ' · Tier ใช้คอลัมน์ %s (ไม่มีหัว Rank/ระดับ แต่ค่าเป็น S/A/SS…) ตรวจอีกที' \
+                    % col_letter(rankc)
+            else:
+                tier_note = ' · ไม่เจอคอลัมน์ Tier (Rank/ระดับ) → General ทั้งตาราง'
 
         # ---- หัวข้อของตาราง: ข้อความใกล้หัวตารางที่สุด ในคอลัมน์ fdItemNum (หรือซ้ายติดกัน) ----
         top = max(r - 8, last_end.get(c, -1) + 1, 0)
@@ -10211,6 +10646,7 @@ def ou_tables(rows, sheet):
             it['aid'] = it['aid'] or ''
             items.append(it)
             prev = it
+        why += tier_note
         if kind == 'random' and items and all(it['rate'] and float(it['rate']) == 0 for it in items):
             use = False
             why += ' · เรทเป็น 0 ทุกตัว (ไม่มีโอกาสออกเลย) — ไม่ติ๊กไว้'
