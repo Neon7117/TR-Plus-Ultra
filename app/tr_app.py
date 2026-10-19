@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.1.6 : สร้าง Bundle — กลิ้งเมาส์ในตารางได้แล้ว · ตอน Chrome เปิดค้างให้ตรวจ แก้/ลบรายการได้ · ตอนแก้ไม่ได้บอกเหตุผล
 V1.1.5 : สร้าง Bundle — อ่าน Tier จากหัว “ระดับ” ได้ (+ดูจากค่าในช่อง / เตือนถ้าไม่เจอ) · แก้ในตาราง ตั้ง Tier ทีละหลายแถว เพิ่ม/ลบไอเทม ลบบันเดิล
 V1.1.4 : WR Master — กด ↺ รีเซ็ตเวลาเริ่ม แล้วกด Actions > ล็อก ให้ด้วย (โหมดทดสอบบนเว็บคนปิดเองตอนรีเช็ก)
 V1.1.3 : เวลาสิ้นสุด / หยุดขาย ต้องถึงวินาทีสุดท้าย 23:59:59 ทุกแท็บ (เดิมบางทีเข้าเว็บเป็น 23:59:00) · ตรวจช่องบนเว็บรวมวินาทีด้วย
@@ -7239,7 +7240,7 @@ class App:
         self.b_tree.bind('<Double-1>', self._b_dbl)
         self.b_tree.bind('<Delete>', lambda e: self.b_delete())
         for sq in ('<MouseWheel>', '<Button-4>', '<Button-5>'):
-            self.b_tree.bind(sq, lambda e: self._b_commit(False, quiet=True), add='+')
+            self.b_tree.bind(sq, self._b_wheel, add='+')
 
         s3 = self._card(p, 'ลงมือสร้าง')
         self.bv_do = tk.BooleanVar(value=False)
@@ -7390,7 +7391,7 @@ class App:
         """คลิกที่ช่อง "ใช้" ของแถวบันเดิล = สลับเลือก/ไม่เลือก"""
         if self._b_ed:                       # กำลังแก้ช่องไหนอยู่ คลิกที่อื่น = บันทึกช่องนั้นก่อน
             self._b_commit(False, quiet=True)
-        if self.b_running:
+        if self.b_tree.identify_column(ev.x) == '#1' and self._b_locked():
             return
         if self.b_tree.identify_region(ev.x, ev.y) != 'cell':
             return
@@ -7410,7 +7411,7 @@ class App:
         self._b_refresh()
 
     def b_clear(self):
-        if self.b_running or not self.bq:
+        if not self.bq or self._b_locked(True):
             return
         if messagebox.askyesno('ล้าง', 'ลบบันเดิลทั้งหมด %d อันออกจากรายการ?' % len(self.bq)):
             self.bq = []
@@ -7423,7 +7424,7 @@ class App:
     #  ช่องอื่น = เปิดหน้าต่างแก้ไขแบบเดิม
     def _b_target(self, row, col):
         m = self._b_rowmap.get(row)
-        if not m or self.b_running:
+        if not m or (self.b_running and not CHROME_HOLD['on']):
             return None
         if m[0] == 'b':
             if col != '#0' or m[1] >= len(self.bq):
@@ -7472,7 +7473,7 @@ class App:
         return None
 
     def _b_dbl(self, ev):
-        if self.b_running:
+        if self._b_locked(True):
             return 'break'
         reg = self.b_tree.identify_region(ev.x, ev.y)
         if reg not in ('cell', 'tree'):
@@ -7583,6 +7584,24 @@ class App:
                         break
         return 'break'
 
+    def _b_wheel(self, ev):
+        """กลิ้งเมาส์ในตาราง: ถ้ากำลังแก้ช่องไหนอยู่ บันทึกก่อน แล้วปล่อยให้ตารางเลื่อนตามปกติ
+        (ห้ามคืน 'break' — ไม่งั้นตารางไม่เลื่อน ต้องไปกลิ้งที่แถบเลื่อนแทน)"""
+        if self._b_ed:
+            self._b_commit(False, quiet=True)
+        return None
+
+    def _b_locked(self, popup=False):
+        """กำลังทำงานบนเว็บจริงๆ อยู่ = ห้ามแก้รายการ (บอกด้วย ไม่เงียบ)
+        งานเสร็จแล้วแค่เปิด Chrome ค้างไว้ให้ตรวจ = แก้ได้ปกติ (ดูบนเว็บแล้วมาแก้ในนี้ต่อได้เลย)"""
+        if not self.b_running or CHROME_HOLD['on']:
+            return False
+        msg = 'กำลังทำงานบนเว็บอยู่ — แก้ / ลบ รายการได้หลังทำงานเสร็จ'
+        self._b_msg('⏳  ' + msg, 'err')
+        if popup:
+            messagebox.showinfo('รอสักครู่', msg + '\n(ตอนที่เปิด Chrome ค้างไว้ให้ตรวจ แก้ได้ปกติ)')
+        return True
+
     def _b_go_next(self, row, col):
         self._b_next_job = None
         if self.b_tree.exists(row):
@@ -7615,7 +7634,7 @@ class App:
 
     def b_set_tier(self):
         """ตั้ง Tier ให้ทุกแถวที่เลือก — เลือกแถวบันเดิล = ทุกไอเทมในบันเดิลนั้น"""
-        if self.b_running:
+        if self._b_locked(True):
             return
         self._b_commit(False, quiet=True)
         t = self.bv_tier.get()
@@ -7651,7 +7670,7 @@ class App:
 
     def b_add_item(self):
         """เพิ่มไอเทมเข้าบันเดิลที่เลือกอยู่ (เลือกแถวไหนของบันเดิลก็ได้)"""
-        if self.b_running:
+        if self._b_locked(True):
             return
         self._b_commit(False, quiet=True)
         ks = self._b_sel_keys()
@@ -7683,7 +7702,7 @@ class App:
 
     def b_delete(self):
         """ลบแถวที่เลือกออกจากรายการ (บันเดิลทั้งอัน / ไอเทม / famepoint · exp) — ไม่แตะไฟล์ ไม่แตะเว็บ"""
-        if self.b_running:
+        if self._b_locked(True):
             return
         self._b_commit(False, quiet=True)
         ks = self._b_sel_keys()
@@ -7737,7 +7756,7 @@ class App:
 
     # ---------- นำเข้า ----------
     def b_import(self):
-        if self.b_running:
+        if self._b_locked(True):
             return
         path = filedialog.askopenfilename(title='เลือกไฟล์ต้นฉบับ',
                                           filetypes=[('Excel', '*.xlsx *.xlsm'), ('ทุกไฟล์', '*.*')])
@@ -7769,7 +7788,7 @@ class App:
 
     # ---------- แก้ไข ----------
     def b_edit(self):
-        if self.b_running:
+        if self._b_locked(True):
             return
         self._b_commit(False, quiet=True)
         sel = self.b_tree.selection()
