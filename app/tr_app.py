@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.2.1 : หลักฐานเทส — นำเข้าแล้วเลือกชีทได้ (หน้าต่างเลือกชีทแบบแท็บสร้าง Bundle / WR) · อ่านเลข Bundle / ชื่อเซ็ตจากชีทจริงได้ดีขึ้น
 V1.2.0 : แท็บใหม่ 📸 หลักฐานเทส — เลือกเซ็ตไอเทมจากชีท → แคป 4 ภาพ ภาพเข้าช่องเอง → ตรวจเทียบกับชีท → บันทึกเป็นภาพเดียว
 V1.1.6 : สร้าง Bundle — กลิ้งเมาส์ในตารางได้แล้ว · ตอน Chrome เปิดค้างให้ตรวจ แก้/ลบรายการได้ · ตอนแก้ไม่ได้บอกเหตุผล
 V1.1.5 : สร้าง Bundle — อ่าน Tier จากหัว “ระดับ” ได้ (+ดูจากค่าในช่อง / เตือนถ้าไม่เจอ) · แก้ในตาราง ตั้ง Tier ทีละหลายแถว เพิ่ม/ลบไอเทม ลบบันเดิล
@@ -14368,10 +14369,25 @@ _EV_LABELS = {'bundle', 'bundleid', 'game', 'start', 'end', 'reward', 'code', 'f
               'talesrunner', 'template', 'templateวางของ', 'id', 'name', 'note'}
 
 
+def _ev_norm(t):
+    """เทียบป้ายแบบไม่สนวรรค/ตัวพิมพ์ — สระอำพิมพ์แยก (ํ + า) ก็นับเป็น ำ"""
+    return _hkey(t).replace('\u0e4d\u0e32', '\u0e33')
+
+
+_EV_BUNDLE_IN = re.compile(r'\s*bundle\s*(?:id|no\.?)?\s*[:#=]?\s*(\d+)\s*$', re.I)
+
+
+def ev_bundle_in(t):
+    """ช่องที่เขียนป้ายกับเลขไว้ในช่องเดียว เช่น “Bundle 354” / “Bundle: 4897” -> '354'"""
+    m = _EV_BUNDLE_IN.match(str(t or ''))
+    return m.group(1) if m else ''
+
+
 def ev_is_label(t):
-    k = _hkey(t)
+    k = _ev_norm(t)
     return (k in _EV_LABELS or k.startswith('limit') or k.startswith('เงื่อนไข')
-            or k.startswith('เติมซ้ำ') or k.startswith('ไม่จำกัด'))
+            or k.startswith('เติมซ้ำ') or k.startswith('เติมข้าม') or k.startswith('ไม่จำกัด')
+            or bool(ev_bundle_in(t)))
 
 
 def _ev_txt(v):
@@ -14501,9 +14517,14 @@ def ev_sets_from_rows(rows, sheet):
                 bundle = v
                 break
         if not bundle:
+            # ป้าย Bundle อาจอยู่ซ้ายของก้อนตารางนิดหน่อย (คอลัมน์ที่ไม่มีข้อมูลในแถวไอเทม)
             for y in range(r - 1, max(r - 6, prev_end + 1, 0) - 1, -1):
-                for j in range(bl, br + 1):
-                    if _hkey(_ou_cell(rows, y, j)) not in ('bundle', 'bundleid'):
+                for j in range(max(0, bl - 3), br + 1):
+                    v0 = _ou_cell(rows, y, j)
+                    if ev_bundle_in(v0):                 # “Bundle 354” ในช่องเดียว
+                        bundle = ev_bundle_in(v0)
+                        break
+                    if _hkey(v0) not in ('bundle', 'bundleid'):
                         continue
                     for v in [_ou_cell(rows, yy, j) for yy in range(y + 1, r)] + \
                             [_ou_cell(rows, y, j + 1)]:
@@ -14519,7 +14540,7 @@ def ev_sets_from_rows(rows, sheet):
         title, ty = '', None
         top = max(r - 8, prev_end + 1, 0)
         for y in range(r - 1, top - 1, -1):
-            for j in range(bl, br + 1):
+            for j in range(max(0, bl - 3), br + 1):
                 if _hkey(_ou_cell(rows, y, j)) != 'code':
                     continue
                 for k in range(j + 1, br + 2):
@@ -14592,6 +14613,28 @@ def ev_read_workbook(path):
         except Exception:
             pass
     return out, bad
+
+
+def ev_read_sheet_wb(wb, sheet):
+    """อ่าน 1 ชีท -> (เซ็ต, คำเตือน) — ใช้กับหน้าต่างเลือกชีท"""
+    sets = ev_sets_from_rows(ou_read_rows(wb, sheet), sheet)
+    warns = ['%s · %s: %s' % (s['sheet'], ev_set_name(s), ' · '.join(s['warn'])) for s in sets if s['warn']]
+    return sets, warns
+
+
+def ev_scan_sheets_wb(wb, progress=None):
+    """[(ชื่อชีท, จำนวนเซ็ตที่เจอ)] — โชว์ในหน้าต่างเลือกชีท"""
+    out = []
+    names = wb.sheetnames
+    for k, s in enumerate(names, 1):
+        if progress:
+            progress(k, len(names), s)
+        try:
+            n = len(ev_sets_from_rows(ou_read_rows(wb, s), s))
+        except Exception:
+            n = 0
+        out.append((s, n))
+    return out
 
 
 def ev_set_name(s):
@@ -14791,6 +14834,7 @@ class EvTab:
         self.tab = tab
         self.sets = []
         self.file = ''
+        self.picked = []            # ชีทที่เลือกตอนนำเข้า (ไว้กด “อ่านใหม่”)
         self.cur = None
         self.slots = {k: None for k, _, _ in EV_SLOTS}
         self.want = None
@@ -14959,23 +15003,53 @@ class EvTab:
 
     # ---------- ไฟล์ชีท ----------
     def open_file(self):
+        """นำเข้า = เลือกชีทเองก่อน (หน้าต่างเลือกชีทแบบเดียวกับแท็บสร้าง Bundle / WR) ไม่ดึงทั้งไฟล์"""
         path = filedialog.askopenfilename(title='เลือกไฟล์ชีท (.xlsx)',
                                           filetypes=[('Excel', '*.xlsx *.xlsm'), ('ทุกไฟล์', '*.*')])
-        if path:
-            self.load_path(path)
+        if not path or not self._ok_to_drop():
+            return
+        dlg = EvImportDialog(self.app.root, path)
+        if dlg.result is None:
+            return
+        self._apply(path, dlg.result, getattr(dlg, 'picked', []), [])
 
     def reread(self):
+        """อ่านชีทเดิมที่เลือกไว้ใหม่ (ชีทถูกแก้หลังนำเข้า) — ไม่ต้องเลือกชีทซ้ำ"""
         if not self.file:
             return messagebox.showinfo('ยังไม่มีไฟล์', 'กด “นำเข้าไฟล์ชีท” ก่อนนะ')
         if not os.path.exists(self.file):
             return messagebox.showwarning('หาไฟล์ไม่เจอ', 'ไม่เจอไฟล์เดิมแล้ว:\n%s' % self.file)
-        self.load_path(self.file)
+        if not self._ok_to_drop():
+            return
+        if not self.picked:
+            dlg = EvImportDialog(self.app.root, self.file)
+            if dlg.result is not None:
+                self._apply(self.file, dlg.result, getattr(dlg, 'picked', []), [])
+            return
+        self.load_path(self.file, self.picked)
 
-    def load_path(self, path):
+    def _ok_to_drop(self):
+        return not self._busy_slots() or messagebox.askyesno(
+            'มีภาพค้างอยู่', 'ภาพที่แคปไว้ของเซ็ตตอนนี้ยังไม่ได้บันทึก — ทิ้งแล้วนำเข้าใหม่ไหม?')
+
+    def load_path(self, path, sheets=None):
+        """อ่านจากไฟล์ตรงๆ (ไม่เปิดหน้าต่างเลือกชีท) — sheets = ชื่อชีทที่จะอ่าน · None = ทุกชีท"""
+        sets, bad = [], []
         try:
             self.tab.config(cursor='watch')
             self.tab.update_idletasks()
-            sets, bad = ev_read_workbook(path)
+            if sheets is None:
+                sets, bad = ev_read_workbook(path)
+            else:
+                wb = open_workbook(path)
+                try:
+                    for nm in sheets:
+                        if nm not in wb.sheetnames:
+                            bad.append('%s: ไม่มีชีทนี้แล้ว' % nm)
+                            continue
+                        sets += ev_read_sheet_wb(wb, nm)[0]
+                finally:
+                    wb.close()
         except Exception as ex:
             self.app.log('หลักฐานเทส: อ่านไฟล์ไม่ได้ — %s' % ex, 'ERR')
             return messagebox.showerror('อ่านไฟล์ไม่ได้', str(ex)[:300])
@@ -14984,6 +15058,9 @@ class EvTab:
                 self.tab.config(cursor='')
             except Exception:
                 pass
+        self._apply(path, sets, list(sheets) if sheets is not None else [], bad)
+
+    def _apply(self, path, sets, picked, bad):
         # อ่านไฟล์เดิมซ้ำ = เก็บสถานะ "บันทึกแล้ว" กับชื่อที่แก้ไว้
         old = {}
         if os.path.abspath(path) == os.path.abspath(self.file or '_'):
@@ -14995,10 +15072,8 @@ class EvTab:
                     if o.get(k) is not None and (k == 'done' or o.get('edited')):
                         s[k] = o[k]
                 s['edited'] = o.get('edited', False)
-        if self._busy_slots() and not messagebox.askyesno(
-                'มีภาพค้างอยู่', 'ภาพที่แคปไว้ของเซ็ตตอนนี้ยังไม่ได้บันทึก — ทิ้งแล้วอ่านไฟล์ใหม่ไหม?'):
-            return
         self.file = path
+        self.picked = list(picked or [])
         self.sets = sets + [s for s in self.sets if s.get('manual')]
         self.cur = None
         self._clear_slots()
@@ -15011,15 +15086,15 @@ class EvTab:
             self.cb_sheet.set('ทุกชีท')
         nw = sum(1 for s in sets if s.get('warn'))
         self.app.log('หลักฐานเทส: นำเข้า %s — %d เซ็ต จาก %d ชีท%s'
-                     % (os.path.basename(path), len(sets), len(sheets),
+                     % (os.path.basename(path), len(sets), len({s['sheet'] for s in sets}),
                         (' · ต้องดู %d เซ็ต' % nw) if nw else ''), 'OK' if sets else 'WARN')
         for b in bad:
             self.app.log('  ⚠ อ่านชีทไม่ได้: ' + b, 'WARN')
-        log_event('ev_import', file=os.path.basename(path), sets=len(sets))
+        log_event('ev_import', file=os.path.basename(path), sets=len(sets), sheets=len(self.picked))
         if not sets:
             messagebox.showwarning('ไม่เจอเซ็ตไอเทม',
-                                   'ไม่เจอตารางที่มีหัว fdItemNum ในไฟล์นี้เลย\n\n'
-                                   'ยังรวมภาพได้ปกติ — กด “➕ เซ็ตเพิ่มเอง” แล้วตั้งชื่อเซ็ตเอง')
+                                   'ไม่เจอตารางที่มีหัว fdItemNum ในชีทที่เลือก\n\n'
+                                   'ยังรวมภาพได้ปกติ — กด “➕ เพิ่มเอง” แล้วตั้งชื่อเซ็ตเอง')
         self._save()
         self.refresh()
 
@@ -15611,7 +15686,8 @@ class EvTab:
     def _save(self):
         try:
             with open(self._path(), 'w', encoding='utf-8') as f:
-                json.dump({'file': self.file, 'sets': self.sets}, f, ensure_ascii=False, indent=1)
+                json.dump({'file': self.file, 'picked': self.picked, 'sets': self.sets}, f,
+                          ensure_ascii=False, indent=1)
         except Exception as ex:
             self.app.log('หลักฐานเทส: เก็บสถานะไม่ได้ — %s' % ex, 'WARN')
 
@@ -15620,7 +15696,16 @@ class EvTab:
             with open(self._path(), 'r', encoding='utf-8') as f:
                 d = json.load(f)
             self.file = d.get('file') or ''
+            self.picked = [x for x in d.get('picked') or [] if isinstance(x, str)]
             self.sets = [s for s in d.get('sets') or [] if isinstance(s, dict) and 'items' in s]
+            if 'picked' not in d and not any(s.get('done') for s in self.sets):
+                # v1.2.0 ดึงมาทั้งไฟล์ (ยังไม่มีหน้าต่างเลือกชีท) และยังไม่ได้บันทึกอะไร -> เริ่มใหม่ให้สะอาด
+                keep = [s for s in self.sets if s.get('manual')]
+                n = len(self.sets) - len(keep)
+                self.sets = keep
+                if n:
+                    self.app.log('หลักฐานเทส: ล้างรายการเดิม %d เซ็ต (เวอร์ชันก่อนดึงมาทั้งไฟล์) — '
+                                 'กด “นำเข้าไฟล์ชีท” แล้วเลือกชีทที่จะเทสได้เลย' % n, 'INFO')
             sheets = []
             for s in self.sets:
                 if s.get('sheet') not in sheets:
@@ -15728,6 +15813,51 @@ class CropDialog:
     def no_crop(self):
         self.ev.save_crop(self.kind, None, (self.w, self.h))
         self.win.destroy()
+
+
+class EvImportDialog(BundleImportDialog):
+    """หน้าต่างนำเข้าชีทของแท็บหลักฐานเทส — ใช้หน้าต่างเลือกชีทแบบเดียวกับแท็บสร้าง Bundle / WR
+    (สืบทอดอย่างเดียว ไม่แก้ของเดิม) · เปลี่ยนแค่สิ่งที่อ่านกับที่โชว์"""
+    TITLE = 'นำเข้าชีท — 📸 หลักฐานเทส'
+    PICK_ALL = 'เลือกชีทที่มีเซ็ตไอเทมทั้งหมด'
+    HINT = ('เลือกเฉพาะชีทที่จะเทส — 1 ตารางที่มีหัว fdItemNum = 1 เซ็ตไอเทม · ชื่อเซ็ตเอาจากป้าย CODE / '
+            'หัวข้อเหนือตาราง · Bundle เอาจากเลขในแถวหัวตาราง / ใต้ป้าย Bundle · '
+            'เช็กลิสต์ใช้ Display Name / ระยะเวลาของขวัญ / Amt')
+    TREE_TITLE = 'เซ็ตไอเทมที่เจอ'
+    TREE_HEAD = 'เซ็ต / ไอเทม'
+    scan_fn = staticmethod(lambda wb, progress=None: ev_scan_sheets_wb(wb, progress))
+    read_fn = staticmethod(lambda wb, nm: ev_read_sheet_wb(wb, nm))
+    ALLOW_COL = False
+
+    def _show(self, bs, ws, note):
+        self.bundles = bs
+        self.warns = ws
+        for c, t, w in (('qty', 'Amt', 50), ('tier', 'ระยะเวลา', 90)):
+            self.tree.heading(c, text=t)
+            self.tree.column(c, width=w)
+        self.tree.delete(*self.tree.get_children())
+        for s in bs:
+            info = ('Bundle %s' % s['bundle']) if s.get('bundle') else '⚠ ไม่มี Bundle'
+            info += ' · %d ไอเทม' % len(s['items'])
+            other = [w for w in s.get('warn', []) if 'Bundle' not in w]
+            if other:
+                info += ' · ⚠ ' + ' · '.join(other)
+            pid = self.tree.insert('', 'end', text='🧾  ' + ev_set_name(s), open=False,
+                                   values=('', '', info))
+            for it in s['items']:
+                self.tree.insert(pid, 'end', text='      ' + (it.get('name') or '?'),
+                                 values=(it.get('amt') or '1', it.get('days_raw') or '—',
+                                         'fdItemNum %s' % (it.get('kind') or '—')))
+        self.info.config(text='%s · พบ %d เซ็ต' % (note, len(bs)))
+        self.warn_lbl.config(text=('⚠  %d เซ็ตที่ต้องดู เช่น %s' % (len(ws), ws[0][:90])) if ws else '')
+        self.count_lbl.config(text='จะนำเข้า %d เซ็ต' % len(bs) if bs else '')
+        self.ok_btn.config(state='normal' if bs else 'disabled',
+                           bg=C['accent'] if bs else C['input'],
+                           fg='white' if bs else C['dim'])
+
+    def _ok(self):
+        self.picked = self._selected()             # จำชีทที่เลือกไว้ ใช้ตอนกด “อ่านใหม่”
+        BundleImportDialog._ok(self)
 
 
 if __name__ == '__main__':
