@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.2.3 : WR Master — เช็กชื่อ Bundle ต้องมีชื่อโค้ด ไม่ตรง = ไม่สร้าง + เด้งเตือน · คิวเตือนเลข Bundle ซ้ำหลายโค้ด
 V1.2.2 : หลักฐานเทส — เอา “ตรวจโดย <ชื่อผู้ใช้เครื่อง> <เวลา>” ออกจากภาพ
 V1.2.1 : หลักฐานเทส — นำเข้าแล้วเลือกชีทได้ (หน้าต่างเลือกชีทแบบแท็บสร้าง Bundle / WR) · อ่านเลข Bundle / ชื่อเซ็ตจากชีทจริงได้ดีขึ้น
 V1.2.0 : แท็บใหม่ 📸 หลักฐานเทส — เลือกเซ็ตไอเทมจากชีท → แคป 4 ภาพ ภาพเข้าช่องเอง → ตรวจเทียบกับชีท → บันทึกเป็นภาพเดียว
@@ -2011,6 +2012,35 @@ JS_CODE_BUNDLE = r"""
   return 'ไม่รู้จักคำสั่ง';
 }"""
 
+# อ่าน “#เลข — ชื่อ Bundle” ที่เลือกไว้ให้ได้ทั้งชื่อ (เลขกับชื่ออาจอยู่คนละแท็ก)
+# ใช้ตรวจว่า Bundle ที่เลือกเป็นของโค้ดนี้จริง — ไม่กดอะไรบนหน้าเว็บ อ่านอย่างเดียว
+JS_CODE_BUNDLE_NAME = r"""
+([bid]) => {
+""" + _JS_CODE_LIB + r"""
+  // ข้อความของกล่อง โดยไม่เอาปุ่ม (“เปลี่ยน”) / ช่องกรอก มาปนเป็นชื่อ
+  const txt = e => {
+    const c = e.cloneNode(true);
+    c.querySelectorAll('button,[role=button],input,textarea,select,svg').forEach(x => x.remove());
+    return (c.textContent || '').replace(/\s+/g, ' ').trim();
+  };
+  const num = String(bid || '').replace(/\D/g, '');
+  const head = num ? new RegExp('^#\\s*' + num + '(\\D|$)') : /^#\s*\d/;
+  const bare = /^#\s*\d+\s*[—–\-:|·]*\s*$/;           // มีแต่เลข ยังไม่มีชื่อ
+  const rw = rewardBox() || document.body;
+  const w = document.createTreeWalker(rw, NodeFilter.SHOW_TEXT, null, false);
+  let node;
+  while ((node = w.nextNode())) {
+    let el = node.parentElement;
+    if (!el || !vis(el) || !head.test(txt(el))) continue;
+    for (let i = 0; i < 4 && bare.test(txt(el)) && el.parentElement && el !== rw; i++) {
+      if (!head.test(txt(el.parentElement))) break;
+      el = el.parentElement;
+    }
+    return 'ok|' + txt(el).slice(0, 160);
+  }
+  return 'ok|';
+}"""
+
 # ============================================================================
 #  หน้ารายการ Item Code / หน้าแก้ไข — ใช้กับปุ่ม "รีเซ็ตเวลาเริ่ม"
 #  โค้ดที่สร้างแล้วจะถูกล็อกเสมอ -> ต้องไปกด Actions > ปลดล็อก ที่หน้ารายการก่อน
@@ -3788,6 +3818,37 @@ def wr_queue_flags(queue, made=()):
     dup = {k: v for k, v in seen.items() if len(v) > 1}
     done = {wr_key(m.get('d') or m) for m in made if wr_is_created(m)}
     return dup, done & set(seen)
+
+
+def wr_bundle_match(code, shown):
+    """WR Master: ชื่อ Bundle ปกติ = ชื่อโค้ด (เช่น โค้ด MIST9T6N1J3W -> Bundle “MIST9T6N1J3W WR 10 AUG”)
+    shown = ข้อความ Bundle ที่เลือกบนเว็บ “#2845 — ชื่อ”
+    คืน (ผล, ชื่อ Bundle) · ผล: 'ok' ชื่อมีโค้ดนี้เป็นคำของมันเอง · 'bad' ไม่มี
+                               'noname' อ่านชื่อไม่ได้ · 'skip' ไม่มี CODE ให้เทียบ"""
+    s = str(shown or '').strip()
+    m = re.match(r'#\s*\d+\s*[—–\-:|·]*\s*(.*)$', s)
+    name = (m.group(1) if m else s).strip()
+    c = re.sub(r'[^A-Z0-9]', '', str(code or '').upper())
+    if not c:
+        return 'skip', name
+    if not re.sub(r'[\s—–\-:|·]', '', name):
+        return 'noname', name
+    return ('ok' if c in re.findall(r'[A-Z0-9]+', name.upper()) else 'bad'), name
+
+
+def wr_shared_bundles(queue):
+    """WR Master: เลข Bundle เดียวกันถูกใส่ให้หลายโค้ด (ปกติ 1 โค้ด = 1 Bundle ชื่อเดียวกับโค้ด)
+    คืน {เลข Bundle: [CODE, ...]} เฉพาะเลขที่ใช้กับมากกว่า 1 โค้ด"""
+    by = {}
+    for d in queue:
+        b = re.sub(r'\D', '', str(d.get('bundle') or ''))
+        k = wr_key(d)
+        if not b or not k or wr_is_random(d):
+            continue
+        ks = by.setdefault(b, [])
+        if k not in ks:
+            ks.append(k)
+    return {b: ks for b, ks in by.items() if len(ks) > 1}
 
 
 def wr_same(got, want):
@@ -6491,6 +6552,31 @@ class App:
         await page.keyboard.press('Escape')
         return False
 
+    async def _w_bundle_name_guard(self, page, d):
+        """WR Master: Bundle ที่เลือกต้องเป็นของโค้ดนี้ — ชื่อ Bundle ต้องมี CODE อยู่ในชื่อ
+        (กันเลข Bundle ในชีทพิมพ์ผิด แล้วโค้ดไปผูกกับ Bundle ของโค้ดอื่น — สร้างแล้วเว็บแก้ Bundle ไม่ได้)
+        คืน None = ผ่าน/ไม่ต้องเช็ก · คืน dict = ไม่ตรง (ห้ามสร้าง)"""
+        if getattr(self, 'W_NAME', '') != 'WR Master' or wr_is_random(d):
+            return None
+        code = str(d.get('code') or '').strip()
+        if not code:
+            return None
+        bid = re.sub(r'\D', '', str(d.get('bundle') or ''))
+        st, name = 'noname', ''
+        for _ in range(8):                      # ชื่ออาจโผล่ตามหลังเลขนิดนึง
+            r = str(await page.evaluate(JS_CODE_BUNDLE_NAME, [bid]))
+            st, name = wr_bundle_match(code, r.split('|', 1)[1] if r.startswith('ok|') else '')
+            if st != 'noname':
+                break
+            await page.wait_for_timeout(250)
+        if st in ('ok', 'skip'):
+            self.log('   · ชื่อ Bundle มีโค้ด %s ตรงกัน ✓' % code, 'INFO')
+            return None
+        why = ('อ่านชื่อ Bundle #%s บนเว็บไม่ได้ — เช็กไม่ได้ว่าเป็นของโค้ดนี้ไหม' % bid
+               if st == 'noname' else
+               'Bundle #%s ชื่อ “%s” ไม่มีโค้ด %s' % (bid, name[:60], code))
+        return {'code': code, 'bundle': bid, 'name': name[:60], 'why': why}
+
     # ==================================================================
     #  WR Master — รีเซ็ตเวลาเริ่ม (แก้ของที่สร้างไว้แล้ว ห้ามสร้างใหม่)
     # ==================================================================
@@ -6573,6 +6659,21 @@ class App:
                 return True
         self.log('   ! กดปลดล็อกแล้ว แต่แถวนี้ยังขึ้น “ล็อก” อยู่ — ต้องปลดเองบนเว็บ', 'WARN')
         return False
+
+    def _w_bname_popup(self, mis, do):
+        """เด้งเตือนครั้งเดียวต่อรอบ ตอนเจอ Bundle ไม่ตรงโค้ดตัวแรก (งานยังทำตัวอื่นต่อ)"""
+        msg = ('โค้ด  %s\nเลข Bundle ในชีท = #%s\n\n%s\n\n'
+               'ปกติชื่อ Bundle = ชื่อโค้ด → เลข Bundle ในชีทน่าจะผิด\n'
+               '%s · โค้ดอื่นทำต่อตามปกติ\n(จบงานแล้วดูรายชื่อทั้งหมดในแท็บ Log)\n\n'
+               'แก้: เช็กเลข Bundle ในชีท → ดับเบิลคลิกแถวในคิวแก้เลข → กดเริ่มใหม่'
+               % (mis['code'], mis['bundle'],
+                  ('บนเว็บ Bundle #%s ชื่อ “%s”' % (mis['bundle'], mis['name']))
+                  if mis.get('name') else mis['why'],
+                  'ไม่สร้างโค้ดนี้' if do else 'โหมดทดสอบ: ถ้ากดจริงจะไม่สร้างโค้ดนี้'))
+        try:
+            self.root.after(0, lambda: messagebox.showwarning('⛔ Bundle ไม่ตรงโค้ด', msg))
+        except Exception:
+            pass
 
     def _w_autolock(self):
         """รีเซ็ตเวลาเริ่มแล้วกดล็อกให้ด้วย — เฉพาะ WR Master"""
@@ -6876,6 +6977,25 @@ class App:
                 self.log('   ! ตรวจรอบสุดท้าย: Bundle บนเว็บเป็น “%s”' % (now or 'ยังไม่เลือก'),
                          'WARN')
                 bad.append('Bundle')
+        # ---------- WR Master: ชื่อ Bundle ต้องเป็นของโค้ดนี้ ไม่งั้นไม่สร้าง ----------
+        if 'Bundle' not in bad:
+            mis = await self._w_bundle_name_guard(page, d)
+            if mis:
+                self.log('   ⛔ %s — เลข Bundle ในชีทน่าจะผิด %s'
+                         % (mis['why'], 'ไม่สร้างให้' if do else '(ถ้ากดจริงจะไม่สร้างตัวนี้)'),
+                         'ERR')
+                fails = getattr(self, '_w_bname_fails', None)
+                if fails is not None:
+                    fails.append(mis)
+                log_event('wr_bundle_mismatch', code=mis['code'], bundle=mis['bundle'],
+                          bundle_name=mis['name'], commit=bool(do))
+                if not bad:
+                    if not do and hold:
+                        await page.wait_for_timeout(hold * 1000)
+                    self.add_made_code(d, '', ('โหมดทดสอบ — ' if not do else 'ไม่ได้สร้าง — ')
+                                       + 'Bundle ไม่ตรงโค้ด (#%s)' % mis['bundle'], ok=False)
+                    return False
+                bad.append('Bundle ไม่ตรงโค้ด')
 
         if bad:
             miss = ', '.join(dict.fromkeys(bad))
@@ -9054,6 +9174,7 @@ class App:
         แดง = CODE ซ้ำกันในคิว (เว็บไม่ให้สร้างซ้ำ) · ฟ้า = เคยสร้างจริงไปแล้ว
         เหลือง = ชีทไม่มีเลข Bundle"""
         dup, done = wr_queue_flags(self.wq, self.made_codes)
+        shared = wr_shared_bundles(self.wq) if getattr(self, 'W_NAME', '') == 'WR Master' else {}
         nobd = 0
         for i, d in enumerate(self.wq, 1):
             iid = 'wq%d' % i
@@ -9074,6 +9195,8 @@ class App:
                 code_txt = '✔ ' + code_txt
             elif not d.get('bundle'):
                 tag = 'warn'
+            elif re.sub(r'\D', '', str(d.get('bundle'))) in shared:
+                tag = 'warn'                      # เลข Bundle เดียวกันกับโค้ดอื่น
             else:
                 tag = ''
             if not d.get('bundle'):
@@ -9095,6 +9218,12 @@ class App:
         if nobd:
             msgs.append('⚠  มี %d โค้ดที่ยังไม่มีเลข Bundle ในชีท (แถวเหลือง) — '
                         'ดับเบิลคลิกใส่เองก่อน ไม่งั้นตัวนั้นจะเลือก Bundle ไม่ได้' % nobd)
+        if shared:
+            msgs.append('⚠  เลข Bundle เดียวกันใส่ให้หลายโค้ด (แถวเหลือง): %s — ปกติ 1 โค้ด = 1 Bundle '
+                        'ชื่อเดียวกับโค้ด เช็กเลขในชีทก่อนนะ (ตอนสร้าง ตัวที่ชื่อ Bundle ไม่ตรงโค้ดจะไม่สร้างให้)'
+                        % (' · '.join('#%s (%s)' % (b, ', '.join(ks[:3]) + (' …' if len(ks) > 3 else ''))
+                                      for b, ks in list(shared.items())[:3])
+                           + (' …' if len(shared) > 3 else '')))
         self.w_warn.config(text='\n'.join(msgs),
                            fg=C['err'] if dup else C['warn'])
 
@@ -9538,6 +9667,13 @@ class App:
             if nobd:
                 msg += ('\n⚠  มี %d โค้ดที่ยังไม่มีเลข Bundle — ตัวนั้นจะเลือก Bundle '
                         'ไม่ได้\n' % nobd)
+            if getattr(self, 'W_NAME', '') == 'WR Master':
+                sh = wr_shared_bundles(rows)
+                if sh:
+                    msg += ('\n⚠  เลข Bundle เดียวกันใส่ให้หลายโค้ด: %s\n'
+                            '   (ตัวที่ชื่อ Bundle ไม่ตรงโค้ด จะไม่สร้างให้)\n'
+                            % ' · '.join('#%s = %s' % (b, ', '.join(ks[:3])) for b, ks in list(sh.items())[:3]))
+                msg += '\n🔎 ทุกโค้ดจะเช็กว่าชื่อ Bundle บนเว็บมีชื่อโค้ดนั้น — ไม่ตรง = ไม่สร้าง\n'
             msg += '\nตรวจชื่อ/เวลา/จำนวนในคิวเรียบร้อยแล้วใช่ไหม?'
             if not messagebox.askyesno('ยืนยัน', msg):
                 return
@@ -9647,6 +9783,8 @@ class App:
                 okc = errc = 0
                 if mode == 'reset':
                     self._w_lock_fails = []
+                else:
+                    self._w_bname_fails = []
                 for i, d in enumerate(rows, 1):
                     if self.w_cancel:
                         self.log('ยกเลิกแล้ว', 'WARN')
@@ -9660,7 +9798,10 @@ class App:
                             if good and do:
                                 self._w_after_reset(d)
                         else:
+                            nb0 = len(self._w_bname_fails)
                             good = await self._w_one(page, d, do, hold)
+                            if nb0 == 0 and self._w_bname_fails:
+                                self._w_bname_popup(self._w_bname_fails[0], do)
                         if good:
                             okc += 1
                         else:
@@ -9680,6 +9821,14 @@ class App:
                                  % (len(lf), ', '.join(lf[:12]) + (' …' if len(lf) > 12 else '')),
                                  'WARN')
                     self.log('เหลือแค่ปิด “โหมดทดสอบ” บนเว็บเอง แล้วรีเช็กอีกรอบ', 'INFO')
+                bf = getattr(self, '_w_bname_fails', None) if mode != 'reset' else None
+                if bf:
+                    self.log('⛔ Bundle ไม่ตรงโค้ด %d ตัว — %s: %s' % (
+                        len(bf), 'ไม่ได้สร้าง' if do else 'ถ้ากดจริงจะไม่สร้าง',
+                        ' · '.join('%s (#%s)' % (m['code'], m['bundle']) for m in bf[:12])
+                        + (' …' if len(bf) > 12 else '')), 'ERR')
+                    self.log('   แก้: เช็กเลข Bundle ในชีท -> ดับเบิลคลิกแถวในคิวแก้เลข Bundle '
+                             '-> กดเริ่มใหม่ (ตัวที่สร้างไปแล้วจะข้ามให้เอง)', 'INFO')
                 log_event('wr_done', ok=okc, fail=errc, commit=bool(do))
             finally:
                 try:
