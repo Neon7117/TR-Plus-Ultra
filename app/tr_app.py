@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.2.5 : หน้าจอ — ตาราง “ที่สร้างแล้ว” ย้ายไปอยู่ขวาของคิว (สร้าง Item / Bundle / WR Master / Item Code) ลากเส้นแบ่งปรับได้ · ช่องชื่อแคบลง
 V1.2.4 : สร้าง Item — ไอเทมชื่อเดียวกัน (ต่างแค่จำนวน/วัน) ใส่รูปครั้งเดียว แถวอื่นได้รูปเดียวกันเอง
 V1.2.3 : WR Master — เช็กชื่อ Bundle ต้องมีชื่อโค้ด ไม่ตรง = ไม่สร้าง + เด้งเตือน · คิวเตือนเลข Bundle ซ้ำหลายโค้ด
 V1.2.2 : หลักฐานเทส — เอา “ตรวจโดย <ชื่อผู้ใช้เครื่อง> <เวลา>” ออกจากภาพ
@@ -5488,6 +5489,17 @@ class App:
                 self.root.geometry('%dx%d' % (need, max(720, self.root.winfo_height())))
         except Exception:
             pass
+        # คิวกับ “ที่สร้างแล้ว” วางซ้าย | ขวา — จอกว้างพอ เปิดหน้าต่างกว้างขึ้นให้เห็นครบทั้งสองฝั่ง
+        try:
+            self.root.update_idletasks()
+            sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+            want = min(1760, sw - 80)
+            if want > self.root.winfo_width():
+                h = min(max(760, self.root.winfo_height()), sh - 90)
+                self.root.geometry('%dx%d+%d+%d' % (want, h, max(0, (sw - want) // 2),
+                                                    max(0, (sh - h) // 2 - 30)))
+        except Exception:
+            pass
 
     def _card(self, parent, title, grow=False):
         outer = tk.LabelFrame(parent, text='  ' + title + '  ', bg=C['bg'], fg=C['dim'],
@@ -5497,6 +5509,86 @@ class App:
         inner = tk.Frame(outer, bg=C['bg'])
         inner.pack(fill='both' if grow else 'x', expand=grow, padx=12, pady=8)
         return inner
+
+    def _split_lr(self, parent, left_frac=0.55):
+        """แบ่งพื้นที่ ซ้าย | ขวา — ลากเส้นแบ่งตรงกลางปรับความกว้างได้
+        ใช้วาง คิว + ลงมือสร้าง (ซ้าย) | ตาราง “ที่สร้างแล้ว” (ขวา) จะได้ไม่ต้องขยายหน้าต่างลงล่าง"""
+        pw = tk.PanedWindow(parent, orient='horizontal', bg=C['line'], bd=0, sashwidth=6,
+                            sashrelief='flat', opaqueresize=True, sashcursor='sb_h_double_arrow')
+        pw.pack(fill='both', expand=True)
+        left = tk.Frame(pw, bg=C['bg'])
+        right = tk.Frame(pw, bg=C['bg'])
+        pw.add(left, minsize=420, stretch='always')
+        pw.add(right, minsize=300, stretch='always')
+        st = {'frac': None, 'job': None}
+
+        def _place():
+            st['job'] = None
+            try:
+                w = pw.winfo_width()
+                if w < 600 or not pw.winfo_ismapped():
+                    return
+                if st['frac'] is None:
+                    lw = min(max(left.winfo_reqwidth(), int(w * left_frac)), w - 440)
+                    st['frac'] = max(0.3, min(0.8, lw / float(w)))
+                want = int(w * st['frac'])
+                if abs(pw.sash_coord(0)[0] - want) > 2:
+                    pw.sash_place(0, want, 0)
+            except Exception:
+                pass
+
+        def _cfg(e):
+            # ครั้งแรก: ฝั่งซ้ายกว้างพอให้เห็นคอลัมน์คิวครบ (แต่ฝั่งขวาเหลืออย่างน้อย ~440)
+            # หลังจากนั้น: ขยาย/ย่อหน้าต่าง เส้นแบ่งอยู่สัดส่วนเดิม (หรือตามที่ลากไว้)
+            # ตั้งหลัง Tk จัดหน้าเสร็จ (after) — ตั้งทันทีใน Configure แล้ว Tk จัดทับ
+            if e.widget is not pw:
+                return
+            if st['job']:
+                try:
+                    pw.after_cancel(st['job'])
+                except Exception:
+                    pass
+            st['job'] = pw.after(30, _place)
+
+        def _dragged(e):                                 # ลากเส้นแบ่งเอง = จำสัดส่วนใหม่
+            try:
+                w = pw.winfo_width()
+                if w >= 600:
+                    st['frac'] = max(0.2, min(0.85, pw.sash_coord(0)[0] / float(w)))
+            except Exception:
+                pass
+        pw.bind('<Configure>', _cfg, add='+')
+        pw.bind('<ButtonRelease-1>', _dragged, add='+')
+        return pw, left, right
+
+    def _wrap_to(self, watch, label, pad=28):
+        """ข้อความยาวพับบรรทัดตามความกว้างจริงของกล่อง (กล่องแคบลงตอนแบ่ง ซ้าย | ขวา)"""
+        def _fit(e):
+            try:
+                w = max(200, e.width - pad)
+                if int(float(label.cget('wraplength'))) != w:
+                    label.config(wraplength=w)
+            except Exception:
+                pass
+        watch.bind('<Configure>', _fit, add='+')
+
+    def _made_head(self, right, title, attr):
+        """หัวตาราง “…ที่สร้างแล้ว” ฝั่งขวา: แถวบน = ชื่อ + สถานะ · แถวล่าง = ปุ่ม (คืนกล่องปุ่ม)"""
+        h1 = tk.Frame(right, bg=C['bg'])
+        h1.pack(fill='x', padx=(8, 14), pady=(10, 2))
+        tk.Label(h1, text=title, bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9, 'bold')).pack(side='left')
+        lbl = tk.Label(h1, text='ยังไม่ได้สร้าง', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9),
+                       anchor='w', justify='left')
+        lbl.pack(side='left', padx=10, fill='x', expand=True)
+        self._wrap_to(h1, lbl, pad=190)
+        setattr(self, attr, lbl)
+        h2 = tk.Frame(right, bg=C['bg'])
+        h2.pack(fill='x', padx=(8, 14), pady=(2, 2))
+        tip = tk.Label(right, text='(เลือกแถวที่ต้องการก่อน · ไม่เลือก = เอาทั้งหมด)', bg=C['bg'],
+                       fg=C['dim'], font=('Segoe UI', 8), anchor='w')
+        tip.pack(fill='x', padx=(8, 14), pady=(0, 4))
+        return h2
 
     def _entry(self, parent, width=22):
         e = tk.Entry(parent, bg=C['input'], fg=C['fg'], insertbackground=C['fg'],
@@ -5705,8 +5797,9 @@ class App:
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), wraplength=940,
                  justify='left').grid(row=1, column=0, columnspan=8, sticky='w', pady=(8, 0))
 
-        # ---------- คิว ----------
-        s2 = self._card(p, 'คิวไอเทมที่จะสร้าง', grow=True)
+        # ---------- คิว + ลงมือ (ซ้าย) | ที่สร้างแล้ว (ขวา) ----------
+        self.c_split, c_left, c_right = self._split_lr(p, left_frac=0.55)
+        s2 = self._card(c_left, 'คิวไอเทมที่จะสร้าง', grow=True)
         bar = tk.Frame(s2, bg=C['bg'])
         bar.pack(fill='x')
         self._btn(bar, '📂  นำเข้าไฟล์ต้นฉบับ (.xlsx)', self.c_import,
@@ -5741,9 +5834,11 @@ class App:
         self.c_warn = tk.Label(s2, text='', bg=C['bg'], fg=C['warn'], font=('Segoe UI', 9),
                                anchor='w', justify='left', wraplength=940)
         self.c_warn.pack(fill='x', pady=(8, 0))
+        self._wrap_to(s2, self.c_warn, pad=8)
 
         # ---------- ลงมือ ----------
-        s3 = self._card(p, 'ลงมือสร้าง')
+        s3 = self._card(c_left, 'ลงมือสร้าง')
+        s3.master.pack_configure(pady=(8, 12))
         self.cv_do = tk.BooleanVar(value=False)
         cb = tk.Checkbutton(s3, variable=self.cv_do, command=self._c_do_changed,
                             text='กดปุ่ม “สร้าง Item” จริง',
@@ -5764,42 +5859,36 @@ class App:
 
         run = tk.Frame(s3, bg=C['bg'])
         run.grid(row=2, column=0, columnspan=3, sticky='w', pady=(12, 0))
-        tk.Label(s3, text='⏱ เซ็ตเวลาไว้ทดสอบ = สร้างเหมือนปกติ แต่เวลาเริ่มใช้งานเป็น “วันนี้ 00:00:00” '
-                          '(เวลาสิ้นสุด/ชื่อ/Slug ตามเอกสาร)  ·  ทดสอบเสร็จกด “↺ รีเซ็ตเวลาเริ่ม” '
-                          'ด้านล่าง เพื่อแก้เวลาเริ่มกลับตามเอกสาร (ไม่สร้างใหม่)',
-                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w', justify='left',
-                 wraplength=900).grid(row=3, column=0, columnspan=3, sticky='w', pady=(8, 0))
+        c_hint = tk.Label(s3, text='⏱ เซ็ตเวลาไว้ทดสอบ = สร้างเหมือนปกติ แต่เวลาเริ่มใช้งานเป็น “วันนี้ 00:00:00” '
+                                   '(เวลาสิ้นสุด/ชื่อ/Slug ตามเอกสาร)  ·  ทดสอบเสร็จกด “↺ รีเซ็ตเวลาเริ่ม” '
+                                   'ด้านล่าง เพื่อแก้เวลาเริ่มกลับตามเอกสาร (ไม่สร้างใหม่)',
+                          bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w', justify='left',
+                          wraplength=900)
+        c_hint.grid(row=3, column=0, columnspan=3, sticky='w', pady=(8, 0))
+        self._wrap_to(s3, c_hint, pad=8)
         self.c_btn_run = self._btn(run, '▶  เริ่มทำงาน', self.c_start, primary=True)
         self.c_btn_run.pack(side='left', ipadx=18, ipady=5)
         self.c_btn_stop = self._btn(run, '■  ยกเลิก', self.c_stop)
         self.c_btn_stop.config(state='disabled')
         self.c_btn_stop.pack(side='left', padx=(8, 0), ipadx=12, ipady=5)
 
-        # ---- ไอเทมที่สร้างสำเร็จ + เลข Aztek Item Id ที่เว็บออกให้ ----
+        # ---- ไอเทมที่สร้างสำเร็จ + เลข Aztek Item Id ที่เว็บออกให้ (ฝั่งขวาของคิว) ----
         self.made_items = []
-        ib = tk.Frame(p, bg=C['bg'])
-        ib.pack(fill='x', padx=14, pady=(10, 4))
-        iw = tk.Frame(p, bg=C['bg'])
-        iw.pack(fill='both', expand=True, padx=14, pady=(0, 12))
-        tk.Label(ib, text='Item ที่สร้างแล้ว', bg=C['bg'], fg=C['dim'],
-                 font=('Segoe UI', 9, 'bold')).pack(side='left')
-        self.lbl_item = tk.Label(ib, text='ยังไม่ได้สร้าง', bg=C['bg'], fg=C['dim'],
-                                 font=('Segoe UI', 9))
-        self.lbl_item.pack(side='left', padx=10)
+        ib = self._made_head(c_right, 'Item ที่สร้างแล้ว', 'lbl_item')
+        iw = tk.Frame(c_right, bg=C['bg'])
+        iw.pack(fill='both', expand=True, padx=(8, 14), pady=(0, 12))
         self._btn(ib, '📋  คัดลอก Aztek Item Id', self.copy_made_items).pack(
-            side='right', ipadx=8, ipady=2)
-        tk.Label(ib, text='(เลือกแถวที่ต้องการก่อน · ไม่เลือก = เอาทั้งหมด)',
-                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8)).pack(
-                     side='right', padx=8)
+            side='left', ipadx=8, ipady=2)
         ic = ('no', 'aid', 'kind', 'iname', 'pic', 'at', 'note')
         self.tree_item = ttk.Treeview(iw, columns=ic, show='headings', height=6,
                                       style='TR.Treeview', selectmode='extended')
-        for c, t, w in (('no', '#', 42), ('aid', 'Aztek Item Id', 110),
-                        ('kind', 'ItemKind', 90), ('iname', 'ชื่อไอเทม', 330),
-                        ('pic', 'รูป', 44), ('at', 'เวลา', 78),
-                        ('note', 'หมายเหตุ', 150)):
+        # ช่องชื่อไม่ยืดเอง (เดิมกว้างเกิน) — ที่ว่างที่เหลือไปอยู่ช่องหมายเหตุ ช่องสุดท้าย
+        for c, t, w in (('no', '#', 36), ('aid', 'Aztek Item Id', 96),
+                        ('kind', 'ItemKind', 74), ('iname', 'ชื่อไอเทม', 220),
+                        ('pic', 'รูป', 36), ('at', 'เวลา', 66),
+                        ('note', 'หมายเหตุ', 110)):
             self.tree_item.heading(c, text=t)
-            self.tree_item.column(c, width=w, anchor='w')
+            self.tree_item.column(c, width=w, anchor='w', stretch=(c == 'note'))
         self.tree_item.tag_configure('bad', background='#3a1f1e', foreground='#f0736a')
         isb2 = ttk.Scrollbar(iw, orient='vertical', command=self.tree_item.yview)
         self.tree_item.configure(yscrollcommand=isb2.set)
@@ -7483,7 +7572,9 @@ class App:
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(
             fill='x', pady=(8, 0))
 
-        s2 = self._card(p, 'บันเดิลที่จะสร้าง', grow=True)
+        # ---- บันเดิลที่จะสร้าง + ลงมือ (ซ้าย) | Bundle ที่สร้างแล้ว (ขวา) ----
+        self.b_split, b_left, b_right = self._split_lr(p, left_frac=0.55)
+        s2 = self._card(b_left, 'บันเดิลที่จะสร้าง', grow=True)
         # ---- แถบแก้ไข: แก้ / เพิ่มไอเทม / ลบ / ตั้ง Tier ทีละหลายแถว ----
         eb = tk.Frame(s2, bg=C['bg'])
         eb.pack(fill='x', pady=(0, 8))
@@ -7500,6 +7591,8 @@ class App:
         self.b_edit_msg = tk.Label(eb, text='Ctrl / Shift = เลือกหลายแถว · เลือกแถวบันเดิล = ทุกไอเทมในบันเดิลนั้น',
                                    bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w')
         self.b_edit_msg.pack(side='left', padx=(12, 0), fill='x', expand=True)
+        self.b_edit_msg.config(justify='left')
+        self._wrap_to(self.b_edit_msg, self.b_edit_msg, pad=4)
         tw = tk.Frame(s2, bg=C['bg'])
         tw.pack(fill='both', expand=True)
         cols = ('use', 'qty', 'tier', 'info')
@@ -7523,7 +7616,8 @@ class App:
         for sq in ('<MouseWheel>', '<Button-4>', '<Button-5>'):
             self.b_tree.bind(sq, self._b_wheel, add='+')
 
-        s3 = self._card(p, 'ลงมือสร้าง')
+        s3 = self._card(b_left, 'ลงมือสร้าง')
+        s3.master.pack_configure(pady=(8, 12))
         self.bv_do = tk.BooleanVar(value=False)
         tk.Checkbutton(s3, variable=self.bv_do, command=self._b_do_changed,
                        text='กดปุ่ม “สร้าง Bundle” จริง', bg=C['bg'], fg=C['fg'],
@@ -7549,30 +7643,22 @@ class App:
         self.b_btn_stop.config(state='disabled')
         self.b_btn_stop.pack(side='left', padx=(8, 0), ipadx=12, ipady=5)
 
-        # ---- เลข Bundle ที่สร้างสำเร็จ อยู่ในแท็บเดียวกับที่สั่งสร้าง ----
+        # ---- เลข Bundle ที่สร้างสำเร็จ อยู่ในแท็บเดียวกับที่สั่งสร้าง (ฝั่งขวา) ----
         self.made = []
-        mb = tk.Frame(p, bg=C['bg'])
-        mb.pack(fill='x', padx=14, pady=(10, 4))
-        mw = tk.Frame(p, bg=C['bg'])
-        mw.pack(fill='both', expand=True, padx=14, pady=(0, 12))
-        tk.Label(mb, text='Bundle ที่สร้างแล้ว', bg=C['bg'], fg=C['dim'],
-                 font=('Segoe UI', 9, 'bold')).pack(side='left')
-        self.lbl_made = tk.Label(mb, text='ยังไม่ได้สร้าง', bg=C['bg'], fg=C['dim'],
-                                 font=('Segoe UI', 9))
-        self.lbl_made.pack(side='left', padx=10)
+        mb = self._made_head(b_right, 'Bundle ที่สร้างแล้ว', 'lbl_made')
+        mw = tk.Frame(b_right, bg=C['bg'])
+        mw.pack(fill='both', expand=True, padx=(8, 14), pady=(0, 12))
         self._btn(mb, '📋  คัดลอกเลข Bundle', self.copy_made).pack(
-            side='right', ipadx=8, ipady=2)
-        tk.Label(mb, text='(เลือกแถวที่ต้องการก่อน · ไม่เลือก = เอาทั้งหมด)',
-                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8)).pack(
-                     side='right', padx=8)
+            side='left', ipadx=8, ipady=2)
         mc = ('no', 'bid', 'bname', 'cnt', 'at')
         self.tree_made = ttk.Treeview(mw, columns=mc, show='headings', height=4,
                                       style='TR.Treeview', selectmode='extended')
-        for c, t, w in (('no', '#', 42), ('bid', 'Bundle ID', 100),
-                        ('bname', 'ชื่อ Bundle', 430), ('cnt', 'ไอเทม', 60),
-                        ('at', 'เวลา', 80)):
+        # ช่องชื่อไม่ยืดเอง (เดิมกว้างเกิน) — ที่ว่างที่เหลือไปอยู่ช่องเวลา ช่องสุดท้าย
+        for c, t, w in (('no', '#', 36), ('bid', 'Bundle ID', 84),
+                        ('bname', 'ชื่อ Bundle', 240), ('cnt', 'ไอเทม', 52),
+                        ('at', 'เวลา', 70)):
             self.tree_made.heading(c, text=t)
-            self.tree_made.column(c, width=w, anchor='w')
+            self.tree_made.column(c, width=w, anchor='w', stretch=(c == 'at'))
         msb = ttk.Scrollbar(mw, orient='vertical', command=self.tree_made.yview)
         self.tree_made.configure(yscrollcommand=msb.set)
         self.tree_made.pack(side='left', fill='both', expand=True)
@@ -9204,7 +9290,9 @@ class App:
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w',
                  justify='left').pack(fill='x', pady=(8, 0))
 
-        s2 = self._card(p, 'คิว Item Code ที่จะสร้าง', grow=True)
+        # ---- คิว + ลงมือ (ซ้าย) | Item Code ที่สร้างแล้ว (ขวา) ----
+        self.w_split, w_left, w_right = self._split_lr(p, left_frac=0.55)
+        s2 = self._card(w_left, 'คิว Item Code ที่จะสร้าง', grow=True)
         tw = tk.Frame(s2, bg=C['bg'])
         tw.pack(fill='both', expand=True)
         wc = tuple(c for c, _, _ in self.W_COLS)
@@ -9225,8 +9313,10 @@ class App:
                                font=('Segoe UI', 9), anchor='w', justify='left',
                                wraplength=940)
         self.w_warn.pack(fill='x', pady=(8, 0))
+        self._wrap_to(s2, self.w_warn, pad=8)
 
-        s3 = self._card(p, 'ลงมือสร้าง')
+        s3 = self._card(w_left, 'ลงมือสร้าง')
+        s3.master.pack_configure(pady=(8, 12))
         self.wv_do = tk.BooleanVar(value=False)
         tk.Checkbutton(s3, variable=self.wv_do, command=self._w_do_changed,
                        text='กดปุ่ม “สร้าง Item Code” จริง',
@@ -9255,34 +9345,27 @@ class App:
         self.w_btn_stop.config(state='disabled')
         self.w_btn_stop.pack(side='left', padx=(8, 0), ipadx=12, ipady=5)
 
-        # ---- ผลลัพธ์ ----
+        # ---- ผลลัพธ์ (ฝั่งขวาของคิว) ----
         self.made_codes = []
-        ib = tk.Frame(p, bg=C['bg'])
-        ib.pack(fill='x', padx=14, pady=(10, 4))
-        iw = tk.Frame(p, bg=C['bg'])
-        iw.pack(fill='both', expand=True, padx=14, pady=(0, 12))
-        tk.Label(ib, text='Item Code ที่สร้างแล้ว', bg=C['bg'], fg=C['dim'],
-                 font=('Segoe UI', 9, 'bold')).pack(side='left')
-        self.lbl_wmade = tk.Label(ib, text='ยังไม่ได้สร้าง', bg=C['bg'], fg=C['dim'],
-                                  font=('Segoe UI', 9))
-        self.lbl_wmade.pack(side='left', padx=10)
-        self._btn(ib, '📋  คัดลอก CODE', self.copy_made_codes).pack(
-            side='right', ipadx=8, ipady=2)
+        ib = self._made_head(w_right, 'Item Code ที่สร้างแล้ว', 'lbl_wmade')
+        iw = tk.Frame(w_right, bg=C['bg'])
+        iw.pack(fill='both', expand=True, padx=(8, 14), pady=(0, 12))
         self.w_btn_reset = self._btn(ib, '↺  รีเซ็ตเวลาเริ่ม', self.w_reset,
                                      color=(C['green'], C['green_on']))
-        self.w_btn_reset.pack(side='right', padx=(0, 8), ipadx=12, ipady=3)
+        self.w_btn_reset.pack(side='left', ipadx=12, ipady=3)
+        self._btn(ib, '📋  คัดลอก CODE', self.copy_made_codes).pack(
+            side='left', padx=(8, 0), ipadx=8, ipady=2)
         self._btn(ib, '🗑  ล้างประวัติ', self.w_clear_made).pack(
-            side='right', padx=(0, 8), ipadx=6, ipady=2)
-        tk.Label(ib, text='(เลือกแถวที่ต้องการก่อน · ไม่เลือก = เอาทั้งหมด)',
-                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8)).pack(side='right', padx=8)
+            side='left', padx=(8, 0), ipadx=6, ipady=2)
         mc = ('no', 'code', 'cid', 'cname', 'at', 'note')
         self.tree_code = ttk.Treeview(iw, columns=mc, show='headings', height=5,
                                       style='TR.Treeview', selectmode='extended')
-        for c, t, w in (('no', '#', 42), ('code', 'CODE', 130),
-                        ('cid', 'Item Code Id', 100), ('cname', 'ชื่อ Item Code', 230),
-                        ('at', 'เวลา', 92), ('note', 'หมายเหตุ', 150)):
+        # ช่องชื่อไม่ยืดเอง — ที่ว่างที่เหลือไปอยู่ช่องหมายเหตุ ช่องสุดท้าย
+        for c, t, w in (('no', '#', 36), ('code', 'CODE', 112),
+                        ('cid', 'Item Code Id', 90), ('cname', 'ชื่อ Item Code', 210),
+                        ('at', 'เวลา', 80), ('note', 'หมายเหตุ', 130)):
             self.tree_code.heading(c, text=t)
-            self.tree_code.column(c, width=w, anchor='w')
+            self.tree_code.column(c, width=w, anchor='w', stretch=(c == 'note'))
         self.tree_code.tag_configure('bad', background='#3a1f1e', foreground='#f0736a')
         csb2 = ttk.Scrollbar(iw, orient='vertical', command=self.tree_code.yview)
         self.tree_code.configure(yscrollcommand=csb2.set)
