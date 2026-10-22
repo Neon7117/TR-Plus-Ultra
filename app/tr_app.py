@@ -3,6 +3,8 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.3.1 : สร้าง Item / ค้นหา — จำนวนบนเว็บ = ชิ้นในชื่อ × Amt (3 ชิ้น Amt 2 = 6) · fdItemNum เดียวกันแต่ Amt ต่างกัน = คนละไอเทม ไม่ตัดทิ้ง
+V1.3.0 : หลักฐานเทส — 1 เซ็ตแคปกี่ภาพก็ได้ (ไม่ล็อก 4 ช่อง ไม่แบ่งหมวด ไม่ตัดภาพ) · ภาพรวมจัดเรียงให้เองเป็นระเบียบ มีเลขภาพกำกับ
 V1.2.9 : ธีม TR — แยกสีตามหน้าที่: แท็บน้ำเงินเข้ม · หัวตารางฟ้าอ่อน · ปุ่มหลักส้ม · ⏱ม่วง · ↺เขียว · ปุ่มรองมีกรอบ (เปลี่ยนแค่สี)
 V1.2.8 : ธีม TalesRunner โทนนุ่มตา — ลดความสว่างพื้นขาวลง ตัวหนังสือเข้มขึ้นให้อ่านง่าย (เปลี่ยนแค่สี)
 V1.2.7 : ธีมหน้าจอแบบ TalesRunner (ฟ้า-ขาว หัวมีเมฆ แท็บ/ปุ่มแบบเกม) — ปุ่ม 🎨 ธีม สลับกลับธีมมืดเดิมได้ · เปลี่ยนแค่สี
@@ -2858,6 +2860,9 @@ JS_BUNDLE_FAME_TYPE = """
 #        dur     = เลขในคอลัมน์ระยะเวลา เฉพาะตอนมีคำว่า "วัน" ; "ถาวร"/ว่าง -> '' (ถาวร)
 #        trade   = คอลัมน์ Itemmove (Yes/No, ว่าง = No) ; ไม่มีคอลัมน์เลย -> 'any'
 #        หนึ่งแถวมีได้หลายตาราง (fdItemNum หลายคอลัมน์วางเรียงกัน) และตัด ID ซ้ำให้
+#        amt     = คอลัมน์ Amt / Amount / จำนวน (v1.3.1) — จำนวนบนเว็บ = ชิ้นในชื่อ × Amt
+#                  เช่น "ตั๋ว… 3 ชิ้น" Amt 2 -> 6 · Amt 4 -> 12 · ชื่อไม่มี "ชิ้น" = 1 ชิ้น × Amt
+#                  fdItemNum เดียวกันแต่ Amt ต่างกัน = คนละไอเทมบนเว็บ (ไม่ตัดซ้ำ) · Amt 1 / ไม่มีคอลัมน์ = เหมือนเดิมเป๊ะ
 # ============================================================================
 MASTER_TRADE_YES = ('yes', 'y', 'true', 'ได้', 'แลกเปลี่ยนได้')
 # ชีทรุ่นใหม่เขียน Itemmove เป็นที่เก็บของแทน Yes/No
@@ -2956,6 +2961,8 @@ def suspect_reasons(r, mode_len=0):
     if r.get('move_bad'):
         out.append('Itemmove = “%s” ไม่รู้จัก (รู้จักแค่ Storage/Gift/Yes/No) — ตัวนี้ไม่กรองแลกเปลี่ยน'
                    % r.get('move_raw', ''))
+    if r.get('amt_raw'):
+        out.append('Amt = “%s” อ่านเป็นตัวเลขไม่ได้ — คิดเป็น 1 (เช็กในชีทก่อนนะ)' % r.get('amt_raw'))
     return out
 
 
@@ -3160,6 +3167,27 @@ def miss_to_item(r, type_name=DEFAULT_TYPE, suffix=DEFAULT_SUFFIX, price='', mai
     return row_to_item(src, type_name, suffix, price, mail)
 
 
+def master_amt(v):
+    """ค่าในคอลัมน์ Amt -> (จำนวนเต็ม ≥ 1, ข้อความเดิมถ้าอ่านไม่ได้)
+    ว่าง / ไม่มีคอลัมน์ = 1 (เหมือนเดิม) · '2' / 2 / 2.0 = 2 · อ่านไม่ได้ / 0 = 1 + คืนข้อความไว้เตือน"""
+    s = num_str(v).strip() if v is not None else ''
+    if not s:
+        return 1, ''
+    m = re.fullmatch(r'(\d+)(?:\.0+)?', s.replace(',', ''))
+    if m and int(m.group(1)) >= 1:
+        return int(m.group(1)), ''
+    return 1, s
+
+
+def qty_text(r):
+    """ช่อง “จำนวน” ในตารางนำเข้า — Amt > 1 โชว์ที่มาให้เห็น เช่น “6 (3×2)”"""
+    q = str(r.get('qty') or '')
+    a = r.get('amt') or 1
+    if q and a != 1:
+        return '%s (%s×%s)' % (q, r.get('pcs') or '1', a)
+    return q or '—'
+
+
 def parse_master_rows(rows, seen=None):
     out = []
     if seen is None:
@@ -3197,13 +3225,14 @@ def parse_master_rows(rows, seen=None):
                 dur_col = findin([lambda h: 'ระยะเวลา' in h, lambda h: 'ของขวัญ' in h,
                                   lambda h: 'duration' in h])
                 move_col = findin([is_move_header])
+                amt_col = findin([lambda h: h == 'amt', lambda h: h == 'amount', lambda h: h == 'จำนวน'])
                 if move_col is None:      # บางไฟล์เขียน Itemmove ไว้แถวบนของหัวตาราง
                     for j in span:
                         if j < len(top) and is_move_header(top[j]):
                             move_col = j
                             break
                 tables.append({'kind': a, 'name': name_col, 'dur': dur_col,
-                               'move': move_col, 'desc': desc_col})
+                               'move': move_col, 'desc': desc_col, 'amt': amt_col})
             prev = cells
             continue
 
@@ -3230,17 +3259,21 @@ def parse_master_rows(rows, seen=None):
                 move_raw = clean_text(mc)
             else:
                 trade, known, move_raw = 'any', True, ''
+            amt, amt_raw = master_amt(cells[t['amt']] if t.get('amt') is not None and t['amt'] < len(cells)
+                                      else '')
             # ตัดซ้ำด้วย ItemKind + แลกเปลี่ยน — ตัวเดียวกันแต่ Storage กับ Gift คือคนละไอเทม
             #   (ตัวที่ไม่มีคอลัมน์ Itemmove ยังตัดด้วย ItemKind อย่างเดียวเหมือนเดิม)
+            #   v1.3.1: Amt ต่างกัน = คนละไอเทม (จำนวนบนเว็บต่างกัน) · Amt 1 ใช้กุญแจเดิมเป๊ะ
+            base = kind if amt == 1 else '%s×%d' % (kind, amt)
             if trade == 'any':
-                if kind in seen or kind + '|*' in seen:
+                if base in seen or base + '|*' in seen:
                     continue
-                seen.add(kind)
+                seen.add(base)
             else:
-                key = kind + '|' + trade
-                if kind in seen or key in seen:
+                key = base + '|' + trade
+                if base in seen or key in seen:
                     continue
-                seen.update((key, kind + '|*'))
+                seen.update((key, base + '|*'))
 
             m = re.search(r'(\d+)\s*ชิ้น', name)
             qty = m.group(1) if m else ''
@@ -3256,6 +3289,10 @@ def parse_master_rows(rows, seen=None):
                 dsc = clean_text(cells[t['desc']])
 
             cname, amount, has_qty = split_name_qty(name)
+            pcs = qty
+            if amt != 1:                  # จำนวนบนเว็บ = ชิ้นในชื่อ × Amt (ค้นหา + สร้าง ใช้ค่าเดียวกัน)
+                qty = str(int(qty or 1) * amt)
+                amount = str(int(amount or 1) * amt)
 
             out.append({'kind': kind, 'name': '', 'disp': disp,
                         'dur': dur, 'trade': trade, 'qty': qty,
@@ -3263,7 +3300,8 @@ def parse_master_rows(rows, seen=None):
                         'move_raw': move_raw, 'move_bad': not known,
                         # ---- ใช้ตอน "สร้างไอเทม" ----
                         'raw': name.strip(), 'cname': cname,
-                        'amount': amount, 'has_qty': has_qty, 'desc': dsc})
+                        'amount': amount, 'has_qty': has_qty, 'desc': dsc,
+                        'amt': amt, 'amt_raw': amt_raw, 'pcs': pcs or '1'})
     return out
 
 
@@ -4609,7 +4647,7 @@ class ImportDialog:
             trade = trade_text(r)
             self.tree.insert('', 'end', tags=('warn',) if r.get('warn') else (),
                              values=('⚠' if r.get('warn') else '', r['kind'], r['disp'],
-                                     dur, trade, r['qty'] or '—'))
+                                     dur, trade, qty_text(r)))
         has_move = any(r.get('has_move') for r in rows)
         extra = '' if has_move else '   (ชีทนี้ไม่มีคอลัมน์ Itemmove → ไม่กรองแลกเปลี่ยน)'
         self.info.config(text=f'{note} · พบ {len(rows)} รายการ{extra}')
@@ -5090,6 +5128,19 @@ def run_logic_tests():
     d1 = parse_master_rows(rows, seen)
     d2 = parse_master_rows(rows, seen)
     r.append(_t(len(d1) == 3 and len(d2) == 0, 'ตัด ID ซ้ำข้ามชีทได้', f'{len(d1)} / {len(d2)}'))
+
+    # ---- Amt (v1.3.1): จำนวนบนเว็บ = ชิ้นในชื่อ × Amt · Amt ต่างกัน = คนละไอเทม ----
+    ra = [['4898', 'fdItemNum', 'fdPosition', 'fdItemKind', 'Display Name', 'Rank', 'ระยะเวลาของขวัญ', 'Amt'],
+          ['2670', '127892', '9999', '3699', 'ตั๋วเลือกซีเคร็ตเอลฟิน 3 ชิ้น', 'SS', '30 วัน', '2'],
+          ['2681', '121387', '185', '536', 'เบ็ดตกปลาเทลส์รันเนอร์ 7 วัน', 'S', '30 วัน', '2'],
+          ['4899', 'fdItemNum', 'fdPosition', 'fdItemKind', 'Display Name', 'Rank', 'ระยะเวลาของขวัญ', 'Amt'],
+          ['2728', '127892', '9999', '3699', 'ตั๋วเลือกซีเคร็ตเอลฟิน 3 ชิ้น', 'SS', '30 วัน', '4'],
+          ['2670', '127892', '9999', '3699', 'ตั๋วเลือกซีเคร็ตเอลฟิน 3 ชิ้น', 'SS', '30 วัน', '2']]
+    ga = parse_master_rows(ra)
+    r.append(_t([(x['kind'], x['qty'], row_to_item(x)['qty']) for x in ga] ==
+                [('127892', '6', '6'), ('121387', '2', '2'), ('127892', '12', '12')],
+                'Amt: 3 ชิ้น × Amt 2 = 6 · × Amt 4 = 12 (คนละไอเทม) · Amt เดียวกันซ้ำ = ตัดเหลือตัวเดียว',
+                [(x['kind'], x['qty']) for x in ga]))
 
     # ---- เงื่อนไข deep check ----
     item7 = {'duration': '7', 'trade': False, 'qty': '10'}
@@ -7524,7 +7575,10 @@ class App:
         # ตรวจว่าค่าเข้าไปจริง
         got = await page.evaluate(JS_READ_FORM, SEL_CREATE)
         bad = []
-        for k, want in (('name', d['name']), ('kind', d['kind'])):
+        chk = [('name', d['name']), ('kind', d['kind'])]
+        if d.get('web', True) and str(d.get('qty') or '').strip():
+            chk.append(('qty', d['qty']))     # v1.3.1 จำนวนบนเว็บ (ชิ้น × Amt) ต้องเข้าจริง
+        for k, want in chk:
             if (got.get(k) or '').strip() != str(want).strip():
                 bad.append(f'{k}: อยากได้ “{want}” แต่ในฟอร์มเป็น “{got.get(k)}”')
         if bad:
@@ -10604,7 +10658,7 @@ class App:
             self.imp_tree.insert('', 'end', tags=('warn',) if r.get('warn') else (),
                                  values=(i, '⚠' if r.get('warn') else '',
                                          r.get('kind', ''), name, dur, trade,
-                                         r.get('qty') or '—'))
+                                         qty_text(r)))
         n = len(self.imported)
         self.imp_cnt.config(text=f'{n} รายการ' + (f'  ·  น่าสงสัย {nwarn}' if nwarn else ''))
         self.btn_imp.config(state='normal' if n else 'disabled')
@@ -14918,7 +14972,8 @@ class PdNameDialog:
 #      · จุดยึด = แถวที่มีป้าย fdItemNum · อ่านคอลัมน์จากป้าย "ในแถวเดียวกันนั้น" เท่านั้น
 #        (ชีท WR มีหัวตาราง 2 แถว ป้ายเหลื่อมกัน 1 คอลัมน์ — อ่านป้ายแถวบน Amt จะผิดทั้งตาราง)
 #      · ภาพชีท = ภาพที่ผู้ใช้แคปเองจากชีทจริง (หลักฐาน) — ข้อมูลที่อ่านจากไฟล์ใช้แค่ตรวจเทียบ + ตั้งชื่อไฟล์
-#      · ไม่มี Pillow ใน exe: ตัด/ย่อภาพด้วย Tk PhotoImage · ภาพรวมให้ Chrome จัดหน้าแล้วถ่ายเป็น PNG
+#      · ไม่มี Pillow ใน exe: ย่อภาพด้วย Tk PhotoImage · ภาพรวมให้ Chrome จัดหน้าแล้วถ่ายเป็น PNG
+#      · v1.3.0: 1 เซ็ต = กี่ภาพก็ได้ (ไม่แบ่งหมวด ไม่ตัดภาพ) · ภาพรวมจัดเรียงให้เองตามลำดับที่แคป
 # ============================================================================
 import datetime as _ev_dt
 import pathlib as _ev_pl
@@ -14926,13 +14981,13 @@ import struct as _ev_struct
 import tempfile as _ev_tmp
 
 EV_STATE = 'ev_state.json'
-# ช่องภาพของ 1 เซ็ต — เรียงตามลำดับที่แคปจริง
-EV_SLOTS = (('sheet', '1  ชีท', 'Win+Shift+S ลากกรอบเซ็ต'),
-            ('gift', '2  กล่องของขวัญ', 'Win+PrtSc (ก่อนกดรับ)'),
-            ('bag0', '3  กระเป๋า ก่อนรับ', 'Win+PrtSc'),
-            ('bag1', '4  กระเป๋า หลังรับ', 'Win+PrtSc'))
-EV_CROP = {'gift': 'gift', 'bag0': 'bag', 'bag1': 'bag'}      # ช่อง -> จุดตัดที่ใช้
-EV_CROP_NAME = {'gift': 'กล่องของขวัญ', 'bag': 'กระเป๋า'}
+# ภาพของ 1 เซ็ต = กี่ภาพก็ได้ เรียงตามลำดับที่แคป (v1.3.0 — เดิมล็อก 4 ช่อง ชีท/ของขวัญ/กระเป๋า + ตัดภาพตามกรอบ)
+# ผู้ใช้: แคปลากกรอบเองทุกภาพ (Win+Shift+S) ไม่ต้องแบ่งหมวด ไม่ต้องตัด — แค่จัดให้เป็นระเบียบ เช็กง่าย
+EV_GAP = 14                 # ระยะห่างระหว่างภาพในภาพรวม
+EV_CAP = 22                 # แถบเลขภาพเหนือแต่ละภาพ (“#1 · 10:36:02”)
+# ขนาดภาพเต็มจอที่เจอบ่อย — แคปเต็มจอเข้ามาจะเตือน (ไม่ตัดให้แล้ว)
+EV_FULLSCREEN = {(1366, 768), (1600, 900), (1920, 1080), (1920, 1200), (2560, 1080), (2560, 1440),
+                 (3440, 1440), (3840, 1080), (3840, 2160), (5120, 1440)}
 # ป้ายที่ "ไม่ใช่ชื่อเซ็ต" (เทียบแบบ _hkey)
 _EV_LABELS = {'bundle', 'bundleid', 'game', 'start', 'end', 'reward', 'code', 'fditemnum',
               'talesrunner', 'template', 'templateวางของ', 'id', 'name', 'note'}
@@ -15268,54 +15323,69 @@ def _ev_esc(s):
             .replace('"', '&quot;'))
 
 
-def ev_layout(parts, crops):
-    """จัดวางแบบในภาพตัวอย่างของผู้ใช้: ชีทบนเต็มกว้าง · ล่างซ้ายกล่องของขวัญ · ล่างขวากระเป๋าก่อน/หลังซ้อนกัน
-    parts = {ช่อง: {'path','size'}} · crops = {'gift': (x1,y1,x2,y2) | None, 'bag': ...}
-    คืน {ช่อง: (x, y, w, h, (sx, sy))} + ความกว้าง/สูงรวม (ไม่รวมแถบหัว)"""
-    gap = 12
-    box = {}
-    for k, p in parts.items():
-        if not p:
-            continue
-        w, h = p['size']
-        cr = crops.get(EV_CROP.get(k)) if k in EV_CROP else None
-        if cr:
-            x1, y1, x2, y2 = cr
-            x1, y1 = max(0, min(x1, w - 1)), max(0, min(y1, h - 1))
-            x2, y2 = max(x1 + 1, min(x2, w)), max(y1 + 1, min(y2, h))
-            box[k] = (x2 - x1, y2 - y1, (x1, y1))
-        else:
-            box[k] = (w, h, (0, 0))
-    out = {}
-    y = 0
-    W = 0
-    if 'sheet' in box:
-        w, h, src = box['sheet']
-        out['sheet'] = (0, 0, w, h, src)
-        y = h + gap
-        W = w
-    gw = gh = 0
-    if 'gift' in box:
-        gw, gh, src = box['gift']
-        out['gift'] = (0, y, gw, gh, src)
-    bx = gw + gap if gw else 0
-    by = y
-    bw = 0
-    for k in ('bag0', 'bag1'):
-        if k in box:
-            w, h, src = box[k]
-            out[k] = (bx, by, w, h, src)
-            by += h + gap
-            bw = max(bw, w)
-    W = max(W, bx + bw)
-    H = max(y + gh, by - gap if by > y else y)
-    return out, max(W, 1), max(H, 1)
+def ev_is_fullscreen(size):
+    """ภาพเต็มจอ (Win+PrtSc) — ขนาดจอที่เจอบ่อย หรือกว้างตั้งแต่ 3000 (หลายจอ)"""
+    try:
+        w, h = int(size[0]), int(size[1])
+    except Exception:
+        return False
+    return (w, h) in EV_FULLSCREEN or w >= 3000
 
 
-def ev_html(parts, crops, head_lines, result):
-    """หน้า HTML ของภาพรวม — ภาพทุกชิ้นวางขนาดจริง (1 พิกเซลต่อ 1 พิกเซล) ไม่ย่อไม่ขยาย
-    result = (ข้อความผลตรวจ, 'ok' | 'bad' | 'todo')"""
-    pos, W, H = ev_layout(parts, crops)
+def _ev_shelf(ws, hs, limit, gap, cap, tall=1.6):
+    """เรียงซ้าย→ขวาตามลำดับ (ภาพในแถวชิดบน) — ขึ้นแถวใหม่เมื่อ
+    · เกินความกว้าง limit หรือ
+    · ภาพถัดไปสูง/เตี้ยต่างจากภาพแรกของแถวเกิน tall เท่า (ภาพชีทเตี้ยๆ ไม่ปนแถวกับหน้ากล่องของขวัญสูงๆ
+      ภาพทรงเดียวกันจะอยู่แถวเดียวกัน ดูเป็นชุด เช็กง่าย)"""
+    pos, x, y, rowh, W, h0 = [], 0, 0, 0, 0, 0
+    for w, h in zip(ws, hs):
+        if x > 0 and (x + w > limit or h > h0 * tall or h * tall < h0):
+            y += rowh + gap
+            x, rowh = 0, 0
+        if x == 0:
+            h0 = h
+        pos.append((x, y + cap, w, h))
+        x += w + gap
+        rowh = max(rowh, h + cap)
+        W = max(W, x - gap)
+    return pos, max(W, 1), max(y + rowh, 1)
+
+
+def ev_layout(sizes, gap=EV_GAP, cap=EV_CAP, aspect=1.6):
+    """จัดภาพหลายภาพให้เป็นระเบียบ เช็กง่าย — ตามลำดับที่แคป ซ้าย→ขวา บน→ล่าง
+    · ไม่ย่อ/ไม่ขยายภาพ (1 พิกเซลต่อ 1 พิกเซล) · มีแถบเลขภาพเหนือทุกภาพ
+    · ภาพทรงเดียวกัน (สูงใกล้กัน) อยู่แถวเดียวกัน · ภาพทรงต่างกันมากขึ้นแถวใหม่
+    · ลองหลายความกว้างแถว แล้วเลือกแบบที่ภาพรวมใกล้สี่เหลี่ยมผืนผ้า (~16:10) และมีที่ว่างน้อยสุด
+    sizes = [(กว้าง, สูง), ...] · คืน ([(x, y, w, h) ของแต่ละภาพ], กว้างรวม, สูงรวม)"""
+    if not sizes:
+        return [], 1, 1
+    ws = [max(1, int(w)) for w, _ in sizes]
+    hs = [max(1, int(h)) for _, h in sizes]
+    area = float(sum(w * (h + cap) for w, h in zip(ws, hs)))
+    maxw = max(ws)
+    cands = {maxw}
+    acc = 0
+    for i, w in enumerate(ws):
+        acc += w + (gap if i else 0)
+        if acc >= maxw:
+            cands.add(acc)
+    best = None
+    # แบบจับภาพทรงเดียวกันไว้แถวเดียวกันก่อน · แบบไม่จับกลุ่มใช้เฉพาะตอนที่ดีกว่าชัดๆ
+    # (เช่น แคปสลับ ของขวัญ/กระเป๋า/ของขวัญ… จะได้ไม่เป็นแถวละภาพยาวลงไป)
+    for tall, bias in ((1.6, 0.0), (1e9, 0.35)):
+        for limit in sorted(cands):
+            pos, W, H = _ev_shelf(ws, hs, limit, gap, cap, tall)
+            r = W / float(H)
+            score = (W * H) / area + max(r / aspect, aspect / r) - 1.0 + bias
+            if best is None or score < best[0] - 1e-9:
+                best = (score, pos, W, H)
+    return best[1], best[2], best[3]
+
+
+def ev_html(shots, head_lines, result):
+    """หน้า HTML ของภาพรวม — ภาพทุกชิ้นวางขนาดจริง (1 พิกเซลต่อ 1 พิกเซล) ไม่ย่อไม่ขยาย ไม่ตัด
+    shots = [{'path', 'size', 'cap'}] ตามลำดับ · result = (ข้อความผลตรวจ, 'ok' | 'bad' | 'todo')"""
+    pos, W, H = ev_layout([x['size'] for x in shots])
     W = max(W, 900)
     col = {'ok': '#1f7a3e', 'bad': '#b42318', 'todo': '#9a6700'}.get(result[1], '#333')
     h = ['<!doctype html><html><head><meta charset="utf-8"><style>',
@@ -15325,22 +15395,27 @@ def ev_html(parts, crops, head_lines, result):
          '.t{font-size:18px;font-weight:700}.m{font-size:13px;color:#444;margin-top:3px}',
          '.r{font-size:15px;font-weight:700;margin-top:4px;color:%s}' % col,
          '.wrap{position:relative;width:%dpx;height:%dpx;margin:10px 0}' % (W, H),
-         '.c{position:absolute;overflow:hidden}.c img{position:absolute;max-width:none;max-height:none}',
+         '.c{position:absolute;overflow:hidden}.c img{position:absolute;left:0;top:0;max-width:none;max-height:none}',
+         '.n{position:absolute;height:%dpx;line-height:%dpx;font-size:13px;font-weight:700;color:#1d3557;'
+         'white-space:nowrap;overflow:hidden}' % (EV_CAP, EV_CAP),
          '</style></head><body><div class="hd">']
     for i, line in enumerate(head_lines):
         h.append('<div class="%s">%s</div>' % ('t' if i == 0 else 'm', _ev_esc(line)))
     h.append('<div class="r">%s</div></div><div class="wrap">' % _ev_esc(result[0]))
-    for k, (x, y, w, hh, (sx, sy)) in pos.items():
-        uri = _ev_pl.Path(parts[k]['path']).resolve().as_uri()
+    for x, (px, py, w, hh) in zip(shots, pos):
+        uri = _ev_pl.Path(x['path']).resolve().as_uri()
+        h.append('<div class="n" style="left:%dpx;top:%dpx;width:%dpx">%s</div>'
+                 % (px, py - EV_CAP, w, _ev_esc(x.get('cap', ''))))
         h.append('<div class="c" style="left:%dpx;top:%dpx;width:%dpx;height:%dpx">'
-                 '<img src="%s" style="left:%dpx;top:%dpx"></div>' % (x, y, w, hh, uri, -sx, -sy))
+                 '<img src="%s"></div>' % (px, py, w, hh, uri))
     h.append('</div></body></html>')
     return '\n'.join(h), W
 
 
-async def ev_render(out_path, parts, crops, head_lines, result):
-    """ให้ Chrome (แบบซ่อนหน้าต่าง โปรไฟล์ชั่วคราว) จัดหน้าแล้วถ่ายเป็น PNG — ไม่ยุ่งกับ Chrome ที่ใช้ทำงานบนเว็บ"""
-    doc, W = ev_html(parts, crops, head_lines, result)
+async def ev_render(out_path, shots, head_lines, result):
+    """ให้ Chrome (แบบซ่อนหน้าต่าง โปรไฟล์ชั่วคราว) จัดหน้าแล้วถ่ายเป็น PNG — ไม่ยุ่งกับ Chrome ที่ใช้ทำงานบนเว็บ
+    shots = [{'path', 'size', 'cap'}] ตามลำดับที่จะวาง"""
+    doc, W = ev_html(shots, head_lines, result)
     tmpd = _ev_tmp.mkdtemp(prefix='trpu_ev_')
     page_path = os.path.join(tmpd, 'ev.html')
     with open(page_path, 'w', encoding='utf-8') as f:
@@ -15392,11 +15467,10 @@ def _ev_ceil(a, b):
 
 
 class EvTab:
-    """แท็บ 📸 หลักฐานเทส — เลือกเซ็ต → แคป 4 ภาพตามลำดับ (ภาพเข้าช่องเอง) → ตรวจเทียบกับชีท → บันทึกเป็นภาพเดียว
-    ไม่แตะเว็บ ไม่แตะแท็บอื่น · ภาพต้นฉบับในโฟลเดอร์ Screenshots ไม่ลบ ไม่ย้าย"""
+    """แท็บ 📸 หลักฐานเทส — เลือกเซ็ต → แคปกี่ภาพก็ได้ (ภาพต่อท้ายเองตามลำดับ) → ตรวจเทียบกับชีท → บันทึกเป็นภาพเดียว
+    (จัดเรียงให้เป็นระเบียบเอง) · ไม่แตะเว็บ ไม่แตะแท็บอื่น · ภาพต้นฉบับในโฟลเดอร์ Screenshots ไม่ลบ ไม่ย้าย"""
     POLL_MS = 800
-    THUMB = (156, 88)
-    SHORT = {'sheet': 'ชีท', 'gift': 'กล่องของขวัญ', 'bag0': 'กระเป๋าก่อนรับ', 'bag1': 'กระเป๋าหลังรับ'}
+    THUMB = (132, 88)
 
     def __init__(self, app, tab):
         self.app = app
@@ -15405,8 +15479,7 @@ class EvTab:
         self.file = ''
         self.picked = []            # ชีทที่เลือกตอนนำเข้า (ไว้กด “อ่านใหม่”)
         self.cur = None
-        self.slots = {k: None for k, _, _ in EV_SLOTS}
-        self.want = None
+        self.shots = []             # ภาพของเซ็ตที่กำลังเทส ตามลำดับ [{'path','size','mtime','warn'}]
         self.checks = {}
         self.watching = False
         self.saving = False
@@ -15419,8 +15492,6 @@ class EvTab:
         p = app.prefs
         self.shot_dir = p.get('ev_shot_dir') or ev_default_shot_dir()
         self.out_root = p.get('ev_out_dir') or os.path.join(os.path.dirname(self.shot_dir), 'หลักฐานเทส')
-        self.crops = dict(p.get('ev_crop') or {})
-        self.screen = p.get('ev_screen')
         self._build()
         self._load()
         self.refresh()
@@ -15478,7 +15549,7 @@ class EvTab:
                                 justify='left', wraplength=360)
         self.lbl_sel.pack(fill='x', pady=(6, 0))
 
-        s2 = a._card(right, '2) แคปภาพ — ดับเบิลคลิกเซ็ตทางซ้าย แล้วแคปตามลำดับ ภาพจะเข้าช่องเอง')
+        s2 = a._card(right, '2) แคปภาพ — ดับเบิลคลิกเซ็ตทางซ้าย แล้วแคปกี่ภาพก็ได้ (Win+Shift+S) ภาพต่อท้ายเอง')
         b2 = tk.Frame(s2, bg=C['bg'])
         b2.pack(fill='x')
         self.btn_start = a._btn(b2, '▶  เริ่มเซ็ตนี้', self.start_selected, primary=True)
@@ -15486,41 +15557,25 @@ class EvTab:
         self.btn_watch = a._btn(b2, '■  หยุดรับภาพ', self.toggle_watch)
         self.btn_watch.pack(side='left', padx=(6, 0), ipadx=4, ipady=3)
         a._btn(b2, '📁  โฟลเดอร์แคป', self.pick_shot_dir).pack(side='right', ipadx=2, ipady=3)
-        a._btn(b2, '✂  ตัดกระเป๋า', lambda: self.set_crop('bag')).pack(
-            side='right', padx=(0, 6), ipadx=2, ipady=3)
-        a._btn(b2, '✂  ตัดกล่องของขวัญ', lambda: self.set_crop('gift')).pack(
-            side='right', padx=(0, 6), ipadx=2, ipady=3)
+        a._btn(b2, '🗑  ล้างภาพ', self.clear_shots).pack(side='right', padx=(0, 6), ipadx=2, ipady=3)
+        a._btn(b2, '📂  เพิ่มภาพจากไฟล์', self.add_files).pack(side='right', padx=(0, 6), ipadx=2, ipady=3)
         self.lbl_stat = tk.Label(s2, text='', bg=C['bg'], fg=C['fg'], font=FB, anchor='w',
                                  justify='left', wraplength=700)
         self.lbl_stat.pack(fill='x', pady=(6, 6))
-        row = tk.Frame(s2, bg=C['bg'])
-        row.pack(fill='x')
-        self.sw = {}
-        for i, (k, title, how) in enumerate(EV_SLOTS):
-            f = tk.Frame(row, bg=C['card'], highlightthickness=2, highlightbackground=C['line'])
-            f.grid(row=0, column=i, sticky='nsew', padx=(0 if i == 0 else 6, 0))
-            row.grid_columnconfigure(i, weight=1, uniform='slot')
-            tk.Label(f, text=title, bg=C['card'], fg=C['fg'], font=FB, anchor='w').pack(
-                fill='x', padx=6, pady=(4, 0))
-            tk.Label(f, text=how, bg=C['card'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(
-                fill='x', padx=6)
-            hold = tk.Frame(f, bg=C['thumb_bg'], width=self.THUMB[0], height=self.THUMB[1])
-            hold.pack_propagate(False)                # กล่องขนาดคงที่ (Label ที่มีแต่ตัวหนังสือ วัดเป็นตัวอักษร)
-            hold.pack(padx=6, pady=4)
-            img = tk.Label(hold, bg=C['thumb_bg'], text='—', fg=C['dim'], font=('Segoe UI', 8))
-            img.pack(fill='both', expand=True)
-            info = tk.Label(f, text='—', bg=C['card'], fg=C['dim'], font=('Segoe UI', 8), anchor='w',
-                            justify='left', wraplength=self.THUMB[0], height=2)
-            info.pack(fill='x', padx=6)
-            bb = tk.Frame(f, bg=C['card'])
-            bb.pack(fill='x', padx=6, pady=(2, 6))
-            for col, (txt, cmd) in enumerate((('↺ แคปใหม่', lambda k=k: self.recapture(k)),
-                                              ('📂 เลือกไฟล์', lambda k=k: self.pick_file(k)))):
-                b = a._btn(bb, txt, cmd)
-                b.config(font=('Segoe UI', 8))
-                b.grid(row=0, column=col, sticky='we', padx=(0 if col == 0 else 4, 0))
-                bb.grid_columnconfigure(col, weight=1, uniform='sb')
-            self.sw[k] = {'frame': f, 'img': img, 'info': info}
+        # แถบภาพเลื่อนซ้าย-ขวา — ภาพละ 1 กล่อง (เลข · เวลา · ภาพย่อ · ◀ ▶ ✕) + กล่องรอภาพถัดไปท้ายสุด
+        sw = tk.Frame(s2, bg=C['bg'])
+        sw.pack(fill='x')
+        self.strip = tk.Canvas(sw, bg=C['bg'], highlightthickness=0, bd=0, height=180)
+        self.strip.pack(fill='x')
+        self.strip_sb = ttk.Scrollbar(sw, orient='horizontal', command=self.strip.xview)
+        self.strip_sb.pack(fill='x')
+        self.strip.configure(xscrollcommand=self.strip_sb.set)
+        self.strip_in = tk.Frame(self.strip, bg=C['bg'])
+        self.strip.create_window(0, 0, window=self.strip_in, anchor='nw')
+        self.strip_in.bind('<Configure>', lambda e: self.strip.configure(
+            scrollregion=self.strip.bbox('all') or (0, 0, 0, 0)))
+        self._wheel_x(self.strip)
+        self._wheel_x(self.strip_in)
 
         s3 = a._card(right, '3) ตรวจเทียบกับชีท — คลิกช่อง “ตรวจ”  ☐ → ✓ ตรง → ✗ ไม่ตรง', grow=True)
         tw3 = tk.Frame(s3, bg=C['bg'])
@@ -15846,110 +15901,89 @@ class EvTab:
         if self.watching:
             self._job = self.tab.after(self.POLL_MS, self._poll)
 
-    def take(self, path, slot=None):
-        """ภาพใหม่เข้ามา -> ใส่ช่องที่รออยู่ (ตามลำดับ ชีท → ของขวัญ → กระเป๋าก่อน → หลัง)"""
+    def take(self, path):
+        """ภาพใหม่เข้ามา -> ต่อท้ายภาพของเซ็ตนี้ (กี่ภาพก็ได้)"""
         if self.saving:
             self._hold.append(path)
             return
         name = os.path.basename(path)
         if self.cur is None:
-            self._note('ได้ภาพ %s แต่ยังไม่ได้เลือกเซ็ต — เลือกเซ็ตก่อน (ภาพนี้ใช้ปุ่ม 📂 เลือกไฟล์ ทีหลังได้)' % name)
+            self._note('ได้ภาพ %s แต่ยังไม่ได้เลือกเซ็ต — เลือกเซ็ตก่อน (ภาพนี้ใช้ปุ่ม 📂 เพิ่มภาพจากไฟล์ ทีหลังได้)' % name)
             return
-        k = slot or self.want or next((k for k, _, _ in EV_SLOTS if not self.slots[k]), None)
-        if not k:
-            self._note('ช่องครบ 4 ภาพแล้ว — %s ไม่ได้ใช้ (กด ↺ แคปใหม่ ที่ช่องที่ต้องการก่อน)' % name)
-            self.app.log('หลักฐานเทส: ภาพเกิน %s ไม่ได้ใช้' % name, 'WARN')
+        if any(os.path.abspath(x['path']) == os.path.abspath(path) for x in self.shots):
+            self._note('%s อยู่ในรายการแล้ว — ไม่ใส่ซ้ำ' % name)
             return
         size = ev_png_size(path)
         try:
             mt = os.path.getmtime(path)
         except Exception:
             mt = datetime.now().timestamp()
-        warn = ''
-        scr = tuple(self.screen) if self.screen else None
-        if k == 'sheet' and scr and tuple(size or ()) == scr:
-            warn = 'ภาพนี้เป็นภาพเต็มจอ — ภาพชีทใช้ Win+Shift+S ลากกรอบเฉพาะเซ็ตนะ'
-        elif k != 'sheet' and scr and size and tuple(size) != scr:
-            warn = 'ขนาดภาพไม่เท่าภาพเต็มจอ (%dx%d) — แคปด้วย Win+PrtSc หรือเปล่า?' % tuple(scr)
-        self.slots[k] = {'path': path, 'size': size, 'mtime': mt, 'warn': warn}
-        if self.want == k:
-            self.want = None
-        self._thumbs.pop(k, None)
-        self.app.log('หลักฐานเทส: ช่อง %s ← %s' % (dict((a, b) for a, b, _ in EV_SLOTS)[k].strip(), name),
-                     'WARN' if warn else 'INFO')
+        warn = ('ภาพเต็มจอ — ตั้งใจไหม? (ไม่ตัดให้แล้ว ลบได้ที่ ✕)'
+                if size and ev_is_fullscreen(size) else '')
+        self.shots.append({'path': path, 'size': size, 'mtime': mt, 'warn': warn})
+        self.app.log('หลักฐานเทส: ภาพที่ %d ← %s' % (len(self.shots), name), 'WARN' if warn else 'INFO')
+        self._scroll_end = True
         self.refresh()
 
-    def recapture(self, k):
+    def add_files(self):
+        """📂 เพิ่มภาพจากไฟล์ — เลือกได้หลายไฟล์ เรียงตามเวลาไฟล์"""
         if self.cur is None:
             return messagebox.showinfo('เลือกเซ็ต', 'เลือกเซ็ตก่อนนะ')
-        self.slots[k] = None
-        self._thumbs.pop(k, None)
-        self.want = k
-        if not self.watching:
-            self.toggle_watch(on=True)
-        self.refresh()
-
-    def pick_file(self, k):
-        if self.cur is None:
-            return messagebox.showinfo('เลือกเซ็ต', 'เลือกเซ็ตก่อนนะ')
-        path = filedialog.askopenfilename(title='เลือกภาพ', initialdir=self.shot_dir,
-                                          filetypes=[('PNG', '*.png'), ('ทุกไฟล์', '*.*')])
-        if not path:
+        paths = filedialog.askopenfilenames(title='เลือกภาพ (เลือกได้หลายภาพ)', initialdir=self.shot_dir,
+                                            filetypes=[('PNG', '*.png'), ('ทุกไฟล์', '*.*')])
+        if not paths:
             return
-        if not ev_png_size(path):
-            return messagebox.showwarning('ไม่ใช่ PNG', 'ใช้ได้เฉพาะไฟล์ .png (ภาพแคปของ Windows)')
-        self.take(path, slot=k)
+        bad = [os.path.basename(x) for x in paths if not ev_png_size(x)]
+        good = [x for x in paths if ev_png_size(x)]
+        try:
+            good.sort(key=os.path.getmtime)
+        except Exception:
+            pass
+        for x in good:
+            self.take(x)
+        if bad:
+            messagebox.showwarning('ไม่ใช่ PNG', 'ใช้ได้เฉพาะไฟล์ .png (ภาพแคปของ Windows)\nข้าม: %s'
+                                   % ', '.join(bad[:6]))
+
+    def remove_shot(self, i):
+        if 0 <= i < len(self.shots) and not self.saving:
+            x = self.shots.pop(i)
+            self.app.log('หลักฐานเทส: เอาภาพ %s ออก' % os.path.basename(x['path']), 'INFO')
+            self.refresh()
+
+    def move_shot(self, i, d):
+        j = i + d
+        if 0 <= i < len(self.shots) and 0 <= j < len(self.shots) and not self.saving:
+            self.shots[i], self.shots[j] = self.shots[j], self.shots[i]
+            self.refresh()
+
+    def clear_shots(self):
+        if not self.shots or self.saving:
+            return
+        if messagebox.askyesno('ล้างภาพ', 'เอาภาพของเซ็ตนี้ออกทั้ง %d ภาพ?\n(ไฟล์ในโฟลเดอร์ Screenshots ไม่ถูกลบ)'
+                               % len(self.shots)):
+            self.shots = []
+            self.refresh()
 
     def _clear_slots(self):
-        self.slots = {k: None for k, _, _ in EV_SLOTS}
-        self.want = None
+        self.shots = []
         self.checks = {}
         self._thumbs = {}
 
     def _busy_slots(self):
-        return self.cur is not None and any(self.slots.values()) and not self.saving
+        return self.cur is not None and bool(self.shots) and not self.saving
 
     def _note(self, text):
         self.lbl_stat.config(text='⚠  ' + text, fg=C['warn'])
 
-    # ---------- จุดตัด ----------
-    def _crop_of(self, k):
-        c = self.crops.get(EV_CROP.get(k, ''))
-        return tuple(c) if c and len(c) == 4 else None
-
-    def set_crop(self, kind):
-        src = None
-        for k in (('gift',) if kind == 'gift' else ('bag0', 'bag1')):
-            if self.slots.get(k):                      # ใช้ภาพที่เพิ่งแคปเข้าช่องก่อน
-                src = self.slots[k]['path']
-                break
-        if not src:                                    # ไม่มี -> ภาพเต็มจอล่าสุดในโฟลเดอร์ (ดูแค่ 30 ภาพล่าสุด)
-            recent = sorted(((v[1], p) for p, v in self._list_png().items()), reverse=True)[:30]
-            big = [(mt, p) for mt, p in recent if (ev_png_size(p) or (0, 0))[0] >= 1600]
-            src = big[0][1] if big else None
-        use = bool(src) and messagebox.askyesno(
-            'ภาพที่ใช้ตั้งจุดตัด', 'ใช้ภาพนี้ตั้งจุดตัด%s ไหม?\n\n%s\n\n(ตอบ “ไม่” = เลือกภาพเอง)'
-            % (EV_CROP_NAME[kind], os.path.basename(src)))
-        if not use:
-            src = filedialog.askopenfilename(title='เลือกภาพเต็มจอที่เห็น%s' % EV_CROP_NAME[kind],
-                                             initialdir=self.shot_dir, filetypes=[('PNG', '*.png')])
-        if not src:
-            return
-        CropDialog(self, kind, src)
-
-    def save_crop(self, kind, region, size):
-        if region:
-            self.crops[kind] = [int(v) for v in region]
-        else:
-            self.crops.pop(kind, None)
-        self.screen = [int(size[0]), int(size[1])]
-        self.app.prefs['ev_crop'] = self.crops
-        self.app.prefs['ev_screen'] = self.screen
-        save_prefs(self.app.prefs)
-        self._thumbs = {}
-        self.app.log('หลักฐานเทส: ตั้งจุดตัด%s = %s (ภาพ %dx%d)'
-                     % (EV_CROP_NAME[kind], region or 'ทั้งภาพ', size[0], size[1]), 'OK')
-        self.refresh()
+    def _wheel_x(self, w):
+        """กลิ้งเมาส์บนแถบภาพ = เลื่อนซ้าย-ขวา"""
+        def _w(e):
+            d = -1 if (getattr(e, 'num', 0) == 4 or getattr(e, 'delta', 0) > 0) else 1
+            self.strip.xview_scroll(d * 3, 'units')
+            return 'break'
+        for sq in ('<MouseWheel>', '<Button-4>', '<Button-5>'):
+            w.bind(sq, _w, add='+')
 
     # ---------- ตรวจเทียบ ----------
     def _items(self):
@@ -16013,16 +16047,15 @@ class EvTab:
         if self.cur is None:
             return messagebox.showinfo('เลือกเซ็ต', 'เลือกเซ็ตแล้วแคปภาพก่อนนะ')
         s = self.sets[self.cur]
-        miss = [self.SHORT[k] for k, _, _ in EV_SLOTS if not self.slots[k]]
-        if not self.slots['sheet'] or not self.slots['gift']:
-            return messagebox.showwarning('ภาพยังไม่ครบ', 'ต้องมีอย่างน้อยภาพชีท กับ ภาพกล่องของขวัญ\n'
-                                                          'ยังขาด: %s' % ', '.join(miss))
+        if not self.shots:
+            return messagebox.showwarning('ยังไม่มีภาพ', 'แคปภาพก่อนนะ (Win+Shift+S) — ภาพจะต่อท้ายเอง\n'
+                                                         'หรือกด 📂 เพิ่มภาพจากไฟล์')
         msgs = []
-        if miss:
-            msgs.append('ยังไม่มีภาพ: %s' % ', '.join(miss))
-        nocrop = sorted({EV_CROP_NAME[EV_CROP[k]] for k in EV_CROP if self.slots[k] and not self._crop_of(k)})
-        if nocrop:
-            msgs.append('ยังไม่ได้ตั้งจุดตัด: %s — จะใช้ทั้งภาพ (ภาพใหญ่มาก)' % ', '.join(nocrop))
+        if len(self.shots) == 1:
+            msgs.append('มีภาพเดียว')
+        full = sum(1 for x in self.shots if x.get('warn'))
+        if full:
+            msgs.append('มีภาพเต็มจอ %d ภาพ — ภาพรวมจะใหญ่มาก' % full)
         res = self.result()
         if res[1] == 'todo' and s['items']:
             msgs.append(res[0])
@@ -16038,16 +16071,17 @@ class EvTab:
         fn = '%02d_%s%s.png' % (ev_next_no(out), (s['bundle'] + '_') if s.get('bundle') else '',
                                 ev_safe_name(name))
         path = os.path.join(out, fn)
-        when = [(self.SHORT[k], datetime.fromtimestamp(self.slots[k]['mtime']).strftime('%H:%M:%S'))
-                for k, _, _ in EV_SLOTS if self.slots[k]]
-        day = datetime.fromtimestamp(self.slots['gift']['mtime']).strftime('%Y-%m-%d')
+        tm = [datetime.fromtimestamp(x['mtime']) for x in self.shots]
+        day = min(tm).strftime('%Y-%m-%d')
+        span = min(tm).strftime('%H:%M:%S') + ('–' + max(tm).strftime('%H:%M:%S') if len(tm) > 1 else '')
         head = ['%s%s' % (name, ('  ·  Bundle %s' % s['bundle']) if s.get('bundle') else ''),
                 'ไฟล์ %s · ชีท %s%s' % (os.path.basename(self.file) if not s.get('manual') else '—',
                                        s['sheet'], (' · แถว %d' % s['row']) if s.get('row') else ''),
-                'แคปวันที่ %s · %s' % (day, ' · '.join('%s %s' % w for w in when))]
+                'แคปวันที่ %s · %d ภาพ · %s' % (day, len(self.shots), span)]
         text = res[0]                     # ไม่ใส่ชื่อผู้ใช้เครื่องลงภาพ (ผู้ใช้ไม่ได้อนุญาต)
-        parts = {k: dict(v) for k, v in self.slots.items() if v}
-        crops = {c: self.crops.get(c) for c in ('gift', 'bag')}
+        shots = [{'path': x['path'], 'size': x['size'],
+                  'cap': '#%d · %s' % (n, t.strftime('%H:%M:%S'))}
+                 for n, (x, t) in enumerate(zip(self.shots, tm), 1)]
         self.saving = True
         self.btn_save.config(state='disabled', text='⏳  กำลังบันทึก…')
         self.refresh_status()
@@ -16056,7 +16090,7 @@ class EvTab:
 
         def work():                       # ทำภาพใน thread แยก — ห้ามแตะหน้าจอจาก thread นี้
             try:
-                asyncio.run(ev_render(path, parts, crops, head, (text, res[1])))
+                asyncio.run(ev_render(path, shots, head, (text, res[1])))
                 box['ok'] = True
             except Exception as ex:
                 box['err'] = str(ex)
@@ -16142,7 +16176,7 @@ class EvTab:
             s = self.sets[i]
             d = s.get('done')
             if i == self.cur:
-                st, tag = '▶ กำลังเทส %d/4' % sum(1 for v in self.slots.values() if v), 'cur'
+                st, tag = '▶ เทส · %d ภาพ' % len(self.shots), 'cur'
             elif d:
                 st = ('✓ ' if d.get('kind') == 'ok' else '⚠ ') + d.get('file', '')[:3].rstrip('_') + ' บันทึกแล้ว'
                 tag = 'done' if d.get('kind') == 'ok' else 'bad'
@@ -16165,80 +16199,119 @@ class EvTab:
         self._show_sel()
         self.lbl_out.config(text='เซฟที่: %s   ·   ภาพแคปจาก: %s' % (self._out_dir(), self.shot_dir))
 
-    def _next_slot(self):
-        if self.cur is None:
-            return None
-        return self.want or next((k for k, _, _ in EV_SLOTS if not self.slots[k]), None)
-
     def refresh_status(self):
         if self.saving:
             t, col = '⏳ กำลังทำภาพรวม…', C['dim']
         elif self.cur is None:
-            t, col = 'เลือกเซ็ตที่จะเทส (ดับเบิลคลิกในตาราง) แล้วแคปตามลำดับ', C['dim']
+            t, col = 'เลือกเซ็ตที่จะเทส (ดับเบิลคลิกในตาราง) แล้วแคปกี่ภาพก็ได้', C['dim']
         else:
-            k = self._next_slot()
             name = ev_set_name(self.sets[self.cur])
-            if not k:
-                t, col = '%s — ครบ 4 ภาพแล้ว ตรวจเทียบด้านล่าง แล้วกด 💾 บันทึกภาพ' % name, C['ok']
+            n = len(self.shots)
+            if not self.watching:
+                t, col = '%s — %d ภาพ · หยุดรับภาพอยู่ — กด ▶ รับภาพต่อ' % (name, n), C['warn']
+            elif not n:
+                t, col = '%s — รอภาพแรก… แคปด้วย Win+Shift+S ได้เลย (กี่ภาพก็ได้)' % name, C['fg']
             else:
-                lab = dict((a, (b, c)) for a, b, c in EV_SLOTS)[k]
-                t = '%s — รอภาพที่ %s  (%s)' % (name, lab[0].strip(), lab[1])
-                col = C['fg'] if self.watching else C['warn']
-                if not self.watching:
-                    t += '   ·   หยุดรับภาพอยู่ — กด ▶ เริ่มเซ็ตนี้'
+                t, col = ('%s — ได้ %d ภาพแล้ว · แคปต่อได้เรื่อยๆ · ครบแล้วตรวจเทียบด้านล่าง แล้วกด 💾 บันทึก'
+                          % (name, n)), C['ok']
+                full = ['#%d' % k for k, x in enumerate(self.shots, 1) if x.get('warn')]
+                if full:                  # ภาพเต็มจอ (Win+PrtSc) — ไม่ตัดให้แล้ว บอกให้รู้ตัว
+                    t, col = ('%s — ได้ %d ภาพ · ⚠ ภาพ %s เต็มจอ ตั้งใจไหม? ไม่ใช่กด ✕ แล้วแคปใหม่ (Win+Shift+S)'
+                              % (name, n, ', '.join(full[:5]) + (' …' if len(full) > 5 else ''))), C['warn']
         self.lbl_stat.config(text=t, fg=col)
         self.btn_watch.config(text='■  หยุดรับภาพ' if self.watching else '▶  รับภาพต่อ')
         self.btn_start.config(state='disabled' if self.saving else 'normal')
 
     def refresh_slots(self):
-        nxt = self._next_slot()
-        for k, _, _ in EV_SLOTS:
-            w = self.sw[k]
-            v = self.slots[k]
-            w['frame'].config(highlightbackground=C['accent'] if k == nxt else
-                              (C['warn'] if v and v.get('warn') else C['line']))
-            if not v:
-                w['img'].config(image='', text='รอภาพ…' if k == nxt else '—')
-                w['info'].config(text='—', fg=C['dim'])
-                continue
-            im = self._thumb(k)
-            w['img'].config(image=im or '', text='' if im else 'เปิดภาพไม่ได้')
-            t = '%s · %s' % (os.path.basename(v['path']),
-                             datetime.fromtimestamp(v['mtime']).strftime('%H:%M:%S'))
-            if v.get('warn'):
-                t = '⚠ ' + v['warn']
-            elif k != 'sheet' and not self._crop_of(k):
-                t += '\nยังไม่ได้ตั้งจุดตัด (ใช้ทั้งภาพ)'
-            w['info'].config(text=t, fg=C['warn'] if v.get('warn') else C['dim'])
+        """วาดแถบภาพใหม่ — ภาพละ 1 กล่อง + กล่องรอภาพถัดไปท้ายสุด"""
+        a = self.app
+        for w in self.strip_in.winfo_children():
+            w.destroy()
+        live = {x['path'] for x in self.shots}
+        self._thumbs = {k: v for k, v in self._thumbs.items() if k in live}
+        cards = []
+        for i, x in enumerate(self.shots):
+            f = tk.Frame(self.strip_in, bg=C['card'], highlightthickness=2,
+                         highlightbackground=C['warn'] if x.get('warn') else C['line'])
+            f.pack(side='left', padx=(0, 6), anchor='n')
+            top = tk.Frame(f, bg=C['card'])
+            top.pack(fill='x', padx=6, pady=(4, 0))
+            tk.Label(top, text='#%d' % (i + 1), bg=C['card'], fg=C['fg'], font=FB).pack(side='left')
+            tk.Label(top, text=datetime.fromtimestamp(x['mtime']).strftime('%H:%M:%S'), bg=C['card'],
+                     fg=C['dim'], font=('Segoe UI', 8)).pack(side='right')
+            hold = tk.Frame(f, bg=C['thumb_bg'], width=self.THUMB[0], height=self.THUMB[1])
+            hold.pack_propagate(False)
+            hold.pack(padx=6, pady=3)
+            im = self._thumb(x['path'])
+            tk.Label(hold, bg=C['thumb_bg'], image=im or '', text='' if im else 'เปิดภาพไม่ได้',
+                     fg=C['dim'], font=('Segoe UI', 8)).pack(fill='both', expand=True)
+            sz = x.get('size') or ('?', '?')
+            tk.Label(f, text='⚠ เต็มจอ %s×%s' % tuple(sz) if x.get('warn') else '%s×%s' % tuple(sz), bg=C['card'],
+                     fg=C['warn'] if x.get('warn') else C['dim'], font=('Segoe UI', 8), anchor='w'
+                     ).pack(fill='x', padx=6)
+            bb = tk.Frame(f, bg=C['card'])
+            bb.pack(fill='x', padx=6, pady=(2, 6))
+            for col, (txt, cmd, on) in enumerate((('◀', lambda i=i: self.move_shot(i, -1), i > 0),
+                                                  ('▶', lambda i=i: self.move_shot(i, 1), i < len(self.shots) - 1),
+                                                  ('✕', lambda i=i: self.remove_shot(i), True))):
+                b = a._btn(bb, txt, cmd)
+                b.config(font=('Segoe UI', 8), state='normal' if on else 'disabled')
+                b.grid(row=0, column=col, sticky='we', padx=(0 if col == 0 else 3, 0))
+                bb.grid_columnconfigure(col, weight=1, uniform='sb')
+            cards.append(f)
+        # กล่องท้ายสุด: รอภาพถัดไป / เพิ่มจากไฟล์
+        f = tk.Frame(self.strip_in, bg=C['bg'], highlightthickness=2,
+                     highlightbackground=C['accent'] if (self.cur is not None and self.watching) else C['line'])
+        f.pack(side='left', anchor='n')
+        waiting = self.cur is not None and self.watching and not self.saving
+        tk.Label(f, text=('#%d' % (len(self.shots) + 1)) if self.cur is not None else '—', bg=C['bg'],
+                 fg=C['dim'], font=FB).pack(anchor='w', padx=6, pady=(4, 0))
+        hold = tk.Frame(f, bg=C['bg'], width=self.THUMB[0], height=self.THUMB[1])
+        hold.pack_propagate(False)
+        hold.pack(padx=6, pady=3)
+        tk.Label(hold, bg=C['bg'], fg=C['accent'] if waiting else C['dim'], font=('Segoe UI', 9),
+                 text=('รอภาพถัดไป…\nแคปต่อได้เรื่อยๆ' if waiting else
+                       ('หยุดรับภาพอยู่' if self.cur is not None else 'เลือกเซ็ตก่อน')),
+                 justify='center').pack(fill='both', expand=True)
+        b = a._btn(f, '📂 เพิ่มจากไฟล์', self.add_files)
+        b.config(font=('Segoe UI', 8))
+        b.pack(fill='x', padx=6, pady=(0, 6))
+        cards.append(f)
+        for c in cards:                                   # กลิ้งเมาส์ตรงไหนของแถบก็เลื่อนได้
+            stack = [c]
+            while stack:
+                w = stack.pop()
+                self._wheel_x(w)
+                stack.extend(w.winfo_children())
+        self.strip_in.update_idletasks()
+        self.strip.configure(height=self.strip_in.winfo_reqheight(),
+                             scrollregion=self.strip.bbox('all') or (0, 0, 0, 0))
+        if getattr(self, '_scroll_end', False):
+            self._scroll_end = False
+            self.strip.xview_moveto(1.0)
 
-    def _thumb(self, k):
-        v = self.slots[k]
-        if k in self._thumbs:
-            return self._thumbs[k]
+    def _thumb(self, path):
+        if path in self._thumbs:
+            return self._thumbs[path]
         try:
-            src = tk.PhotoImage(file=v['path'])
+            src = tk.PhotoImage(file=path)
         except Exception:
-            self._thumbs[k] = None
+            self._thumbs[path] = None
             return None
         w, h = src.width(), src.height()
-        x1, y1, x2, y2 = 0, 0, w, h
-        cr = self._crop_of(k) if k != 'sheet' else None
-        if cr:
-            x1, y1 = max(0, min(cr[0], w - 1)), max(0, min(cr[1], h - 1))
-            x2, y2 = max(x1 + 1, min(cr[2], w)), max(y1 + 1, min(cr[3], h))
-        f = max(1, _ev_ceil(x2 - x1, self.THUMB[0]), _ev_ceil(y2 - y1, self.THUMB[1]))
+        f = max(1, _ev_ceil(w, self.THUMB[0]), _ev_ceil(h, self.THUMB[1]))
         dst = tk.PhotoImage()
-        dst.tk.call(dst, 'copy', src, '-from', x1, y1, x2, y2, '-subsample', f, f)
+        dst.tk.call(dst, 'copy', src, '-from', 0, 0, w, h, '-subsample', f, f)
         del src
-        self._thumbs[k] = dst
+        self._thumbs[path] = dst
         return dst
 
     def refresh_checks(self):
         self.ck.delete(*self.ck.get_children())
         its = self._items()
         day = None
-        if self.slots.get('gift'):
-            day = datetime.fromtimestamp(self.slots['gift']['mtime']).date()
+        if self.shots:                    # วันที่รับของ = วันที่แคปภาพแรกของเซ็ต
+            day = datetime.fromtimestamp(min(x['mtime'] for x in self.shots)).date()
         mark = {'': '☐', 'ok': '✓', 'bad': '✗'}
         for i, it in enumerate(its):
             gift, exp, bag = ev_expect(it, day)
@@ -16282,106 +16355,6 @@ class EvTab:
             self.cb_sheet.config(values=['ทุกชีท'] + sheets)
         except Exception:
             pass
-
-
-class CropDialog:
-    """ลากกรอบบนภาพเต็มจอ (ย่อให้พอดีจอ) เพื่อตั้งจุดตัด — จำไว้ใช้ทุกภาพต่อไป"""
-    MAXW, MAXH = 1180, 640
-
-    def __init__(self, ev, kind, path):
-        self.ev, self.kind, self.path = ev, kind, path
-        root = ev.app.root
-        try:
-            self.src = tk.PhotoImage(file=path)
-        except Exception as ex:
-            messagebox.showerror('เปิดภาพไม่ได้', str(ex)[:200])
-            return
-        self.w, self.h = self.src.width(), self.src.height()
-        self.f = max(1, _ev_ceil(self.w, self.MAXW), _ev_ceil(self.h, self.MAXH))
-        self.small = tk.PhotoImage()
-        self.small.tk.call(self.small, 'copy', self.src, '-subsample', self.f, self.f)
-        del self.src
-        self.win = tk.Toplevel(root)
-        self.win.title('ตั้งจุดตัด — %s' % EV_CROP_NAME[kind])
-        self.win.configure(bg=C['bg'])
-        self.win.transient(root)
-        tk.Label(self.win, text='ลากกรอบรอบ “%s” แล้วกดบันทึก  ·  ภาพ %dx%d (ย่อ 1/%d)  ·  %s'
-                 % (EV_CROP_NAME[kind], self.w, self.h, self.f, os.path.basename(path)),
-                 bg=C['bg'], fg=C['fg'], font=FM, anchor='w').pack(fill='x', padx=12, pady=(10, 6))
-        sw, sh = self.small.width(), self.small.height()
-        self.cv = tk.Canvas(self.win, width=sw, height=sh, bg='#000', highlightthickness=0, cursor='crosshair')
-        self.cv.pack(padx=12)
-        self.cv.create_image(0, 0, image=self.small, anchor='nw')
-        self.rect = None
-        self.p0 = None
-        cur = ev.crops.get(kind)
-        if cur and len(cur) == 4:
-            self.box = [v / self.f for v in cur]
-            self._draw()
-        else:
-            self.box = None
-        self.cv.bind('<ButtonPress-1>', self._down)
-        self.cv.bind('<B1-Motion>', self._move)
-        self.cv.bind('<ButtonRelease-1>', self._move)
-        foot = tk.Frame(self.win, bg=C['bg'])
-        foot.pack(fill='x', padx=12, pady=10)
-        self.lbl = tk.Label(foot, text='', bg=C['bg'], fg=C['dim'], font=FM)
-        self.lbl.pack(side='left')
-        ev.app._btn(foot, 'บันทึกจุดตัด', self.ok, primary=True).pack(side='right', ipadx=14, ipady=3)
-        ev.app._btn(foot, 'ยกเลิก', self.win.destroy).pack(side='right', padx=(0, 8), ipadx=10, ipady=3)
-        ev.app._btn(foot, 'ไม่ตัด (ใช้ทั้งภาพ)', self.no_crop).pack(side='right', padx=(0, 8), ipadx=8, ipady=3)
-        self._label()
-        try:
-            self.win.grab_set()
-        except Exception:
-            pass
-
-    def _down(self, e):
-        self.p0 = (e.x, e.y)
-        self.box = [e.x, e.y, e.x, e.y]
-        self._draw()
-
-    def _move(self, e):
-        if not self.p0:
-            return
-        sw, sh = self.small.width(), self.small.height()
-        x, y = max(0, min(e.x, sw)), max(0, min(e.y, sh))
-        self.box = [min(self.p0[0], x), min(self.p0[1], y), max(self.p0[0], x), max(self.p0[1], y)]
-        self._draw()
-        self._label()
-
-    def _draw(self):
-        if self.rect:
-            self.cv.delete(self.rect)
-        if self.box:
-            self.rect = self.cv.create_rectangle(*self.box, outline='#00e676', width=2)
-
-    def region(self):
-        if not self.box:
-            return None
-        x1, y1, x2, y2 = [int(round(v * self.f)) for v in self.box]
-        x1, y1 = max(0, min(x1, self.w - 1)), max(0, min(y1, self.h - 1))
-        x2, y2 = max(x1 + 1, min(x2, self.w)), max(y1 + 1, min(y2, self.h))
-        if x2 - x1 < 20 or y2 - y1 < 20:
-            return None
-        return (x1, y1, x2, y2)
-
-    def _label(self):
-        r = self.region()
-        self.lbl.config(text=('กรอบ: %d,%d – %d,%d  (%dx%d)' % (r + (r[2] - r[0], r[3] - r[1])))
-                        if r else 'ยังไม่ได้ลากกรอบ')
-
-    def ok(self):
-        r = self.region()
-        if not r:
-            return messagebox.showwarning('ยังไม่มีกรอบ', 'ลากกรอบรอบ%sก่อนนะ (อย่างน้อย 20x20)'
-                                          % EV_CROP_NAME[self.kind], parent=self.win)
-        self.ev.save_crop(self.kind, r, (self.w, self.h))
-        self.win.destroy()
-
-    def no_crop(self):
-        self.ev.save_crop(self.kind, None, (self.w, self.h))
-        self.win.destroy()
 
 
 class EvImportDialog(BundleImportDialog):
