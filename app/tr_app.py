@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.2.9 : ธีม TR — แยกสีตามหน้าที่: แท็บน้ำเงินเข้ม · หัวตารางฟ้าอ่อน · ปุ่มหลักส้ม · ⏱ม่วง · ↺เขียว · ปุ่มรองมีกรอบ (เปลี่ยนแค่สี)
 V1.2.8 : ธีม TalesRunner โทนนุ่มตา — ลดความสว่างพื้นขาวลง ตัวหนังสือเข้มขึ้นให้อ่านง่าย (เปลี่ยนแค่สี)
 V1.2.7 : ธีมหน้าจอแบบ TalesRunner (ฟ้า-ขาว หัวมีเมฆ แท็บ/ปุ่มแบบเกม) — ปุ่ม 🎨 ธีม สลับกลับธีมมืดเดิมได้ · เปลี่ยนแค่สี
 V1.2.6 : หน้าจอ — ตาราง “ที่สร้างแล้ว” สูงขึ้นไปถึงบนสุดของแท็บ (กล่องนำเข้า/ค่าเริ่มต้นย้ายไปอยู่ฝั่งซ้าย)
@@ -245,6 +246,7 @@ FB = ('Segoe UI', 10, 'bold')
 THEMES = {
     'dark': dict(C, **{
         'win': '#11161f', 'accent_on': '#3d55cf', 'card_title': '#8b98ad',
+        'btn1_bg': '#4f6bed', 'btn1_act': '#3d55cf', 'tv_head_act': '',
         'tab_bg': '#151c28', 'tab_fg': '#8b98ad', 'tab_on_bg': '#11161f', 'tab_on_fg': '#dfe6f2',
         'tab_act': '#263041',
         'btn2_bg': '#0c1119', 'btn2_fg': '#dfe6f2', 'btn2_act': '#263041', 'btn2_line': '',
@@ -259,20 +261,23 @@ THEMES = {
         # โทนนุ่มตา (v1.2.8) — ลดความสว่างพื้นขาวลง ~25% ตัวหนังสือยังคมชัด (คอนทราสต์ ≥ 4.5 ทุกคู่หลัก)
         'win': '#8fc1e6', 'bg': '#d0e0ee', 'card': '#bcd4e9', 'line': '#6fa3cf',
         'input': '#dbe6f0',
-        'orange': '#e0640c', 'orange_on': '#c45508',
-        'green': '#1d934b', 'green_on': '#177a3e',
+        # ปุ่ม ⏱ เซ็ตเวลาไว้ทดสอบ (คีย์ชื่อ orange มาแต่เดิม) — ธีม TR ใช้ม่วงชมพู ไม่ให้ชนกับปุ่มหลักสีส้ม/แท็บน้ำเงิน
+        'orange': '#a8378f', 'orange_on': '#8c2d77',
+        'green': '#17803f', 'green_on': '#12682f',            # ↺ รีเซ็ตเวลาเริ่ม
+        'btn1_bg': '#c05108', 'btn1_act': '#a24505',          # ปุ่มหลัก = ส้ม (สีตรงข้ามกับฟ้า)
         'fg': '#132f4b', 'dim': '#405872', 'accent': '#1a6fbf', 'accent_on': '#155a9c',
         'ok': '#0b6a3a', 'warn': '#7d4a00', 'err': '#a82a29',
         'card_title': '#0f4f94',
-        'tab_bg': '#2a78c0', 'tab_fg': '#ffffff', 'tab_on_bg': '#d0e0ee', 'tab_on_fg': '#0f4a86',
-        'tab_act': '#3f8cd2',
-        'btn2_bg': '#d9e5f0', 'btn2_fg': '#14548f', 'btn2_act': '#c7d8e9', 'btn2_line': '#7fb0d9',
+        'tab_bg': '#1f5c9e', 'tab_fg': '#ffffff', 'tab_on_bg': '#d0e0ee', 'tab_on_fg': '#0f4a86',
+        'tab_act': '#2b6db3',                                 # แท็บ = น้ำเงินเข้ม (นำทาง)
+        'btn2_bg': '#dbe6f0', 'btn2_fg': '#14548f', 'btn2_act': '#c9d9e8', 'btn2_line': '#3f7fbf',
         'row_warn_bg': '#ecdca6', 'row_warn_fg': '#5f3d00',
         'row_bad_bg': '#ecc8c4', 'row_bad_fg': '#8c1813',
         'row_dup2_bg': '#e9bcb8', 'row_dup2_fg': '#7d1214',
         'row_done_bg': '#c3d7ee', 'row_done_fg': '#15458f',
         'row_cur_bg': '#e8cf7a', 'row_cur_fg': '#132f4b', 'row_dup_fg': '#1a5fb0',
-        'tv_head_bg': '#2a78c0', 'tv_head_fg': '#ffffff', 'tv_sel_bg': '#e8bf45',
+        'tv_head_bg': '#78a2cb', 'tv_head_fg': '#132f4b', 'tv_head_act': '#6a95bf',   # หัวตาราง = ฟ้ากลาง (โครงสร้าง เงียบๆ)
+        'tv_sel_bg': '#e8bf45',
         'tv_sel_fg': '#132f4b', 'thumb_bg': '#bad2e7',
     },
 }
@@ -4342,9 +4347,9 @@ class ImportDialog:
         foot.pack_propagate(False)
         self.count_lbl = tk.Label(foot, text='', bg=C['card'], fg=C['dim'], font=('Segoe UI', 10))
         self.count_lbl.pack(side='left', padx=18)
-        self.ok_btn = tk.Button(foot, text='ใช้ข้อมูลนี้', bg=C['accent'], fg='white', bd=0,
+        self.ok_btn = tk.Button(foot, text='ใช้ข้อมูลนี้', bg=C['btn1_bg'], fg='white', bd=0,
                                 font=('Segoe UI', 10, 'bold'), cursor='hand2',
-                                activebackground=C['accent_on'], activeforeground='white',
+                                activebackground=C['btn1_act'], activeforeground='white',
                                 state='disabled', command=self._ok)
         self.ok_btn.pack(side='right', padx=18, pady=12, ipadx=22, ipady=5)
         tk.Button(foot, text='ยกเลิก', bg=C['input'], fg=C['fg'], bd=0,
@@ -4619,7 +4624,7 @@ class ImportDialog:
                               + (f'  (น่าสงสัย {nwarn})' if nwarn else '')
                               + ('   (แสดงตัวอย่าง 400 แถวแรก)' if len(rows) > 400 else ''))
         self.ok_btn.config(state='normal' if rows else 'disabled',
-                           bg=C['accent'] if rows else C['input'],
+                           bg=C['btn1_bg'] if rows else C['input'],
                            fg='white' if rows else C['dim'])
 
     def _close_wb(self):
@@ -4945,7 +4950,7 @@ class BundleImportDialog:
                              if ws else '')
         self.count_lbl.config(text='จะนำเข้า %d บันเดิล' % len(bs) if bs else '')
         self.ok_btn.config(state='normal' if bs else 'disabled',
-                           bg=C['accent'] if bs else C['input'],
+                           bg=C['btn1_bg'] if bs else C['input'],
                            fg='white' if bs else C['dim'])
 
     def _close(self):
@@ -5006,7 +5011,7 @@ class CodeImportDialog(BundleImportDialog):
         self.warn_lbl.config(text=msg)
         self.count_lbl.config(text='จะนำเข้า %d โค้ด' % len(bs) if bs else '')
         self.ok_btn.config(state='normal' if bs else 'disabled',
-                           bg=C['accent'] if bs else C['input'],
+                           bg=C['btn1_bg'] if bs else C['input'],
                            fg='white' if bs else C['dim'])
 
 
@@ -5574,12 +5579,12 @@ class App:
         def mk(text, cmd, hot=False):
             return tk.Button(cv, text=text, command=cmd, bd=0, cursor='hand2',
                              font=FB if hot else FM,
-                             bg='#e0640c' if hot else '#d9e5f0',
+                             bg='#c05108' if hot else '#dbe6f0',
                              fg='white' if hot else '#14548f',
-                             activebackground='#c45508' if hot else '#c7d8e9',
+                             activebackground='#a24505' if hot else '#c9d9e8',
                              activeforeground='white' if hot else '#14548f',
                              highlightthickness=1,
-                             highlightbackground='#f0a56b' if hot else '#a9cbe8',
+                             highlightbackground='#e8935a' if hot else '#3f7fbf',
                              padx=14, pady=5)
         btns = [mk('🔓  เปิดหน้า Login', self.open_login, hot=True),
                 mk('🐞  แจ้งบั๊ก', self.bug_open_sheet),
@@ -5663,8 +5668,8 @@ class App:
             st.configure('TR.Treeview.Heading', background=C['tv_head_bg'],
                          foreground=C['tv_head_fg'], bordercolor=C['line'],
                          lightcolor=C['tv_head_bg'], darkcolor=C['line'])
-            st.map('TR.Treeview.Heading', background=[('active', C['accent'])],
-                   foreground=[('active', '#ffffff')])
+            st.map('TR.Treeview.Heading', background=[('active', C['tv_head_act'])],
+                   foreground=[('active', C['tv_head_fg'])])
             st.map('TR.Treeview', background=[('selected', C['tv_sel_bg'])],
                    foreground=[('selected', C['tv_sel_fg'])])
             st.configure('Horizontal.TProgressbar', background='#24a35d', troughcolor=C['card'],
@@ -5784,9 +5789,9 @@ class App:
                 b.config(width=width)
             return b
         b = tk.Button(parent, text=text, command=cmd, bd=0, cursor='hand2', font=FB if primary else FM,
-                      bg=C['accent'] if primary else C['btn2_bg'],
+                      bg=C['btn1_bg'] if primary else C['btn2_bg'],
                       fg='white' if primary else C['btn2_fg'],
-                      activebackground=C['accent_on'] if primary else C['btn2_act'],
+                      activebackground=C['btn1_act'] if primary else C['btn2_act'],
                       activeforeground='white')
         if C['btn2_line'] and not primary:          # ธีม TR: ปุ่มขาวมีกรอบฟ้า
             b.config(highlightthickness=1, highlightbackground=C['btn2_line'],
@@ -16416,7 +16421,7 @@ class EvImportDialog(BundleImportDialog):
         self.warn_lbl.config(text=('⚠  %d เซ็ตที่ต้องดู เช่น %s' % (len(ws), ws[0][:90])) if ws else '')
         self.count_lbl.config(text='จะนำเข้า %d เซ็ต' % len(bs) if bs else '')
         self.ok_btn.config(state='normal' if bs else 'disabled',
-                           bg=C['accent'] if bs else C['input'],
+                           bg=C['btn1_bg'] if bs else C['input'],
                            fg='white' if bs else C['dim'])
 
     def _ok(self):
