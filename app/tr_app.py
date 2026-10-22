@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.2.8 : ธีม TalesRunner โทนนุ่มตา — ลดความสว่างพื้นขาวลง ตัวหนังสือเข้มขึ้นให้อ่านง่าย (เปลี่ยนแค่สี)
 V1.2.7 : ธีมหน้าจอแบบ TalesRunner (ฟ้า-ขาว หัวมีเมฆ แท็บ/ปุ่มแบบเกม) — ปุ่ม 🎨 ธีม สลับกลับธีมมืดเดิมได้ · เปลี่ยนแค่สี
 V1.2.6 : หน้าจอ — ตาราง “ที่สร้างแล้ว” สูงขึ้นไปถึงบนสุดของแท็บ (กล่องนำเข้า/ค่าเริ่มต้นย้ายไปอยู่ฝั่งซ้าย)
 V1.2.5 : หน้าจอ — ตาราง “ที่สร้างแล้ว” ย้ายไปอยู่ขวาของคิว (สร้าง Item / Bundle / WR Master / Item Code) ลากเส้นแบ่งปรับได้ · ช่องชื่อแคบลง
@@ -255,23 +256,24 @@ THEMES = {
         'tv_head_bg': '', 'tv_head_fg': '', 'tv_sel_bg': '', 'tv_sel_fg': '', 'thumb_bg': '#111',
     }),
     'tr': {
-        'win': '#bfe3fb', 'bg': '#f4faff', 'card': '#dcefff', 'line': '#7fc0ee',
-        'input': '#ffffff',
-        'orange': '#ff7f1f', 'orange_on': '#e5660a',
-        'green': '#25b35c', 'green_on': '#1a9147',
-        'fg': '#16375e', 'dim': '#5d7b99', 'accent': '#1e88e5', 'accent_on': '#1669b8',
-        'ok': '#12884f', 'warn': '#a86400', 'err': '#d33a3a',
-        'card_title': '#0f5aa6',
-        'tab_bg': '#3c9ce9', 'tab_fg': '#ffffff', 'tab_on_bg': '#f4faff', 'tab_on_fg': '#0f4c8a',
-        'tab_act': '#62b3f0',
-        'btn2_bg': '#ffffff', 'btn2_fg': '#165a9e', 'btn2_act': '#e3f1fd', 'btn2_line': '#8cc8f2',
-        'row_warn_bg': '#fff4c7', 'row_warn_fg': '#7a5200',
-        'row_bad_bg': '#ffe2e0', 'row_bad_fg': '#b42318',
-        'row_dup2_bg': '#ffd9d6', 'row_dup2_fg': '#a3191b',
-        'row_done_bg': '#dcebff', 'row_done_fg': '#1b56b0',
-        'row_cur_bg': '#ffe7a3', 'row_cur_fg': '#16375e', 'row_dup_fg': '#1f6fd1',
-        'tv_head_bg': '#3c9ce9', 'tv_head_fg': '#ffffff', 'tv_sel_bg': '#ffd65c',
-        'tv_sel_fg': '#16375e', 'thumb_bg': '#cfe6f8',
+        # โทนนุ่มตา (v1.2.8) — ลดความสว่างพื้นขาวลง ~25% ตัวหนังสือยังคมชัด (คอนทราสต์ ≥ 4.5 ทุกคู่หลัก)
+        'win': '#8fc1e6', 'bg': '#d0e0ee', 'card': '#bcd4e9', 'line': '#6fa3cf',
+        'input': '#dbe6f0',
+        'orange': '#e0640c', 'orange_on': '#c45508',
+        'green': '#1d934b', 'green_on': '#177a3e',
+        'fg': '#132f4b', 'dim': '#405872', 'accent': '#1a6fbf', 'accent_on': '#155a9c',
+        'ok': '#0b6a3a', 'warn': '#7d4a00', 'err': '#a82a29',
+        'card_title': '#0f4f94',
+        'tab_bg': '#2a78c0', 'tab_fg': '#ffffff', 'tab_on_bg': '#d0e0ee', 'tab_on_fg': '#0f4a86',
+        'tab_act': '#3f8cd2',
+        'btn2_bg': '#d9e5f0', 'btn2_fg': '#14548f', 'btn2_act': '#c7d8e9', 'btn2_line': '#7fb0d9',
+        'row_warn_bg': '#ecdca6', 'row_warn_fg': '#5f3d00',
+        'row_bad_bg': '#ecc8c4', 'row_bad_fg': '#8c1813',
+        'row_dup2_bg': '#e9bcb8', 'row_dup2_fg': '#7d1214',
+        'row_done_bg': '#c3d7ee', 'row_done_fg': '#15458f',
+        'row_cur_bg': '#e8cf7a', 'row_cur_fg': '#132f4b', 'row_dup_fg': '#1a5fb0',
+        'tv_head_bg': '#2a78c0', 'tv_head_fg': '#ffffff', 'tv_sel_bg': '#e8bf45',
+        'tv_sel_fg': '#132f4b', 'thumb_bg': '#bad2e7',
     },
 }
 THEME = {'name': 'dark'}
@@ -5565,38 +5567,38 @@ class App:
         """หัวโปรแกรมธีม TR: ฟ้าไล่สี + เมฆขาว + ชื่อโปรแกรมตัวขาว (วาดเองทั้งหมด ไม่ใช้รูปจากเกม)
         ปุ่มบนหัว = ปุ่มเดิม คำสั่งเดิม (เปิดหน้า Login / แจ้งบั๊ก) + 🎨 ธีม"""
         H = 62
-        cv = tk.Canvas(self.root, height=H, bd=0, highlightthickness=0, bg='#2f95e6')
+        cv = tk.Canvas(self.root, height=H, bd=0, highlightthickness=0, bg='#2a78c0')
         cv.pack(fill='x')
         self.tr_head = cv
 
         def mk(text, cmd, hot=False):
             return tk.Button(cv, text=text, command=cmd, bd=0, cursor='hand2',
                              font=FB if hot else FM,
-                             bg='#ff8a1f' if hot else '#ffffff',
-                             fg='white' if hot else '#165a9e',
-                             activebackground='#e5660a' if hot else '#e3f1fd',
-                             activeforeground='white' if hot else '#165a9e',
+                             bg='#e0640c' if hot else '#d9e5f0',
+                             fg='white' if hot else '#14548f',
+                             activebackground='#c45508' if hot else '#c7d8e9',
+                             activeforeground='white' if hot else '#14548f',
                              highlightthickness=1,
-                             highlightbackground='#ffd1a3' if hot else '#cfe8fb',
+                             highlightbackground='#f0a56b' if hot else '#a9cbe8',
                              padx=14, pady=5)
         btns = [mk('🔓  เปิดหน้า Login', self.open_login, hot=True),
                 mk('🐞  แจ้งบั๊ก', self.bug_open_sheet),
                 mk('🎨  ธีม', self.toggle_theme)]
         wins = [cv.create_window(0, H // 2, window=b, anchor='e') for b in btns]
-        top_c, bot_c = (0x1f, 0x86, 0xe0), (0x8f, 0xd3, 0xff)
+        top_c, bot_c = (0x1b, 0x66, 0xb2), (0x67, 0xa9, 0xdc)
 
         def cloud(cx, cy, k):
-            for dx, dy, r, col in ((-26, 8, 13, '#dcefff'), (26, 8, 13, '#dcefff'),
-                                   (-24, 4, 14, '#f4faff'), (0, -4, 20, '#ffffff'),
-                                   (24, 3, 15, '#f4faff'), (46, 8, 10, '#eaf6ff'),
-                                   (-44, 9, 9, '#eaf6ff')):
+            for dx, dy, r, col in ((-26, 8, 13, '#b9d5ec'), (26, 8, 13, '#b9d5ec'),
+                                   (-24, 4, 14, '#d3e4f2'), (0, -4, 20, '#dde9f3'),
+                                   (24, 3, 15, '#d3e4f2'), (46, 8, 10, '#c6dcef'),
+                                   (-44, 9, 9, '#c6dcef')):
                 cv.create_oval(cx + (dx - r) * k, cy + (dy - r) * k, cx + (dx + r) * k,
                                cy + (dy + r) * k, fill=col, outline='', tags='bgd')
 
         def star(x, y, r):
             cv.create_polygon(x, y - r, x + r * 0.28, y - r * 0.28, x + r, y, x + r * 0.28,
                               y + r * 0.28, x, y + r, x - r * 0.28, y + r * 0.28, x - r, y,
-                              x - r * 0.28, y - r * 0.28, fill='#ffffff', outline='', tags='bgd')
+                              x - r * 0.28, y - r * 0.28, fill='#dde9f3', outline='', tags='bgd')
 
         def draw(_e=None):
             w = max(cv.winfo_width(), 600)
@@ -5609,13 +5611,13 @@ class App:
                 cloud(w * fx, H - 14 + dy, k)
             for fx, fy, r in ((0.31, 0.28, 5), (0.47, 0.22, 3.5), (0.63, 0.32, 4.5)):
                 star(w * fx, H * fy, r)
-            cv.create_text(20, H // 2 + 2, text='TR Plus Ultra', anchor='w', fill='#0b5aa8',
+            cv.create_text(20, H // 2 + 2, text='TR Plus Ultra', anchor='w', fill='#0c3f75',
                            font=('Segoe UI', 17, 'bold'), tags='bgd')
-            tid = cv.create_text(18, H // 2, text='TR Plus Ultra', anchor='w', fill='#ffffff',
+            tid = cv.create_text(18, H // 2, text='TR Plus Ultra', anchor='w', fill='#eef4f9',
                                  font=('Segoe UI', 17, 'bold'), tags='bgd')
             bb = cv.bbox(tid) or (0, 0, 190, 0)
             cv.create_text(bb[2] + 10, H // 2 + 3, text='v%s' % APP_VERSION, anchor='w',
-                           fill='#eaf6ff', font=('Segoe UI', 9, 'bold'), tags='bgd')
+                           fill='#dde9f3', font=('Segoe UI', 9, 'bold'), tags='bgd')
             cv.tag_lower('bgd')
             x = w - 16
             for wid, b in zip(wins, btns):
@@ -5665,12 +5667,12 @@ class App:
                    foreground=[('active', '#ffffff')])
             st.map('TR.Treeview', background=[('selected', C['tv_sel_bg'])],
                    foreground=[('selected', C['tv_sel_fg'])])
-            st.configure('Horizontal.TProgressbar', background='#33c27a', troughcolor='#dcefff',
-                         bordercolor=C['line'], lightcolor='#6fe0a3', darkcolor='#1f9e5c')
+            st.configure('Horizontal.TProgressbar', background='#24a35d', troughcolor=C['card'],
+                         bordercolor=C['line'], lightcolor='#4fc184', darkcolor='#1a7f47')
             for sb in ('Vertical.TScrollbar', 'Horizontal.TScrollbar'):
-                st.configure(sb, background='#9fd2f7', troughcolor=C['bg'], bordercolor=C['line'],
-                             arrowcolor=C['accent'], lightcolor='#c9e7fc', darkcolor=C['line'])
-                st.map(sb, background=[('active', '#6fbcf3')])
+                st.configure(sb, background='#8fbfe6', troughcolor=C['bg'], bordercolor=C['line'],
+                             arrowcolor=C['accent'], lightcolor='#b4d4ee', darkcolor=C['line'])
+                st.map(sb, background=[('active', '#6aa6da')])
         except Exception:
             pass
 
