@@ -3,6 +3,8 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.2.7 : ธีมหน้าจอแบบ TalesRunner (ฟ้า-ขาว หัวมีเมฆ แท็บ/ปุ่มแบบเกม) — ปุ่ม 🎨 ธีม สลับกลับธีมมืดเดิมได้ · เปลี่ยนแค่สี
+V1.2.6 : หน้าจอ — ตาราง “ที่สร้างแล้ว” สูงขึ้นไปถึงบนสุดของแท็บ (กล่องนำเข้า/ค่าเริ่มต้นย้ายไปอยู่ฝั่งซ้าย)
 V1.2.5 : หน้าจอ — ตาราง “ที่สร้างแล้ว” ย้ายไปอยู่ขวาของคิว (สร้าง Item / Bundle / WR Master / Item Code) ลากเส้นแบ่งปรับได้ · ช่องชื่อแคบลง
 V1.2.4 : สร้าง Item — ไอเทมชื่อเดียวกัน (ต่างแค่จำนวน/วัน) ใส่รูปครั้งเดียว แถวอื่นได้รูปเดียวกันเอง
 V1.2.3 : WR Master — เช็กชื่อ Bundle ต้องมีชื่อโค้ด ไม่ตรง = ไม่สร้าง + เด้งเตือน · คิวเตือนเลข Bundle ซ้ำหลายโค้ด
@@ -234,6 +236,55 @@ C = {
 }
 FM = ('Segoe UI', 10)
 FB = ('Segoe UI', 10, 'bold')
+
+# ---- ธีมหน้าจอ (สีอย่างเดียว ไม่เกี่ยวกับการทำงาน) ----
+#   dark = หน้าตาเดิมทุกจุด (ค่าเหมือนเดิมเป๊ะ)
+#   tr   = แบบเกม TalesRunner: ฟ้าใส-ขาว กรอบฟ้า แท็บฟ้า/ขาว ปุ่มฟ้า/ส้ม/เขียว
+#   สลับได้ที่ปุ่ม 🎨 ธีม บนหัวโปรแกรม (ปิดเปิดใหม่ 1 ครั้ง)
+THEMES = {
+    'dark': dict(C, **{
+        'win': '#11161f', 'accent_on': '#3d55cf', 'card_title': '#8b98ad',
+        'tab_bg': '#151c28', 'tab_fg': '#8b98ad', 'tab_on_bg': '#11161f', 'tab_on_fg': '#dfe6f2',
+        'tab_act': '#263041',
+        'btn2_bg': '#0c1119', 'btn2_fg': '#dfe6f2', 'btn2_act': '#263041', 'btn2_line': '',
+        'row_warn_bg': '#3a3018', 'row_warn_fg': '#e3b341',
+        'row_bad_bg': '#3a1f1e', 'row_bad_fg': '#f0736a',
+        'row_dup2_bg': '#4a1c1c', 'row_dup2_fg': '#ff8a80',
+        'row_done_bg': '#1b2a44', 'row_done_fg': '#8fb3ff',
+        'row_cur_bg': '#1d3557', 'row_cur_fg': 'white', 'row_dup_fg': '#7aa2f7',
+        'tv_head_bg': '', 'tv_head_fg': '', 'tv_sel_bg': '', 'tv_sel_fg': '', 'thumb_bg': '#111',
+    }),
+    'tr': {
+        'win': '#bfe3fb', 'bg': '#f4faff', 'card': '#dcefff', 'line': '#7fc0ee',
+        'input': '#ffffff',
+        'orange': '#ff7f1f', 'orange_on': '#e5660a',
+        'green': '#25b35c', 'green_on': '#1a9147',
+        'fg': '#16375e', 'dim': '#5d7b99', 'accent': '#1e88e5', 'accent_on': '#1669b8',
+        'ok': '#12884f', 'warn': '#a86400', 'err': '#d33a3a',
+        'card_title': '#0f5aa6',
+        'tab_bg': '#3c9ce9', 'tab_fg': '#ffffff', 'tab_on_bg': '#f4faff', 'tab_on_fg': '#0f4c8a',
+        'tab_act': '#62b3f0',
+        'btn2_bg': '#ffffff', 'btn2_fg': '#165a9e', 'btn2_act': '#e3f1fd', 'btn2_line': '#8cc8f2',
+        'row_warn_bg': '#fff4c7', 'row_warn_fg': '#7a5200',
+        'row_bad_bg': '#ffe2e0', 'row_bad_fg': '#b42318',
+        'row_dup2_bg': '#ffd9d6', 'row_dup2_fg': '#a3191b',
+        'row_done_bg': '#dcebff', 'row_done_fg': '#1b56b0',
+        'row_cur_bg': '#ffe7a3', 'row_cur_fg': '#16375e', 'row_dup_fg': '#1f6fd1',
+        'tv_head_bg': '#3c9ce9', 'tv_head_fg': '#ffffff', 'tv_sel_bg': '#ffd65c',
+        'tv_sel_fg': '#16375e', 'thumb_bg': '#cfe6f8',
+    },
+}
+THEME = {'name': 'dark'}
+C.update(THEMES['dark'])              # ค่าเริ่มต้น = หน้าตาเดิม (มีคีย์ครบทุกตัว)
+
+
+def apply_theme(name):
+    """เปลี่ยนชุดสีก่อนสร้างหน้าจอ — ชื่อแปลก/ไม่มี = หน้าตาเดิม"""
+    name = name if name in THEMES else 'dark'
+    C.update(THEMES['dark'])
+    C.update(THEMES[name])
+    THEME['name'] = name
+    return name
 
 
 # ============================================================================
@@ -4291,7 +4342,7 @@ class ImportDialog:
         self.count_lbl.pack(side='left', padx=18)
         self.ok_btn = tk.Button(foot, text='ใช้ข้อมูลนี้', bg=C['accent'], fg='white', bd=0,
                                 font=('Segoe UI', 10, 'bold'), cursor='hand2',
-                                activebackground='#3d55cf', activeforeground='white',
+                                activebackground=C['accent_on'], activeforeground='white',
                                 state='disabled', command=self._ok)
         self.ok_btn.pack(side='right', padx=18, pady=12, ipadx=22, ipady=5)
         tk.Button(foot, text='ยกเลิก', bg=C['input'], fg=C['fg'], bd=0,
@@ -4366,7 +4417,7 @@ class ImportDialog:
                         ('qty', 'จำนวน', 70)):
             self.tree.heading(c, text=t)
             self.tree.column(c, width=w, anchor='w')
-        self.tree.tag_configure('warn', background='#3a3018', foreground='#e3b341')
+        self.tree.tag_configure('warn', background=C['row_warn_bg'], foreground=C['row_warn_fg'])
         self.tree.bind('<<TreeviewSelect>>', lambda e: self._why())
         tsb = ttk.Scrollbar(pv, orient='vertical', command=self.tree.yview)
         self.tree.configure(yscrollcommand=tsb.set)
@@ -4637,7 +4688,7 @@ class BundleImportDialog:
         self.count_lbl.pack(side='left', padx=18)
         self.ok_btn = tk.Button(foot, text='ใช้ข้อมูลนี้', bg=C['input'], fg=C['dim'], bd=0,
                                 font=('Segoe UI', 10, 'bold'), cursor='hand2',
-                                activebackground='#3d55cf', activeforeground='white',
+                                activebackground=C['accent_on'], activeforeground='white',
                                 state='disabled', command=self._ok)
         self.ok_btn.pack(side='right', padx=18, pady=12, ipadx=22, ipady=5)
         tk.Button(foot, text='ยกเลิก', bg=C['input'], fg=C['fg'], bd=0,
@@ -5288,11 +5339,11 @@ class SideTabs:
     """
 
     def __init__(self, parent):
-        self.bar = tk.Frame(parent, bg=C['bg'])
+        self.bar = tk.Frame(parent, bg=C['win'])
         self.bar.pack(fill='x', padx=10, pady=(8, 0))
-        self._l = tk.Frame(self.bar, bg=C['bg'])
+        self._l = tk.Frame(self.bar, bg=C['win'])
         self._l.pack(side='left')
-        self._r = tk.Frame(self.bar, bg=C['bg'])
+        self._r = tk.Frame(self.bar, bg=C['win'])
         self._r.pack(side='right')
         self.body = tk.Frame(parent, bg=C['bg'], highlightthickness=1,
                              highlightbackground=C['line'])
@@ -5302,8 +5353,8 @@ class SideTabs:
 
     def add(self, frame, text, side='left'):
         b = tk.Button(self._l if side == 'left' else self._r, text=text, bd=0,
-                      cursor='hand2', font=FM, bg=C['card'], fg=C['dim'],
-                      activebackground=C['line'], activeforeground=C['fg'],
+                      cursor='hand2', font=FM, bg=C['tab_bg'], fg=C['tab_fg'],
+                      activebackground=C['tab_act'], activeforeground=C['tab_on_fg'],
                       padx=16, pady=7,
                       command=lambda f=frame: self.select(f))
         b.pack(side='left', padx=(0, 2))
@@ -5317,8 +5368,8 @@ class SideTabs:
             return self._cur
         for t in self._tabs:
             on = t['frame'] is frame
-            t['btn'].config(bg=C['bg'] if on else C['card'],
-                            fg=C['fg'] if on else C['dim'],
+            t['btn'].config(bg=C['tab_on_bg'] if on else C['tab_bg'],
+                            fg=C['tab_on_fg'] if on else C['tab_fg'],
                             font=FB if on else FM)
             if on:
                 t['frame'].pack(fill='both', expand=True)
@@ -5353,9 +5404,10 @@ class App:
               ('เลข Bundle', 'bundle', 12))
 
     def __init__(self):
+        apply_theme(load_prefs().get('theme', 'tr'))    # สีหน้าจอ — ต้องตั้งก่อนสร้างหน้าจอ
         self.root = tk.Tk()
         self.root.title(f'TR Plus Ultra  —  v{APP_VERSION}')
-        self.root.configure(bg=C['bg'])
+        self.root.configure(bg=C['win'])
         self.root.geometry('1080x720')
         set_app_icon(self.root)
         self.prefs = load_prefs()
@@ -5380,20 +5432,26 @@ class App:
 
     # ---------- UI ----------
     def _build_ui(self):
-        top = tk.Frame(self.root, bg=C['card'], height=54)
-        top.pack(fill='x')
-        top.pack_propagate(False)
-        tk.Label(top, text='TR Plus Ultra', bg=C['card'], fg=C['fg'],
-                 font=('Segoe UI', 14, 'bold')).pack(side='left', padx=16)
-        tk.Label(top, text=f'v{APP_VERSION}', bg=C['card'], fg=C['dim'],
-                 font=('Segoe UI', 9)).pack(side='left')
-        tk.Button(top, text='🔓  เปิดหน้า Login', bg=C['input'], fg=C['fg'], bd=0,
-                  font=FM, cursor='hand2', activebackground=C['line'],
-                  command=self.open_login).pack(side='right', padx=16, ipadx=12, ipady=5)
-        # อยู่แท็บไหนก็แจ้งบั๊กได้ ไม่ต้องเดินไปหาแท็บ
-        tk.Button(top, text='🐞  แจ้งบั๊ก', bg=C['input'], fg=C['fg'], bd=0,
-                  font=FM, cursor='hand2', activebackground=C['line'],
-                  command=self.bug_open_sheet).pack(side='right', ipadx=10, ipady=5)
+        if THEME['name'] == 'tr':
+            self._tr_header()                      # หัวฟ้าไล่สี + เมฆ (ปุ่มเหมือนเดิมทุกอัน)
+        else:
+            top = tk.Frame(self.root, bg=C['card'], height=54)
+            top.pack(fill='x')
+            top.pack_propagate(False)
+            tk.Label(top, text='TR Plus Ultra', bg=C['card'], fg=C['fg'],
+                     font=('Segoe UI', 14, 'bold')).pack(side='left', padx=16)
+            tk.Label(top, text=f'v{APP_VERSION}', bg=C['card'], fg=C['dim'],
+                     font=('Segoe UI', 9)).pack(side='left')
+            tk.Button(top, text='🔓  เปิดหน้า Login', bg=C['input'], fg=C['fg'], bd=0,
+                      font=FM, cursor='hand2', activebackground=C['line'],
+                      command=self.open_login).pack(side='right', padx=16, ipadx=12, ipady=5)
+            # อยู่แท็บไหนก็แจ้งบั๊กได้ ไม่ต้องเดินไปหาแท็บ
+            tk.Button(top, text='🐞  แจ้งบั๊ก', bg=C['input'], fg=C['fg'], bd=0,
+                      font=FM, cursor='hand2', activebackground=C['line'],
+                      command=self.bug_open_sheet).pack(side='right', ipadx=10, ipady=5)
+            tk.Button(top, text='🎨  ธีม', bg=C['input'], fg=C['fg'], bd=0,
+                      font=FM, cursor='hand2', activebackground=C['line'],
+                      command=self.toggle_theme).pack(side='right', padx=(0, 8), ipadx=10, ipady=5)
 
         style = ttk.Style()
         try:
@@ -5500,11 +5558,128 @@ class App:
                                                     max(0, (sh - h) // 2 - 30)))
         except Exception:
             pass
+        self._theme_styles()                     # ธีม TR: สีตาราง/แถบเลื่อน (ธีมมืด = ไม่ทำอะไร)
+
+    # ---------------- ธีมหน้าจอ (สีอย่างเดียว) ----------------
+    def _tr_header(self):
+        """หัวโปรแกรมธีม TR: ฟ้าไล่สี + เมฆขาว + ชื่อโปรแกรมตัวขาว (วาดเองทั้งหมด ไม่ใช้รูปจากเกม)
+        ปุ่มบนหัว = ปุ่มเดิม คำสั่งเดิม (เปิดหน้า Login / แจ้งบั๊ก) + 🎨 ธีม"""
+        H = 62
+        cv = tk.Canvas(self.root, height=H, bd=0, highlightthickness=0, bg='#2f95e6')
+        cv.pack(fill='x')
+        self.tr_head = cv
+
+        def mk(text, cmd, hot=False):
+            return tk.Button(cv, text=text, command=cmd, bd=0, cursor='hand2',
+                             font=FB if hot else FM,
+                             bg='#ff8a1f' if hot else '#ffffff',
+                             fg='white' if hot else '#165a9e',
+                             activebackground='#e5660a' if hot else '#e3f1fd',
+                             activeforeground='white' if hot else '#165a9e',
+                             highlightthickness=1,
+                             highlightbackground='#ffd1a3' if hot else '#cfe8fb',
+                             padx=14, pady=5)
+        btns = [mk('🔓  เปิดหน้า Login', self.open_login, hot=True),
+                mk('🐞  แจ้งบั๊ก', self.bug_open_sheet),
+                mk('🎨  ธีม', self.toggle_theme)]
+        wins = [cv.create_window(0, H // 2, window=b, anchor='e') for b in btns]
+        top_c, bot_c = (0x1f, 0x86, 0xe0), (0x8f, 0xd3, 0xff)
+
+        def cloud(cx, cy, k):
+            for dx, dy, r, col in ((-26, 8, 13, '#dcefff'), (26, 8, 13, '#dcefff'),
+                                   (-24, 4, 14, '#f4faff'), (0, -4, 20, '#ffffff'),
+                                   (24, 3, 15, '#f4faff'), (46, 8, 10, '#eaf6ff'),
+                                   (-44, 9, 9, '#eaf6ff')):
+                cv.create_oval(cx + (dx - r) * k, cy + (dy - r) * k, cx + (dx + r) * k,
+                               cy + (dy + r) * k, fill=col, outline='', tags='bgd')
+
+        def star(x, y, r):
+            cv.create_polygon(x, y - r, x + r * 0.28, y - r * 0.28, x + r, y, x + r * 0.28,
+                              y + r * 0.28, x, y + r, x - r * 0.28, y + r * 0.28, x - r, y,
+                              x - r * 0.28, y - r * 0.28, fill='#ffffff', outline='', tags='bgd')
+
+        def draw(_e=None):
+            w = max(cv.winfo_width(), 600)
+            cv.delete('bgd')
+            for y in range(H):
+                t = y / float(H - 1)
+                cv.create_line(0, y, w, y, tags='bgd', fill='#%02x%02x%02x' % tuple(
+                    int(a + (b - a) * t) for a, b in zip(top_c, bot_c)))
+            for fx, dy, k in ((0.24, 6, 0.9), (0.40, 12, 0.7), (0.55, 4, 1.05), (0.12, 14, 0.6)):
+                cloud(w * fx, H - 14 + dy, k)
+            for fx, fy, r in ((0.31, 0.28, 5), (0.47, 0.22, 3.5), (0.63, 0.32, 4.5)):
+                star(w * fx, H * fy, r)
+            cv.create_text(20, H // 2 + 2, text='TR Plus Ultra', anchor='w', fill='#0b5aa8',
+                           font=('Segoe UI', 17, 'bold'), tags='bgd')
+            tid = cv.create_text(18, H // 2, text='TR Plus Ultra', anchor='w', fill='#ffffff',
+                                 font=('Segoe UI', 17, 'bold'), tags='bgd')
+            bb = cv.bbox(tid) or (0, 0, 190, 0)
+            cv.create_text(bb[2] + 10, H // 2 + 3, text='v%s' % APP_VERSION, anchor='w',
+                           fill='#eaf6ff', font=('Segoe UI', 9, 'bold'), tags='bgd')
+            cv.tag_lower('bgd')
+            x = w - 16
+            for wid, b in zip(wins, btns):
+                cv.coords(wid, x, H // 2)
+                x -= b.winfo_reqwidth() + 8
+        cv.bind('<Configure>', draw)
+        draw()
+
+    def toggle_theme(self):
+        """ปุ่ม 🎨 ธีม — สลับ TalesRunner (ฟ้า-ขาว) ↔ มืดแบบเดิม · เห็นผลหลังปิดเปิดโปรแกรม 1 ครั้ง"""
+        names = {'tr': 'TalesRunner (ฟ้า-ขาว)', 'dark': 'มืด (แบบเดิม)'}
+        cur = (self.prefs or {}).get('theme', THEME['name'])
+        new = 'dark' if cur == 'tr' else 'tr'
+        if not messagebox.askyesno(
+                '🎨  เปลี่ยนธีม',
+                'ตอนนี้: %s\nเปลี่ยนเป็น: %s ?\n\n'
+                'จะเห็นผลหลังปิดโปรแกรมแล้วเปิดใหม่ 1 ครั้ง\n'
+                '(เปลี่ยนแค่สีหน้าจอ — ถ้ามีงานค้างอยู่ ทำให้เสร็จก่อนค่อยปิดเปิด)'
+                % (names.get(cur, cur), names[new])):
+            return
+        self.prefs['theme'] = new
+        save_prefs(self.prefs)
+        messagebox.showinfo('🎨  เปลี่ยนธีม',
+                            'บันทึกแล้ว — ปิดโปรแกรมแล้วเปิดใหม่ จะเป็นธีม %s' % names[new])
+
+    def _tr_frame(self, w):
+        """กล่องมีหัวข้อที่ไม่ได้สร้างผ่าน _card — ธีม TR ให้เป็นกรอบฟ้าแบบเดียวกัน"""
+        if THEME['name'] == 'tr':
+            try:
+                w.config(bd=0, highlightthickness=1, highlightbackground=C['line'],
+                         highlightcolor=C['line'], fg=C['card_title'])
+            except Exception:
+                pass
+
+    def _theme_styles(self):
+        """ธีม TR: สีตาราง (หัวตารางฟ้า แถวที่เลือกสีเหลือง) + แถบเลื่อน — ธีมมืดไม่แตะอะไร"""
+        if THEME['name'] != 'tr':
+            return
+        try:
+            st = ttk.Style()
+            st.configure('TR.Treeview', background=C['input'], fieldbackground=C['input'],
+                         foreground=C['fg'])
+            st.configure('TR.Treeview.Heading', background=C['tv_head_bg'],
+                         foreground=C['tv_head_fg'], bordercolor=C['line'],
+                         lightcolor=C['tv_head_bg'], darkcolor=C['line'])
+            st.map('TR.Treeview.Heading', background=[('active', C['accent'])],
+                   foreground=[('active', '#ffffff')])
+            st.map('TR.Treeview', background=[('selected', C['tv_sel_bg'])],
+                   foreground=[('selected', C['tv_sel_fg'])])
+            st.configure('Horizontal.TProgressbar', background='#33c27a', troughcolor='#dcefff',
+                         bordercolor=C['line'], lightcolor='#6fe0a3', darkcolor='#1f9e5c')
+            for sb in ('Vertical.TScrollbar', 'Horizontal.TScrollbar'):
+                st.configure(sb, background='#9fd2f7', troughcolor=C['bg'], bordercolor=C['line'],
+                             arrowcolor=C['accent'], lightcolor='#c9e7fc', darkcolor=C['line'])
+                st.map(sb, background=[('active', '#6fbcf3')])
+        except Exception:
+            pass
 
     def _card(self, parent, title, grow=False):
-        outer = tk.LabelFrame(parent, text='  ' + title + '  ', bg=C['bg'], fg=C['dim'],
+        outer = tk.LabelFrame(parent, text='  ' + title + '  ', bg=C['bg'], fg=C['card_title'],
                               font=('Segoe UI', 9, 'bold'), bd=1,
                               relief='solid', highlightbackground=C['line'])
+        if THEME['name'] == 'tr':                   # ธีม TR: กล่องขาวกรอบฟ้า
+            outer.config(bd=0, highlightthickness=1, highlightcolor=C['line'])
         outer.pack(fill='both' if grow else 'x', expand=grow, padx=14, pady=(8, 0))
         inner = tk.Frame(outer, bg=C['bg'])
         inner.pack(fill='both' if grow else 'x', expand=grow, padx=12, pady=8)
@@ -5607,10 +5782,13 @@ class App:
                 b.config(width=width)
             return b
         b = tk.Button(parent, text=text, command=cmd, bd=0, cursor='hand2', font=FB if primary else FM,
-                      bg=C['accent'] if primary else C['input'],
-                      fg='white' if primary else C['fg'],
-                      activebackground='#3d55cf' if primary else C['line'],
+                      bg=C['accent'] if primary else C['btn2_bg'],
+                      fg='white' if primary else C['btn2_fg'],
+                      activebackground=C['accent_on'] if primary else C['btn2_act'],
                       activeforeground='white')
+        if C['btn2_line'] and not primary:          # ธีม TR: ปุ่มขาวมีกรอบฟ้า
+            b.config(highlightthickness=1, highlightbackground=C['btn2_line'],
+                     highlightcolor=C['accent'], activeforeground=C['btn2_fg'])
         if width:
             b.config(width=width)
         return b
@@ -5652,6 +5830,7 @@ class App:
         # ---- แผงรายการ (ซ่อนไว้ก่อน กางเมื่อกดปุ่ม) ----
         self.imp_box = tk.LabelFrame(p, text='  รายการที่จะค้นหา  ', bg=C['bg'], fg=C['dim'],
                                      font=('Segoe UI', 9, 'bold'), bd=1, relief='solid')
+        self._tr_frame(self.imp_box)
         ib = tk.Frame(self.imp_box, bg=C['bg'])
         ib.pack(fill='both', expand=True, padx=12, pady=10)
         ibar = tk.Frame(ib, bg=C['bg'])
@@ -5672,7 +5851,7 @@ class App:
                         ('trade', 'แลกเปลี่ยน', 95), ('qty', 'จำนวน', 70)):
             self.imp_tree.heading(c, text=t)
             self.imp_tree.column(c, width=w, anchor='w')
-        self.imp_tree.tag_configure('warn', background='#3a3018', foreground='#e3b341')
+        self.imp_tree.tag_configure('warn', background=C['row_warn_bg'], foreground=C['row_warn_fg'])
         isb = ttk.Scrollbar(itw, orient='vertical', command=self.imp_tree.yview)
         self.imp_tree.configure(yscrollcommand=isb.set)
         self.imp_tree.pack(side='left', fill='both', expand=True)
@@ -5751,8 +5930,8 @@ class App:
             self.tree.heading(c, text=t)
             self.tree.column(c, width=w, anchor='w')
         # ซ้ำ = เหลือง (ลำดับเดียวเจอหลายตัว ต้องเลือกเอง) · ไม่เจอ = แดง
-        self.tree.tag_configure('dup', background='#3a3018', foreground='#e3b341')
-        self.tree.tag_configure('miss', background='#3a1f1e', foreground='#f0736a')
+        self.tree.tag_configure('dup', background=C['row_warn_bg'], foreground=C['row_warn_fg'])
+        self.tree.tag_configure('miss', background=C['row_bad_bg'], foreground=C['row_bad_fg'])
         sb = ttk.Scrollbar(wrap, orient='vertical', command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side='left', fill='both', expand=True)
@@ -5774,8 +5953,10 @@ class App:
         self.c_running = False
         self.c_cancel = False
 
+        # ---------- ซ้าย = ค่าเริ่มต้น + คิว + ลงมือ · ขวา = ที่สร้างแล้ว (สูงเต็มแท็บ) ----------
+        self.c_split, c_left, c_right = self._split_lr(p, left_frac=0.55)
         # ---------- ค่าเริ่มต้นที่ใช้กับทุกแถว ----------
-        s1 = self._card(p, 'ค่าเริ่มต้น (ใช้ตอนนำเข้าไฟล์ — แก้รายตัวทีหลังได้)')
+        s1 = self._card(c_left, 'ค่าเริ่มต้น (ใช้ตอนนำเข้าไฟล์ — แก้รายตัวทีหลังได้)')
         self.cv_type = tk.StringVar(value=self.prefs.get('c_type', DEFAULT_TYPE))
         self.cv_suffix = tk.StringVar(value=self.prefs.get('c_suffix', DEFAULT_SUFFIX))
         self.cv_price = tk.StringVar(value=self.prefs.get('c_price', ''))
@@ -5792,13 +5973,14 @@ class App:
             e.config(textvariable=var)
             e.grid(row=0, column=col * 2 + 1, sticky='w', ipady=3)
 
-        tk.Label(s1, text='คำต่อท้ายกับ “(X วัน)” จะเติมให้เฉพาะชื่อที่มีคำว่า “ชิ้น” เท่านั้น — '
-                          'จำนวนชิ้นจะถูก “ตัดออกจากชื่อ” แต่ ชม. ยังอยู่ในชื่อเหมือนเดิม',
-                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), wraplength=940,
-                 justify='left').grid(row=1, column=0, columnspan=8, sticky='w', pady=(8, 0))
+        c_hint1 = tk.Label(s1, text='คำต่อท้ายกับ “(X วัน)” จะเติมให้เฉพาะชื่อที่มีคำว่า “ชิ้น” เท่านั้น — '
+                                    'จำนวนชิ้นจะถูก “ตัดออกจากชื่อ” แต่ ชม. ยังอยู่ในชื่อเหมือนเดิม',
+                           bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), wraplength=700,
+                           justify='left')
+        c_hint1.grid(row=1, column=0, columnspan=8, sticky='w', pady=(8, 0))
+        self._wrap_to(s1, c_hint1, pad=8)
 
-        # ---------- คิว + ลงมือ (ซ้าย) | ที่สร้างแล้ว (ขวา) ----------
-        self.c_split, c_left, c_right = self._split_lr(p, left_frac=0.55)
+        # ---------- คิว + ลงมือ (ซ้าย) ----------
         s2 = self._card(c_left, 'คิวไอเทมที่จะสร้าง', grow=True)
         bar = tk.Frame(s2, bg=C['bg'])
         bar.pack(fill='x')
@@ -5823,7 +6005,7 @@ class App:
                         ('img', 'รูป', 120)):
             self.c_tree.heading(c, text=t)
             self.c_tree.column(c, width=w, anchor='w')
-        self.c_tree.tag_configure('warn', background='#3a3018', foreground='#e3b341')
+        self.c_tree.tag_configure('warn', background=C['row_warn_bg'], foreground=C['row_warn_fg'])
         csb = ttk.Scrollbar(tw, orient='vertical', command=self.c_tree.yview)
         self.c_tree.configure(yscrollcommand=csb.set)
         self.c_tree.pack(side='left', fill='both', expand=True)
@@ -5889,7 +6071,7 @@ class App:
                         ('note', 'หมายเหตุ', 110)):
             self.tree_item.heading(c, text=t)
             self.tree_item.column(c, width=w, anchor='w', stretch=(c == 'note'))
-        self.tree_item.tag_configure('bad', background='#3a1f1e', foreground='#f0736a')
+        self.tree_item.tag_configure('bad', background=C['row_bad_bg'], foreground=C['row_bad_fg'])
         isb2 = ttk.Scrollbar(iw, orient='vertical', command=self.tree_item.yview)
         self.tree_item.configure(yscrollcommand=isb2.set)
         self.tree_item.pack(side='left', fill='both', expand=True)
@@ -7545,7 +7727,9 @@ class App:
         self._b_ed = None            # ช่องที่กำลังแก้ในตาราง
         self._b_next_job = None
 
-        s1 = self._card(p, 'นำเข้าจากไฟล์ต้นฉบับ')
+        # ---- ซ้าย = นำเข้า + บันเดิลที่จะสร้าง + ลงมือ · ขวา = Bundle ที่สร้างแล้ว (สูงเต็มแท็บ) ----
+        self.b_split, b_left, b_right = self._split_lr(p, left_frac=0.55)
+        s1 = self._card(b_left, 'นำเข้าจากไฟล์ต้นฉบับ')
         bar = tk.Frame(s1, bg=C['bg'])
         bar.pack(fill='x')
         self._btn(bar, '📂  นำเข้าไฟล์ต้นฉบับ (.xlsx)', self.b_import,
@@ -7566,14 +7750,15 @@ class App:
             side='left', padx=(8, 0), ipadx=8, ipady=3)
         self._btn(bar2, '⌃  หุบทั้งหมด', lambda: self._b_expand_all(False)).pack(
             side='left', padx=(8, 0), ipadx=8, ipady=3)
-        tk.Label(s1, text='คลิกช่อง “ใช้” เพื่อเลือก/ไม่เลือกบันเดิล · ดับเบิลคลิกช่องที่จะแก้ได้เลย '
-                          '(ชื่อบันเดิล · จำนวน · Tier · Aztek Item Id ในช่องรายละเอียด) · '
-                          'Enter = บันทึกแล้วไปแถวถัดไป · Esc = ยกเลิก',
-                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(
-            fill='x', pady=(8, 0))
+        b_hint1 = tk.Label(s1, text='คลิกช่อง “ใช้” เพื่อเลือก/ไม่เลือกบันเดิล · ดับเบิลคลิกช่องที่จะแก้ได้เลย '
+                                    '(ชื่อบันเดิล · จำนวน · Tier · Aztek Item Id ในช่องรายละเอียด) · '
+                                    'Enter = บันทึกแล้วไปแถวถัดไป · Esc = ยกเลิก',
+                           bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w',
+                           justify='left', wraplength=700)
+        b_hint1.pack(fill='x', pady=(8, 0))
+        self._wrap_to(s1, b_hint1, pad=8)
 
-        # ---- บันเดิลที่จะสร้าง + ลงมือ (ซ้าย) | Bundle ที่สร้างแล้ว (ขวา) ----
-        self.b_split, b_left, b_right = self._split_lr(p, left_frac=0.55)
+        # ---- บันเดิลที่จะสร้าง + ลงมือ (ซ้าย) ----
         s2 = self._card(b_left, 'บันเดิลที่จะสร้าง', grow=True)
         # ---- แถบแก้ไข: แก้ / เพิ่มไอเทม / ลบ / ตั้ง Tier ทีละหลายแถว ----
         eb = tk.Frame(s2, bg=C['bg'])
@@ -9033,6 +9218,7 @@ class App:
         # ---- แถบตั้งค่าที่เก็บ log ----
         box = tk.LabelFrame(p, text='  ที่เก็บบันทึกการใช้งาน  ', bg=C['bg'], fg=C['dim'],
                             font=('Segoe UI', 9, 'bold'), bd=1, relief='solid')
+        self._tr_frame(box)
         box.pack(fill='x', padx=14, pady=(12, 0))
         inner = tk.Frame(box, bg=C['bg'])
         inner.pack(fill='x', padx=12, pady=10)
@@ -9270,7 +9456,9 @@ class App:
         self.w_running = False
         self.w_cancel = False
 
-        s1 = self._card(p, 'นำเข้าจากไฟล์ต้นฉบับ')
+        # ---- ซ้าย = นำเข้า + คิว + ลงมือ · ขวา = Item Code ที่สร้างแล้ว (สูงเต็มแท็บ) ----
+        self.w_split, w_left, w_right = self._split_lr(p, left_frac=0.55)
+        s1 = self._card(w_left, 'นำเข้าจากไฟล์ต้นฉบับ')
         bar = tk.Frame(s1, bg=C['bg'])
         bar.pack(fill='x')
         self._btn(bar, '📂  นำเข้าไฟล์ต้นฉบับ (.xlsx)', self.w_import,
@@ -9283,15 +9471,16 @@ class App:
                                                      ipadx=8, ipady=4)
         self.w_count = tk.Label(bar, text='คิวว่าง', bg=C['bg'], fg=C['dim'], font=FM)
         self.w_count.pack(side='right')
-        tk.Label(s1, text=getattr(self, 'W_HINT', None) or (
-                     'อ่านเฉพาะชีทแบบ Master Code (มีแถว CODE) — '
-                     'ชีทบอก Limit เท่าไหร่ จะเผื่อให้อีก %d เสมอ  ·  '
-                     'ดับเบิลคลิกเพื่อแก้รายตัว' % WR_SPARE),
-                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w',
-                 justify='left').pack(fill='x', pady=(8, 0))
+        w_hint1 = tk.Label(s1, text=getattr(self, 'W_HINT', None) or (
+                               'อ่านเฉพาะชีทแบบ Master Code (มีแถว CODE) — '
+                               'ชีทบอก Limit เท่าไหร่ จะเผื่อให้อีก %d เสมอ  ·  '
+                               'ดับเบิลคลิกเพื่อแก้รายตัว' % WR_SPARE),
+                           bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w',
+                           justify='left', wraplength=700)
+        w_hint1.pack(fill='x', pady=(8, 0))
+        self._wrap_to(s1, w_hint1, pad=8)
 
-        # ---- คิว + ลงมือ (ซ้าย) | Item Code ที่สร้างแล้ว (ขวา) ----
-        self.w_split, w_left, w_right = self._split_lr(p, left_frac=0.55)
+        # ---- คิว + ลงมือ (ซ้าย) ----
         s2 = self._card(w_left, 'คิว Item Code ที่จะสร้าง', grow=True)
         tw = tk.Frame(s2, bg=C['bg'])
         tw.pack(fill='both', expand=True)
@@ -9301,9 +9490,9 @@ class App:
         for c, t, w in self.W_COLS:
             self.w_tree.heading(c, text=t)
             self.w_tree.column(c, width=w, anchor='w')
-        self.w_tree.tag_configure('warn', background='#3a3018', foreground='#e3b341')
-        self.w_tree.tag_configure('dup', background='#4a1c1c', foreground='#ff8a80')
-        self.w_tree.tag_configure('done', background='#1b2a44', foreground='#8fb3ff')
+        self.w_tree.tag_configure('warn', background=C['row_warn_bg'], foreground=C['row_warn_fg'])
+        self.w_tree.tag_configure('dup', background=C['row_dup2_bg'], foreground=C['row_dup2_fg'])
+        self.w_tree.tag_configure('done', background=C['row_done_bg'], foreground=C['row_done_fg'])
         wsb = ttk.Scrollbar(tw, orient='vertical', command=self.w_tree.yview)
         self.w_tree.configure(yscrollcommand=wsb.set)
         self.w_tree.pack(side='left', fill='both', expand=True)
@@ -9366,7 +9555,7 @@ class App:
                         ('at', 'เวลา', 80), ('note', 'หมายเหตุ', 130)):
             self.tree_code.heading(c, text=t)
             self.tree_code.column(c, width=w, anchor='w', stretch=(c == 'note'))
-        self.tree_code.tag_configure('bad', background='#3a1f1e', foreground='#f0736a')
+        self.tree_code.tag_configure('bad', background=C['row_bad_bg'], foreground=C['row_bad_fg'])
         csb2 = ttk.Scrollbar(iw, orient='vertical', command=self.tree_code.yview)
         self.tree_code.configure(yscrollcommand=csb2.set)
         self.tree_code.pack(side='left', fill='both', expand=True)
@@ -11659,7 +11848,7 @@ class OungTab:
             self.tree.column(c, width=w, minwidth=36, stretch=grow, anchor='w')
         for tag, kw in (('topic', {'foreground': C['fg'], 'font': FB}),
                         ('off', {'foreground': C['dim']}), ('ok', {'foreground': C['ok']}),
-                        ('warn', {'foreground': C['warn']}), ('dup', {'foreground': '#7aa2f7'}),
+                        ('warn', {'foreground': C['warn']}), ('dup', {'foreground': C['row_dup_fg']}),
                         ('bad', {'foreground': C['err']})):
             self.tree.tag_configure(tag, **kw)
         ys = ttk.Scrollbar(tw, orient='vertical', command=self.tree.yview)
@@ -13699,7 +13888,7 @@ class OungProductTab(OungTab):
         self.tree.column('use', anchor='center')
         for tag, kw in (('topic', {'foreground': C['fg'], 'font': FB}),
                         ('off', {'foreground': C['dim']}), ('ok', {'foreground': C['ok']}),
-                        ('warn', {'foreground': C['warn']}), ('dup', {'foreground': '#7aa2f7'}),
+                        ('warn', {'foreground': C['warn']}), ('dup', {'foreground': C['row_dup_fg']}),
                         ('bad', {'foreground': C['err']})):
             self.tree.tag_configure(tag, **kw)
         ys = ttk.Scrollbar(tw, orient='vertical', command=self.tree.yview)
@@ -15268,7 +15457,7 @@ class EvTab:
         for c, t, w in (('name', 'เซ็ตไอเทม', 168), ('bundle', 'Bundle', 50), ('st', 'สถานะ', 98)):
             self.tree.heading(c, text=t)
             self.tree.column(c, width=w, anchor='w', stretch=(c != 'bundle'))
-        self.tree.tag_configure('cur', background='#1d3557', foreground='white')
+        self.tree.tag_configure('cur', background=C['row_cur_bg'], foreground=C['row_cur_fg'])
         self.tree.tag_configure('done', foreground=C['ok'])
         self.tree.tag_configure('bad', foreground=C['err'])
         self.tree.tag_configure('warn', foreground=C['warn'])
@@ -15308,10 +15497,10 @@ class EvTab:
                 fill='x', padx=6, pady=(4, 0))
             tk.Label(f, text=how, bg=C['card'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(
                 fill='x', padx=6)
-            hold = tk.Frame(f, bg='#111', width=self.THUMB[0], height=self.THUMB[1])
+            hold = tk.Frame(f, bg=C['thumb_bg'], width=self.THUMB[0], height=self.THUMB[1])
             hold.pack_propagate(False)                # กล่องขนาดคงที่ (Label ที่มีแต่ตัวหนังสือ วัดเป็นตัวอักษร)
             hold.pack(padx=6, pady=4)
-            img = tk.Label(hold, bg='#111', text='—', fg=C['dim'], font=('Segoe UI', 8))
+            img = tk.Label(hold, bg=C['thumb_bg'], text='—', fg=C['dim'], font=('Segoe UI', 8))
             img.pack(fill='both', expand=True)
             info = tk.Label(f, text='—', bg=C['card'], fg=C['dim'], font=('Segoe UI', 8), anchor='w',
                             justify='left', wraplength=self.THUMB[0], height=2)
