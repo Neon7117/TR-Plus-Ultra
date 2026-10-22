@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.2.4 : สร้าง Item — ไอเทมชื่อเดียวกัน (ต่างแค่จำนวน/วัน) ใส่รูปครั้งเดียว แถวอื่นได้รูปเดียวกันเอง
 V1.2.3 : WR Master — เช็กชื่อ Bundle ต้องมีชื่อโค้ด ไม่ตรง = ไม่สร้าง + เด้งเตือน · คิวเตือนเลข Bundle ซ้ำหลายโค้ด
 V1.2.2 : หลักฐานเทส — เอา “ตรวจโดย <ชื่อผู้ใช้เครื่อง> <เวลา>” ออกจากภาพ
 V1.2.1 : หลักฐานเทส — นำเข้าแล้วเลือกชีทได้ (หน้าต่างเลือกชีทแบบแท็บสร้าง Bundle / WR) · อ่านเลข Bundle / ชื่อเซ็ตจากชีทจริงได้ดีขึ้น
@@ -2961,6 +2962,90 @@ def check_item_image(path):
     return True, '%s (%.0f KB)' % (os.path.basename(p), mb * 1024)
 
 
+def item_pic_key(d, suffix=DEFAULT_SUFFIX):
+    """ไอเทมชิ้นเดียวกันที่ต่างกันแค่ จำนวน / ระยะเวลา ใช้รูปเดียวกัน
+    กุญแจ = ชื่อฐาน: ตัด “N ชิ้น” · “(N วัน)” · คำต่อท้าย (Gift) ออก · ไม่สนเว้นวรรค/ตัวเล็กใหญ่
+    (ชั่วโมง / ขนาด / อย่างอื่นในชื่อยังอยู่ — “1 ชั่วโมง” กับ “2 ชั่วโมง” คนละไอเทม)"""
+    s = str(d.get('cname') or '').strip()
+    if not s:                                   # เพิ่มเอง = ไม่มีชื่อฐาน ใช้ชื่อที่จะกรอกลงเว็บ
+        s = str(d.get('name') or '').strip()
+        sfx = str(suffix or '').strip()
+        if sfx:
+            s = s.replace(sfx, ' ')
+    s = split_name_qty(s)[0]
+    s = re.sub(r'\(\s*\d+\s*วัน\s*\)', ' ', s)
+    return re.sub(r'\s+', ' ', s).strip().lower()
+
+
+def _same_file(a, b):
+    """ไฟล์เดียวกัน — path เดียวกัน หรือ เนื้อไฟล์เหมือนกันเป๊ะ
+    (โหลดรูปเดิมซ้ำแล้วได้ชื่อ “xxx (1).png” = รูปเดียวกัน ไม่ต้องเตือนว่ารูปไม่ตรง)"""
+    a, b = str(a or '').strip(), str(b or '').strip()
+    if not a or not b:
+        return False
+    if os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b)):
+        return True
+    try:
+        if os.path.getsize(a) != os.path.getsize(b):
+            return False
+        with open(a, 'rb') as fa, open(b, 'rb') as fb:
+            return fa.read() == fb.read()
+    except OSError:
+        return False
+
+
+def item_pic_fill(rows, suffix=DEFAULT_SUFFIX):
+    """ใส่รูปให้แถวที่ยังไม่มีรูป จากแถวชื่อเดียวกัน (ต่างแค่จำนวน/วัน) ที่มีรูปแล้ว
+    · เอาแค่รูปที่ใช้ได้จริง · ชื่อเดียวกันแต่มีรูปหลายไฟล์ = ไม่เดา ไม่ทับ (คืนไปให้เตือน)
+    · แถวที่คนกด “เอารูปออก” เอง (img_off) ไม่ใส่ให้
+    คืน (filled, conflicts)
+      filled    = [(แถวที่ได้รูป, แถวต้นทาง), ...]  (เลขแถวเริ่ม 0)
+      conflicts = [[(แถว, ไฟล์), ...], ...]        ชื่อเดียวกันแต่รูปคนละไฟล์"""
+    groups = {}
+    for i, d in enumerate(rows):
+        k = item_pic_key(d, suffix)
+        if k:
+            groups.setdefault(k, []).append(i)
+    filled, conflicts = [], []
+    for idx in groups.values():
+        if len(idx) < 2:
+            continue
+        pics = []
+        for i in idx:
+            p = str(rows[i].get('img') or '').strip()
+            if p and check_item_image(p)[0] and not any(_same_file(p, q) for _, q in pics):
+                pics.append((i, p))
+        if len(pics) > 1:
+            conflicts.append([(i, str(rows[i].get('img') or '').strip()) for i in idx
+                              if str(rows[i].get('img') or '').strip()])
+            continue
+        if not pics:
+            continue
+        src, p = pics[0]
+        for i in idx:
+            d = rows[i]
+            if not str(d.get('img') or '').strip() and not d.get('img_off'):
+                d['img'] = p
+                filled.append((i, src))
+    return filled, conflicts
+
+
+def item_pic_share(rows, i, old, suffix=DEFAULT_SUFFIX):
+    """แถว i เปลี่ยนรูป (old -> รูปใหม่) — แถวชื่อเดียวกันที่ใช้รูปเดิมร่วมกันอยู่ เปลี่ยนตาม
+    แถวที่ใส่รูปอื่นไว้เองไม่แตะ · คืนเลขแถวที่เปลี่ยนตาม"""
+    new = str(rows[i].get('img') or '').strip()
+    if not new or not str(old or '').strip() or _same_file(new, old):
+        return []
+    k = item_pic_key(rows[i], suffix)
+    out = []
+    for j, d in enumerate(rows):
+        if j != i and k and item_pic_key(d, suffix) == k and _same_file(d.get('img'), old):
+            d['img'] = new
+            d.pop('img_off', None)
+            out.append(j)
+    return out
+
+
 def make_item_name(cname, suffix='', dur=''):
     """ประกอบชื่อที่จะกรอกลงเว็บ: <ชื่อ> <คำต่อท้าย> (<X> วัน)
 
@@ -5739,7 +5824,50 @@ class App:
         self.c_warn.config(text=('⚠  แถว #%d : %s' % (i + 1, ' · '.join(w))) if w else '',
                            fg=C['warn'])
 
+    def _c_pic_sfx(self):
+        try:
+            return self.cv_suffix.get().strip()
+        except Exception:
+            return DEFAULT_SUFFIX
+
+    def _c_pic_after_edit(self, i, old):
+        """หลังกดบันทึกในหน้าแก้ไข: เปลี่ยนรูป = แถวชื่อเดียวกันที่ใช้รูปเดิมร่วมกันเปลี่ยนตาม
+        กด “เอารูปออก” เอง = จำไว้ ไม่ใส่รูปให้แถวนี้อัตโนมัติอีก"""
+        d = self.cq[i]
+        new = str(d.get('img') or '').strip()
+        if str(old or '').strip() and not new:
+            d['img_off'] = True
+        elif new:
+            d.pop('img_off', None)
+        moved = item_pic_share(self.cq, i, old, self._c_pic_sfx())
+        self._c_pic_moved = [(j, i) for j in moved]
+
+    def _c_pic_text(self, filled, conflicts):
+        """ข้อความใต้ตาราง: ใส่รูปให้แถวไหนบ้าง · ชื่อเดียวกันแต่รูปไม่ตรงกัน"""
+        out = []
+        if filled:
+            seen, parts = set(), []
+            for j, src in filled:
+                if j in seen:
+                    continue
+                seen.add(j)
+                parts.append('#%d ← #%d' % (j + 1, src + 1))
+            out.append('🖼  ใส่รูปให้ไอเทมชื่อเดียวกัน (ต่างแค่จำนวน/วัน) อีก %d แถว: %s'
+                       % (len(seen), ' · '.join(parts[:10]) + (' …' if len(parts) > 10 else '')))
+        for grp in conflicts[:3]:
+            nm = self.cq[grp[0][0]].get('cname') or self.cq[grp[0][0]].get('name') or ''
+            out.append('⚠  “%s” ชื่อเดียวกันแต่รูปคนละไฟล์ — ไม่ทับให้ เช็กเองนะ: %s'
+                       % (nm[:40], ' · '.join('#%d %s' % (r + 1, os.path.basename(p))
+                                              for r, p in grp[:4])))
+        if len(conflicts) > 3:
+            out.append('⚠  …และอีก %d ชื่อที่รูปไม่ตรงกัน' % (len(conflicts) - 3))
+        return '\n'.join(out)
+
     def _c_refresh(self):
+        # ไอเทมชื่อเดียวกัน (ต่างแค่จำนวน/วัน) ใช้รูปเดียวกัน — ใส่รูปให้แถวที่ยังว่าง
+        pic_filled, pic_conf = item_pic_fill(self.cq, self._c_pic_sfx())
+        pic_filled = list(getattr(self, '_c_pic_moved', None) or []) + pic_filled
+        self._c_pic_moved = []
         # คิดใหม่ทุกครั้ง — แก้ ItemKind หรือชื่อแล้วคำเตือนจะหายไปเอง
         nwarn = mark_suspects(self.cq)
         self.c_tree.delete(*self.c_tree.get_children())
@@ -5754,6 +5882,16 @@ class App:
             text=(f'⚠  มี {nwarn} แถวหน้าตาไม่เหมือนไอเทมทั่วไป (สีเหลือง) — '
                   'คลิกที่แถวเพื่อดูเหตุผล · ดับเบิลคลิกเพื่อแก้ · ไม่เอาก็ลบออกจากคิวได้'
                   if nwarn else ''), fg=C['warn'])
+        pic_txt = self._c_pic_text(pic_filled, pic_conf)
+        if pic_txt:
+            cur = (f'⚠  มี {nwarn} แถวหน้าตาไม่เหมือนไอเทมทั่วไป (สีเหลือง) — '
+                   'คลิกที่แถวเพื่อดูเหตุผล · ดับเบิลคลิกเพื่อแก้ · ไม่เอาก็ลบออกจากคิวได้'
+                   if nwarn else '')
+            self.c_warn.config(text=(cur + '\n' if cur else '') + pic_txt,
+                               fg=C['warn'] if (nwarn or pic_conf) else C['ok'])
+        if pic_filled:
+            self.log('🖼 ใส่รูปให้ไอเทมชื่อเดียวกันอัตโนมัติ %d แถว'
+                     % len({j for j, _ in pic_filled}), 'INFO')
 
     @staticmethod
     def _c_img_cell(d):
@@ -5812,8 +5950,10 @@ class App:
         if i is None:
             return messagebox.showinfo('แก้ไข', 'เลือกแถวในคิวก่อนนะ')
         d = dict(self.cq[i])
+        old_img = str(self.cq[i].get('img') or '')
         if self._c_form(d, f'แก้ไขไอเทม #{i + 1}'):
             self.cq[i] = d
+            self._c_pic_after_edit(i, old_img)
             self._c_refresh()
 
     def c_del(self):
