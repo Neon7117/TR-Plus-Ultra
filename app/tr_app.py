@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.3.2 : Item Code — ชีทที่เขียนป้าย “Itemcode” = Fix Codes ใช้โค้ดในชีท (เดิมอ่านเป็นสุ่ม) · วันเริ่มจาก “ไลฟ์สตรีม” · Bundle ในแถวหัวตาราง · ชื่อโค้ด Fix ต่อท้าย CODE
 V1.3.1 : สร้าง Item / ค้นหา — จำนวนบนเว็บ = ชิ้นในชื่อ × Amt (3 ชิ้น Amt 2 = 6) · fdItemNum เดียวกันแต่ Amt ต่างกัน = คนละไอเทม ไม่ตัดทิ้ง
 V1.3.0 : หลักฐานเทส — 1 เซ็ตแคปกี่ภาพก็ได้ (ไม่ล็อก 4 ช่อง ไม่แบ่งหมวด ไม่ตัดภาพ) · ภาพรวมจัดเรียงให้เองเป็นระเบียบ มีเลขภาพกำกับ
 V1.2.9 : ธีม TR — แยกสีตามหน้าที่: แท็บน้ำเงินเข้ม · หัวตารางฟ้าอ่อน · ปุ่มหลักส้ม · ⏱ม่วง · ↺เขียว · ปุ่มรองมีกรอบ (เปลี่ยนแค่สี)
@@ -4147,6 +4148,11 @@ _GEN_COUNT = re.compile(r'(?:โค้ด|code)\s*จำนวน\s*([\d,]+)|จ
                         re.I)
 _GEN_START = ('วันเริ่ม', 'วันที่เริ่ม', 'เริ่ม', 'start', 'start date', 'เริ่มใช้งาน')
 _GEN_END = ('หมดอายุ', 'วันหมดอายุ', 'สิ้นสุด', 'วันสิ้นสุด', 'end', 'end date', 'expire')
+# v1.3.2 ชีท Master Code ไลฟ์ (K-champion Watch Party): ป้ายโค้ดเขียนว่า “Itemcode” · วันเริ่มเขียนว่า “ไลฟ์สตรีม”
+_GEN_CODE_LBL = ('code', 'mastercode', 'โค้ด', 'itemcode')          # เทียบแบบตัดเว้นวรรค
+_GEN_CODE_NOT = ('random', 'unique', 'uniquecode', 'server', 'servergenerate', 'generate', 'auto', 'fix',
+                 'fixcode', 'fixcodes')                              # คำในช่องที่ไม่ใช่ตัวโค้ด
+_GEN_LIVE = ('ไลฟ์สตรีม', 'ไลฟ์', 'วันไลฟ์', 'live', 'livestream', 'live stream')   # ใช้เมื่อไม่มีป้าย “เริ่ม”
 _MONTH_WORDS = {m.lower() for m in _WR_MONTH} | {
     'january', 'february', 'march', 'april', 'june', 'july', 'august', 'september',
     'october', 'november', 'december', 'sept'}
@@ -4210,12 +4216,14 @@ def parse_gen_sheet(rows, sheet_name):
         # มีช่อง CODE (ป้าย "CODE" + โค้ดข้างๆ/ข้างล่าง) = Fix Codes ใช้โค้ดนั้น
         # ไม่มี = โค้ดสุ่ม เว็บเจนให้เอง (unique code)
         fixcode = ''
-        for r, c, t in texts + [(r, c, clean_text(cell(r, c))) for r in range(r0, hr)
-                                 for c in range(len(rows[r] or []))]:
-            if t.lower().rstrip(':') in ('code', 'master code', 'โค้ด'):
+        above = [(r, c, clean_text(cell(r, c))) for r in range(r0, hr) for c in range(len(rows[r] or []))]
+        #   v1.3.2: ดูเหนือหัวตารางก่อน (กล่องโค้ดอยู่เหนือตาราง) กันไปหยิบโค้ดของตารางถัดไป
+        for r, c, t in above + [x for x in texts if x[0] >= hr]:
+            if re.sub(r'\s+', '', t.lower()).rstrip(':') in _GEN_CODE_LBL:
                 for rr, cc in ((r, c + 1), (r, c + 2), (r + 1, c)):
                     v = clean_text(cell(rr, cc))
-                    if v and src_int(v) is None and re.fullmatch(r'[A-Za-z0-9_\-]{4,40}', v):
+                    if v and src_int(v) is None and re.fullmatch(r'[A-Za-z0-9_\-]{4,40}', v) \
+                            and re.sub(r'[\s_\-]+', '', v.lower()) not in _GEN_CODE_NOT:
                         fixcode = v
                         break
             if fixcode:
@@ -4238,6 +4246,16 @@ def parse_gen_sheet(rows, sheet_name):
             return None, None, None
         sy, sr, sc = find(_GEN_START)
         ey, er, ec = find(_GEN_END)
+        if not sy:                    # v1.3.2: ไม่มีป้าย “เริ่ม” แต่มี “ไลฟ์สตรีม <วันที่>” = เริ่มวันไลฟ์ 00:00:00
+            for r, c, t in above + texts:
+                if t.lower().rstrip(':').strip() in _GEN_LIVE:
+                    for rr, cc in ((r, c + 1), (r, c + 2), (r + 1, c)):
+                        ymd = wr_date(cell(rr, cc))
+                        if ymd:
+                            sy, sr, sc = ymd, rr, cc
+                            break
+                if sy:
+                    break
         st = en = None
         if sy:
             stop = ec if (er == sr and ec is not None and ec > sc) else sc + 2
@@ -4274,6 +4292,14 @@ def parse_gen_sheet(rows, sheet_name):
                         if best is None or k < best[0]:
                             best = (k, b)
             bid = best[1] if best else ''
+        if not bid:                    # v1.3.2: เลข Bundle อยู่แถวหัวตาราง ซ้ายหัวรางวัล — 4958 | 100฿ | fdItemNum
+            tc = next((c for c in range(kindc - 1, -1, -1) if clean_text(cell(hr, c))), None)
+            if tc is not None and src_int(clean_text(cell(hr, tc))) is None:   # ช่องติด fdItemNum = หัวรางวัล (ข้อความ)
+                for c in range(tc - 1, -1, -1):
+                    b = src_int(cell(hr, c))
+                    if b:
+                        bid = b
+                        break
 
         # ---- หัวรางวัล (เช่น "1200บาท") = ช่องหัวตารางหน้า fdItemNum ----
         title = ''
@@ -4284,6 +4310,8 @@ def parse_gen_sheet(rows, sheet_name):
                 break
         n = len(out) + 1
         name = (sheet_name + (' ' + title if title else ' #%d' % n)).strip()
+        if fixcode:                    # v1.3.2: โค้ด Fix ต่อท้ายด้วย CODE — ชื่อไม่ซ้ำ หาบนเว็บง่าย
+            name = ' '.join(x for x in (sheet_name, title, fixcode) if x)
         slug = gen_slug(sheet_name, sy, n)
         cap = str(cnt + GEN_SPARE)
         d = {'kind': 'gen', 'code': fixcode, 'slug': slug, 'name': name, 'title': title,
@@ -5141,6 +5169,20 @@ def run_logic_tests():
                 [('127892', '6', '6'), ('121387', '2', '2'), ('127892', '12', '12')],
                 'Amt: 3 ชิ้น × Amt 2 = 6 · × Amt 4 = 12 (คนละไอเทม) · Amt เดียวกันซ้ำ = ตัดเหลือตัวเดียว',
                 [(x['kind'], x['qty']) for x in ga]))
+
+    # ---- Item Code (v1.3.2): ป้าย “Itemcode” = Fix Codes · “ไลฟ์สตรีม” = วันเริ่ม · Bundle แถวหัวตาราง ----
+    gi = [[None, 'Itemcode', 'THAIPOONPOON', None, None, 'ไลฟ์สตรีม', datetime(2026, 11, 1)],
+          [None, 'รางวัล', None, None, None, 'วันหมดอายุ', datetime(2026, 11, 3), '23:59 น.'],
+          [4958, '100฿', 'fdItemNum', 'Display Name', 'Amt', 'เติมซ้ำไม่ได้'],
+          [None, 2714, 129706, 'กล่องแดชจัมพ์ 3 ชิ้น', 1, 'จำนวน 100 โค้ด']]
+    gc = parse_gen_sheet(gi, 'ทดสอบ')[0]
+    gd = gc[0] if gc else {}
+    r.append(_t(len(gc) == 1 and gd.get('code') == 'THAIPOONPOON' and gd.get('code_type') == 'Fix Codes'
+                and gd.get('start') == '2026-11-01 00:00:00' and gd.get('end') == '2026-11-03 23:59:59'
+                and gd.get('bundle') == '4958' and gd.get('name') == 'ทดสอบ 100฿ THAIPOONPOON'
+                and gd.get('cap') == '102' and gd.get('per_user') == '1',
+                'Item Code: ป้าย Itemcode = Fix Codes ใช้โค้ดในชีท · วันเริ่มจากไลฟ์สตรีม · Bundle ในแถวหัวตาราง',
+                {k: gd.get(k) for k in ('code', 'code_type', 'start', 'bundle', 'name')}))
 
     # ---- เงื่อนไข deep check ----
     item7 = {'duration': '7', 'trade': False, 'qty': '10'}
