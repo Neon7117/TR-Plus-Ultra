@@ -3,8 +3,9 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.5.2 : แท็บ 🛍 สร้าง Product — คำบนหน้าจอไม่ผูกกับชีทตัวอย่าง (ไฟล์ไหน ชีทไหนก็ได้ที่มีกล่อง Product) · อ่านป้ายได้หลายแบบขึ้น
 V1.5.1 : ย้ายแท็บ 🛍 สร้าง Product ไปอยู่ถัดจาก 📦 สร้าง Bundle (ใช้งานต่อกัน)
-V1.5.0 : แท็บใหม่ 🛍 สร้าง Product (Main Shop · Fame Shop) จากชีท 💰 Web Shop — หมวดหมู่ · ชื่อ · รูป · Dream Point · Bundle · เวลาขาย · จำกัดการซื้อ · ↺ รีเซ็ตเวลาเริ่มขาย
+V1.5.0 : แท็บใหม่ 🛍 สร้าง Product (Main Shop · Fame Shop) จากชีทที่มีกล่อง Product (ไฟล์ไหน ชีทไหนก็ได้) — หมวดหมู่ · ชื่อ · รูป · Dream Point · Bundle · เวลาขาย · จำกัดการซื้อ · ↺ รีเซ็ตเวลาเริ่มขาย
 V1.4.0 : ตรวจก่อนเริ่ม (สร้าง Item · ค้นหา · Bundle · WR Master · Item Code) — ⛔ น่าจะผิด = แถวแดง + Log + เด้งถามก่อนเริ่ม · ⚠ ควรเช็ก = แถวเหลือง + Log
 V1.3.3 : สร้าง Item / ค้นหา / หลักฐานเทส — ช่องระยะเวลาเขียนเลขเปล่าๆ (30) = 30 วัน (เดิมนับเป็นถาวร) · ถาวรต้องเขียนว่าถาวร
 V1.3.2 : Item Code — ชีทที่เขียนป้าย “Itemcode” = Fix Codes ใช้โค้ดในชีท (เดิมอ่านเป็นสุ่ม) · วันเริ่มจาก “ไลฟ์สตรีม” · Bundle ในแถวหัวตาราง · ชื่อโค้ด Fix ต่อท้าย CODE
@@ -16879,7 +16880,7 @@ class EvImportDialog(BundleImportDialog):
 # ============================================================================
 #  [12] แท็บ "🛍 สร้าง Product" (Main Shop / Fame Shop) — ของใหม่ทั้งก้อน (v1.5.0) ไม่แตะของเดิม
 #
-#      ชีท 💰 Web Shop: 1 Product = 1 กล่องป้าย (อ่านจากป้ายข้อความทั้งหมด ไม่ยึดตำแหน่ง)
+#      ชีทไหน ไฟล์ไหนก็ได้ที่มีกล่องป้ายแบบนี้: 1 Product = 1 กล่อง (อ่านจากป้ายข้อความทั้งหมด ไม่ยึดตำแหน่ง/ชื่อชีท)
 #         Category     | <หมวด>                THB         | <บาท>
 #         Product Name | <ชื่อแพ็ก>            Dream Point | <ราคา>    (Fame Shop: Fame Point)
 #         Start        | 30/10/2026 12:00น.    Limit       | 1 ครั้ง ต่อไอดี
@@ -16905,14 +16906,18 @@ SHOP_PIC_SLOT = 'Thumbnail'
 SHOP_LANGS = ('ไทย', 'English')
 SHOP_KEEP = 300                  # เก็บประวัติ Product ที่สร้างแล้วกี่แถวล่าสุด
 _SHOP_LBL = {
-    'productname': 'name', 'ชื่อสินค้า': 'name', 'ชื่อproduct': 'name',
-    'category': 'cat', 'หมวดหมู่': 'cat',
-    'start': 'start', 'เวลาเริ่มขาย': 'start', 'วันเริ่มขาย': 'start', 'startdate': 'start',
-    'end': 'end', 'เวลาหยุดขาย': 'end', 'วันหยุดขาย': 'end', 'enddate': 'end',
-    'limit': 'limit', 'จำกัดการซื้อ': 'limit', 'ลิมิต': 'limit',
+    'productname': 'name', 'ชื่อสินค้า': 'name', 'ชื่อproduct': 'name', 'ชื่อแพ็ก': 'name', 'ชื่อแพ็กเกจ': 'name',
+    'packname': 'name', 'packagename': 'name',
+    'category': 'cat', 'หมวดหมู่': 'cat', 'หมวด': 'cat',
+    'start': 'start', 'เวลาเริ่มขาย': 'start', 'วันเริ่มขาย': 'start', 'startdate': 'start', 'starttime': 'start',
+    'เริ่มขาย': 'start', 'วันเริ่ม': 'start',
+    'end': 'end', 'เวลาหยุดขาย': 'end', 'วันหยุดขาย': 'end', 'enddate': 'end', 'endtime': 'end',
+    'หยุดขาย': 'end', 'วันสิ้นสุด': 'end', 'สิ้นสุด': 'end',
+    'limit': 'limit', 'จำกัดการซื้อ': 'limit', 'ลิมิต': 'limit', 'จำกัด': 'limit',
     'reset': 'reset', 'รีเซ็ต': 'reset',
-    'thb': 'thb',
-    'dreampoint': 'dp', 'famepoint': 'fp',
+    'thb': 'thb', 'บาท': 'thb', 'ราคาบาท': 'thb',
+    'dreampoint': 'dp', 'dreampoints': 'dp', 'dp': 'dp', 'ดรีมพอยต์': 'dp', 'ดรีมพอยท์': 'dp',
+    'famepoint': 'fp', 'famepoints': 'fp', 'fp': 'fp', 'เฟมพอยต์': 'fp', 'เฟมพอยท์': 'fp',
     'ราคาเต็ม': 'full', 'fullprice': 'full', 'ราคาปกติ': 'full', 'ราคาก่อนลด': 'full',
     'originalprice': 'full',
     'bundle': 'bundle', 'bundleid': 'bundle', 'เลขbundle': 'bundle', 'bundleno': 'bundle',
@@ -17966,7 +17971,7 @@ class ShopImportDialog(BundleImportDialog):
 
 
 class ShopTab:
-    """แท็บ 🛍 สร้าง Product — Main Shop (Fame Shop เผื่อไว้) จากชีท 💰 Web Shop · ของใหม่ทั้งก้อน
+    """แท็บ 🛍 สร้าง Product — Main Shop (Fame Shop เผื่อไว้) จากชีทที่มีกล่อง Product (ไฟล์ไหนก็ได้) · ของใหม่ทั้งก้อน
     ใช้ Chrome ตัวเดียวกับแท็บอื่น (ตอนทำงานตั้ง b_running ไว้กันแท็บอื่นเปิดชน เหมือนแท็บ Oung › สร้าง Product)"""
     COLS = (('use', 'ใช้', 40), ('n', '#', 34), ('name', 'ชื่อสินค้า', 220), ('cat', 'หมวดหมู่บนเว็บ', 170),
             ('price', 'ราคา', 116), ('bundle', 'Bundle', 64), ('limit', 'จำกัดการซื้อ', 96),
@@ -18018,7 +18023,7 @@ class ShopTab:
         rb = dict(bg=C['bg'], fg=C['fg'], selectcolor=C['input'], activebackground=C['bg'],
                   activeforeground=C['fg'], font=FM, bd=0, highlightthickness=0)
 
-        s1 = a._card(left, '1) ชีท 💰 Web Shop — เลือกชีทที่จะสร้าง Product')
+        s1 = a._card(left, '1) นำเข้าจากไฟล์ต้นฉบับ — เลือกชีทที่มี Product (เลือกได้หลายชีท)')
         bar = tk.Frame(s1, bg=C['bg'])
         bar.pack(fill='x')
         a._btn(bar, '📂  นำเข้าไฟล์ชีท (.xlsx)', self.open_file, primary=True).pack(
@@ -18225,7 +18230,7 @@ class ShopTab:
             return messagebox.showinfo('กำลังทำงาน', 'รอให้งานเสร็จก่อนนะ')
         f0 = self.st.get('file') or ''
         path = filedialog.askopenfilename(
-            title='เลือกไฟล์ชีท (Monthly Plan / Web Shop)',
+            title='เลือกไฟล์ต้นฉบับ (.xlsx)',
             initialdir=os.path.dirname(f0) if f0 and os.path.isdir(os.path.dirname(f0)) else None,
             filetypes=[('Excel', '*.xlsx *.xlsm'), ('ทุกไฟล์', '*.*')])
         if not path:
@@ -18369,7 +18374,7 @@ class ShopTab:
             self.lbl_file.config(text='📄 %s  ·  ชีท: %s' % (os.path.basename(f), ', '.join(
                 clean_text(s) or s for s in self.st.get('sheets') or []) or '—'), fg=C['fg'])
         else:
-            self.lbl_file.config(text='ยังไม่ได้นำเข้าไฟล์ชีท — กด “📂 นำเข้าไฟล์ชีท” แล้วเลือกชีท 💰 Web Shop',
+            self.lbl_file.config(text='ยังไม่ได้นำเข้าไฟล์ — กด “📂 นำเข้าไฟล์ชีท” แล้วเลือกชีทที่มี Product (ไฟล์ไหนก็ได้)',
                                  fg=C['dim'])
         if rows:
             txt = 'ทั้งหมด %d · ติ๊กไว้ %d' % (len(rows), n['use'])
@@ -18888,7 +18893,7 @@ class ShopTab:
 
     def help(self):
         messagebox.showinfo('วิธีใช้ — 🛍 สร้าง Product', (
-            '1) 📂 นำเข้าไฟล์ชีท → เลือกชีท 💰 Web Shop (เลือกได้หลายชีท)\n'
+            '1) 📂 นำเข้าไฟล์ชีท → เลือกชีทที่มี Product (ชีทที่ขึ้น ★ · เลือกได้หลายชีท · ไฟล์ไหนก็ได้)\n'
             '2) ตรวจตาราง: แถวแดง ⛔ = น่าจะผิด · เหลือง ⚠ = ควรเช็ก · คลิกแถวดูรายละเอียด\n'
             '   ไม่มีเลข Bundle → ดับเบิลคลิกพิมพ์เอง หรือกด 🔗 (ถ้าเพิ่งสร้าง Bundle ในแท็บสร้าง Bundle)\n'
             '   อยากใส่รูป → เลือกแถว แล้วกด 🖼 เลือกรูป (ไม่มีรูปก็สร้างได้)\n'
