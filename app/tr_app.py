@@ -3,6 +3,8 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.4.0 : ตรวจก่อนเริ่ม (สร้าง Item · ค้นหา · Bundle · WR Master · Item Code) — ⛔ น่าจะผิด = แถวแดง + Log + เด้งถามก่อนเริ่ม · ⚠ ควรเช็ก = แถวเหลือง + Log
+V1.3.3 : สร้าง Item / ค้นหา / หลักฐานเทส — ช่องระยะเวลาเขียนเลขเปล่าๆ (30) = 30 วัน (เดิมนับเป็นถาวร) · ถาวรต้องเขียนว่าถาวร
 V1.3.2 : Item Code — ชีทที่เขียนป้าย “Itemcode” = Fix Codes ใช้โค้ดในชีท (เดิมอ่านเป็นสุ่ม) · วันเริ่มจาก “ไลฟ์สตรีม” · Bundle ในแถวหัวตาราง · ชื่อโค้ด Fix ต่อท้าย CODE
 V1.3.1 : สร้าง Item / ค้นหา — จำนวนบนเว็บ = ชิ้นในชื่อ × Amt (3 ชิ้น Amt 2 = 6) · fdItemNum เดียวกันแต่ Amt ต่างกัน = คนละไอเทม ไม่ตัดทิ้ง
 V1.3.0 : หลักฐานเทส — 1 เซ็ตแคปกี่ภาพก็ได้ (ไม่ล็อก 4 ช่อง ไม่แบ่งหมวด ไม่ตัดภาพ) · ภาพรวมจัดเรียงให้เองเป็นระเบียบ มีเลขภาพกำกับ
@@ -2959,11 +2961,14 @@ def suspect_reasons(r, mode_len=0):
     nm = str(r.get('raw') or r.get('name') or r.get('disp') or '')
     if len(nm) > MAX_SANE_NAME:
         out.append('ชื่อยาวผิดปกติ (%d ตัวอักษร) อาจเป็นข้อความโน้ตในชีท' % len(nm))
-    if r.get('move_bad'):
-        out.append('Itemmove = “%s” ไม่รู้จัก (รู้จักแค่ Storage/Gift/Yes/No) — ตัวนี้ไม่กรองแลกเปลี่ยน'
-                   % r.get('move_raw', ''))
-    if r.get('amt_raw'):
-        out.append('Amt = “%s” อ่านเป็นตัวเลขไม่ได้ — คิดเป็น 1 (เช็กในชีทก่อนนะ)' % r.get('amt_raw'))
+    if 'chk' not in r:                 # แถวแบบเก่า (ไม่มีผลตรวจ v1.4.0) — เตือนแบบเดิม
+        if r.get('move_bad'):
+            out.append('Itemmove = “%s” ไม่รู้จัก (รู้จักแค่ Storage/Gift/Yes/No) — ตัวนี้ไม่กรองแลกเปลี่ยน'
+                       % r.get('move_raw', ''))
+        if r.get('amt_raw'):
+            out.append('Amt = “%s” อ่านเป็นตัวเลขไม่ได้ — คิดเป็น 1 (เช็กในชีทก่อนนะ)' % r.get('amt_raw'))
+    for c in chk_active(r):            # v1.4.0 ข้อสงสัยจากตอนอ่านชีท (⛔ = น่าจะผิด)
+        out.append(('⛔ ' if c['lv'] == 'stop' else '') + c['msg'])
     return out
 
 
@@ -3136,7 +3141,7 @@ def row_to_item(r, type_name=DEFAULT_TYPE, suffix=DEFAULT_SUFFIX, price='', mail
         name = make_item_name(cname, suffix, r.get('dur', ''))
     else:
         name = cname          # ชื่อไม่มี 'ชิ้น' -> ไม่เติมอะไรเลย
-    return {
+    d = {
         'kind': r.get('kind', ''),
         'name': name,
         'cname': cname,
@@ -3150,6 +3155,9 @@ def row_to_item(r, type_name=DEFAULT_TYPE, suffix=DEFAULT_SUFFIX, price='', mail
         'web': True,
         'img': '',            # รูปไอเทม — ไฟล์ต้นฉบับไม่มีรูป ต้องเลือกเองในหน้าแก้ไข
     }
+    if r.get('chk'):          # v1.4.0 ผลตรวจติดไปกับคิวด้วย — ผูกกับค่าของไอเทม (แก้ช่องนั้นแล้วหายเอง)
+        d['chk'] = [dict(c, v=(d.get(c['f']) if c.get('f') in d else c.get('v'))) for c in chk_active(r)]
+    return d
 
 
 def miss_to_item(r, type_name=DEFAULT_TYPE, suffix=DEFAULT_SUFFIX, price='', mail=''):
@@ -3166,6 +3174,106 @@ def miss_to_item(r, type_name=DEFAULT_TYPE, suffix=DEFAULT_SUFFIX, price='', mai
     if not src.get('kind'):
         src['kind'] = r.get('kind') or r.get('req') or ''
     return row_to_item(src, type_name, suffix, price, mail)
+
+
+# ============================================================================
+#  [5.3.9] ตรวจข้อมูลก่อนเริ่มทำงาน (v1.4.0) — ผู้ใช้: “อยากให้ tools ตรวจสอบแบบที่เธอทำ … แจ้งใน log
+#          หรือควรมีแจ้งเตือน popup” · เลือกแบบ 2 ระดับ
+#     ⛔ stop = น่าจะผิด  → แถวแดง + Log + เด้งถามก่อนกดเริ่ม (กลับไปแก้ / ข้ามตัวที่มีปัญหา / ทำต่อทั้งหมด)
+#     ⚠ warn = ควรเช็ก   → แถวเหลือง + Log เฉยๆ ไม่เด้ง
+#  ตรวจเฉยๆ ไม่เปลี่ยนค่าที่อ่านจากชีท · ข้อสงสัยผูกกับ “ค่าตอนตรวจ” (f, v) — แก้ช่องนั้นในคิวแล้วคำเตือนหายเอง
+# ============================================================================
+def chk_new(lv, msg, f=None, v=None):
+    return {'lv': lv, 'msg': msg, 'f': f, 'v': v}
+
+
+def chk_active(d):
+    """ข้อสงสัยที่ยังใช้อยู่ (ช่องที่ผูกไว้ยังเป็นค่าเดิม = ยังไม่ได้แก้)"""
+    out = []
+    for c in (d.get('chk') or []) if isinstance(d, dict) else []:
+        f = c.get('f')
+        if f and str(d.get(f)) != str(c.get('v')):
+            continue
+        out.append(c)
+    return out
+
+
+def chk_add(d, c):
+    lst = d.setdefault('chk', [])
+    if not any(x.get('msg') == c['msg'] for x in lst):
+        lst.append(c)
+
+
+def chk_tag(d, extra=()):
+    """'stop' / 'warn' / '' สำหรับระบายสีแถว · extra = ข้อสงสัยที่คิดสดตอนนี้"""
+    cs = chk_active(d) + list(extra)
+    if any(c['lv'] == 'stop' for c in cs):
+        return 'stop'
+    return 'warn' if (cs or (isinstance(d, dict) and d.get('warn'))) else ''
+
+
+def chk_text(c):
+    return ('⛔ ' if c['lv'] == 'stop' else '⚠ ') + c['msg']
+
+
+def c_dyn_checks(d):
+    """คิวสร้าง Item — ตรวจสดจากค่าตอนนี้ (แก้แล้วหายเอง)"""
+    out = []
+    if not re.fullmatch(r'\d+', str(d.get('kind') or '').strip()):
+        out.append(chk_new('stop', 'ItemKind “%s” ไม่ใช่ตัวเลข' % str(d.get('kind') or '')[:20]))
+    if not str(d.get('name') or '').strip():
+        out.append(chk_new('stop', 'ไม่มีชื่อไอเทม'))
+    q = str(d.get('qty') or '').strip()
+    if d.get('web', True) and q and not re.fullmatch(r'[1-9]\d*', q):
+        out.append(chk_new('stop', 'จำนวน (แสดงบนเว็บ) “%s” ไม่ใช่เลข 1 ขึ้นไป' % q[:12]))
+    return out
+
+
+def b_precheck(b):
+    """บันเดิล — ข้อสงสัยตอนนำเข้า (ยังใช้อยู่) + ตรวจสดจากค่าตอนนี้ (v1.4.0)"""
+    out = list(chk_active(b))
+    if not b.get('items'):
+        out.append(chk_new('stop', 'ไม่มีไอเทมเลย'))
+    for j, it in enumerate(b.get('items') or [], 1):
+        for c in chk_active(it):
+            out.append(dict(c, msg='ไอเทม %d — %s' % (j, c['msg'])))
+        for c in b_item_dyn(it):
+            out.append(dict(c, msg='ไอเทม %d — %s' % (j, c['msg'])))
+    return out
+
+
+def b_item_dyn(it):
+    out = []
+    if not re.fullmatch(r'\d+', str(it.get('id') or '').strip()):
+        out.append(chk_new('stop', 'Aztek Item Id “%s” ไม่ใช่ตัวเลข' % str(it.get('id') or '')[:16]))
+    if not re.fullmatch(r'[1-9]\d*', str(it.get('qty') or '').strip()):
+        out.append(chk_new('stop', 'จำนวน “%s” ไม่ใช่เลข 1 ขึ้นไป' % str(it.get('qty') or '')[:12]))
+    if it.get('tier') not in TIERS:
+        out.append(chk_new('stop', 'Tier “%s” ไม่รู้จัก' % str(it.get('tier') or '')[:12]))
+    return out
+
+
+def master_dup_check(rows, dups):
+    """แถวที่ถูกตัดซ้ำ (fdItemNum + Amt + แลกเปลี่ยน เดียวกัน) แต่ชื่อ/ระยะเวลาไม่เหมือนแถวที่เก็บไว้
+    = ชีทขัดกันเอง → ⛔ ติดที่แถวที่เก็บไว้ (เครื่องมือใช้แถวแรกเสมอ เหมือนเดิม)"""
+    idx = {}
+    for r in rows:
+        idx.setdefault((r.get('kind'), r.get('amt', 1)), []).append(r)
+    nm = lambda x: re.sub(r'\s+', '', str(x or '')).lower()
+    for s_ in dups or []:
+        for r in idx.get((s_['kind'], s_.get('amt', 1)), []):
+            if s_['trade'] != 'any' and r.get('trade') not in ('any', s_['trade']):
+                continue
+            fmt = lambda x: (x + ' วัน') if x else 'ถาวร'
+            if s_['dur'] != r.get('dur'):
+                # ระยะเวลาต่างกัน = บนเว็บเป็นคนละไอเทม แต่เครื่องมือเก็บไว้ตัวเดียว → อีกตัวหายไปเลย
+                chk_add(r, chk_new('stop', 'fdItemNum %s มีอีกแถวระยะเวลา %s (แถวนี้ %s) — เครื่องมือเก็บไว้แค่แถวนี้ '
+                                           'แถวนั้นจะไม่ถูกสร้าง/ค้นหา' % (s_['kind'], fmt(s_['dur']),
+                                                                         fmt(r.get('dur')))))
+            elif nm(s_['raw']).replace('gift', '') != nm(r.get('raw')).replace('gift', ''):
+                chk_add(r, chk_new('warn', 'fdItemNum %s มีอีกแถวชื่อ “%s” — ใช้ชื่อแถวนี้'
+                                   % (s_['kind'], str(s_['raw'])[:40])))
+            break
 
 
 def master_amt(v):
@@ -3189,10 +3297,12 @@ def qty_text(r):
     return q or '—'
 
 
-def parse_master_rows(rows, seen=None):
+def parse_master_rows(rows, seen=None, dups=None):
     out = []
     if seen is None:
         seen = set()
+    skipped = []                 # v1.4.0 แถวที่ตัดซ้ำ (ไว้เทียบว่าชีทขัดกันเองไหม)
+    all_tables = []
     tables = []
     prev = []
 
@@ -3234,6 +3344,7 @@ def parse_master_rows(rows, seen=None):
                             break
                 tables.append({'kind': a, 'name': name_col, 'dur': dur_col,
                                'move': move_col, 'desc': desc_col, 'amt': amt_col})
+                all_tables.append(tables[-1])
             prev = cells
             continue
 
@@ -3262,20 +3373,6 @@ def parse_master_rows(rows, seen=None):
                 trade, known, move_raw = 'any', True, ''
             amt, amt_raw = master_amt(cells[t['amt']] if t.get('amt') is not None and t['amt'] < len(cells)
                                       else '')
-            # ตัดซ้ำด้วย ItemKind + แลกเปลี่ยน — ตัวเดียวกันแต่ Storage กับ Gift คือคนละไอเทม
-            #   (ตัวที่ไม่มีคอลัมน์ Itemmove ยังตัดด้วย ItemKind อย่างเดียวเหมือนเดิม)
-            #   v1.3.1: Amt ต่างกัน = คนละไอเทม (จำนวนบนเว็บต่างกัน) · Amt 1 ใช้กุญแจเดิมเป๊ะ
-            base = kind if amt == 1 else '%s×%d' % (kind, amt)
-            if trade == 'any':
-                if base in seen or base + '|*' in seen:
-                    continue
-                seen.add(base)
-            else:
-                key = base + '|' + trade
-                if base in seen or key in seen:
-                    continue
-                seen.update((key, base + '|*'))
-
             m = re.search(r'(\d+)\s*ชิ้น', name)
             qty = m.group(1) if m else ''
             disp = re.sub(r'\s*\d+\s*ชิ้น.*$', '', name).strip() or name.strip()
@@ -3284,6 +3381,10 @@ def parse_master_rows(rows, seen=None):
             durc = cells[dc] if dc < len(cells) else ''
             md = re.search(r'(\d+)', durc) if 'วัน' in durc else None
             dur = md.group(1) if md else ''
+            # v1.3.3 ผู้ใช้: “ถ้าถาวร ต้องบอกว่าถาวรเลย” — ช่องระยะเวลา (เจอจากหัวตาราง) เขียนเลขเปล่าๆ 30 = 30 วัน
+            #   (คอลัมน์สำรองที่เดาตำแหน่งเอาเอง ไม่ใช้กฎนี้ กันไปหยิบราคา/Amt มาเป็นวัน)
+            if not md and t['dur'] is not None and re.fullmatch(r'\d+', durc.strip()) and int(durc.strip()) > 0:
+                dur = str(int(durc.strip()))
 
             dsc = ''
             if t.get('desc') is not None and t['desc'] < len(cells):
@@ -3295,14 +3396,77 @@ def parse_master_rows(rows, seen=None):
                 qty = str(int(qty or 1) * amt)
                 amount = str(int(amount or 1) * amt)
 
-            out.append({'kind': kind, 'name': '', 'disp': disp,
-                        'dur': dur, 'trade': trade, 'qty': qty,
-                        'has_move': t['move'] is not None,
-                        'move_raw': move_raw, 'move_bad': not known,
-                        # ---- ใช้ตอน "สร้างไอเทม" ----
-                        'raw': name.strip(), 'cname': cname,
-                        'amount': amount, 'has_qty': has_qty, 'desc': dsc,
-                        'amt': amt, 'amt_raw': amt_raw, 'pcs': pcs or '1'})
+            # ตัดซ้ำด้วย ItemKind + แลกเปลี่ยน — ตัวเดียวกันแต่ Storage กับ Gift คือคนละไอเทม
+            #   (ตัวที่ไม่มีคอลัมน์ Itemmove ยังตัดด้วย ItemKind อย่างเดียวเหมือนเดิม)
+            #   v1.3.1: Amt ต่างกัน = คนละไอเทม (จำนวนบนเว็บต่างกัน) · Amt 1 ใช้กุญแจเดิมเป๊ะ
+            #   v1.4.0: ย้ายมาหลังอ่านค่าครบ (ผลเหมือนเดิม) จะได้เก็บแถวที่ตัดไว้เทียบว่าชีทขัดกันเองไหม
+            base = kind if amt == 1 else '%s×%d' % (kind, amt)
+            dupl = False
+            if trade == 'any':
+                if base in seen or base + '|*' in seen:
+                    dupl = True
+                else:
+                    seen.add(base)
+            else:
+                key = base + '|' + trade
+                if base in seen or key in seen:
+                    dupl = True
+                else:
+                    seen.update((key, base + '|*'))
+            if dupl:
+                skipped.append({'kind': kind, 'amt': amt, 'trade': trade, 'raw': name.strip(), 'dur': dur})
+                continue
+
+            # ---- v1.4.0 ข้อสงสัย (ตรวจเฉยๆ ไม่เปลี่ยนค่า) ----
+            chk = []
+            if t['dur'] is not None:
+                dtx = str(durc or '').strip()
+                if dtx and not dur and dtx != '0' and 'ถาวร' not in dtx and dtx.lower() != 'permanent':
+                    if dtx in ('-', '—', '–'):
+                        chk.append(chk_new('warn', 'ระยะเวลา “%s” — นับเป็นถาวร' % dtx, 'dur', ''))
+                    else:
+                        chk.append(chk_new('stop', 'ระยะเวลา “%s” อ่านไม่ออก — จะใส่เป็นถาวร '
+                                                   '(ถาวรต้องเขียนว่า “ถาวร”)' % dtx[:24], 'dur', ''))
+            if amt_raw:
+                chk.append(chk_new('stop', 'Amt = “%s” อ่านเป็นตัวเลขไม่ได้ — คิดเป็น 1 (เช็กในชีทก่อนนะ)'
+                                   % amt_raw, 'qty', qty))
+            if not known:
+                chk.append(chk_new('stop', 'Itemmove = “%s” ไม่รู้จัก (รู้จักแค่ Storage/Gift/Yes/No) — '
+                                           'ตัวนี้ไม่กรองแลกเปลี่ยน' % move_raw, 'trade', trade))
+            if name.strip().lower() in _SRC_TIER or len(name.strip()) <= 2:
+                chk.append(chk_new('stop', 'ชื่อไอเทม “%s” ไม่น่าใช่ชื่อ — ช่อง Display Name ในแถวนี้อาจสลับกับ Rank '
+                                           'เช็กชีท' % name.strip(), 'cname', cname))
+
+            row_d = {'kind': kind, 'name': '', 'disp': disp,
+                     'dur': dur, 'trade': trade, 'qty': qty,
+                     'has_move': t['move'] is not None,
+                     'move_raw': move_raw, 'move_bad': not known,
+                     # ---- ใช้ตอน "สร้างไอเทม" ----
+                     'raw': name.strip(), 'cname': cname,
+                     'amount': amount, 'has_qty': has_qty, 'desc': dsc,
+                     'amt': amt, 'amt_raw': amt_raw, 'pcs': pcs or '1'}
+            if chk:
+                row_d['chk'] = chk
+            t.setdefault('rows', []).append(row_d)
+            out.append(row_d)
+    # ---- v1.4.0 ตารางเดียวกัน แต่แถวเดียวระยะเวลาไม่เหมือนแถวอื่น (ที่เหลือเหมือนกันหมด) = ⚠ ควรเช็ก ----
+    for t in all_tables:
+        trs = t.get('rows') or []
+        if len(trs) >= 4:
+            cnt = {}
+            for r in trs:
+                cnt[r['dur']] = cnt.get(r['dur'], 0) + 1
+            top = max(cnt.items(), key=lambda kv: kv[1])
+            if top[1] == len(trs) - 1:
+                fmt = lambda x: (x + ' วัน') if x else 'ถาวร'
+                for r in trs:
+                    if r['dur'] != top[0]:
+                        chk_add(r, chk_new('warn', 'ระยะเวลา %s ไม่เหมือนแถวอื่นในตารางเดียวกัน (แถวอื่น %s)'
+                                           % (fmt(r['dur']), fmt(top[0])), 'dur', r['dur']))
+    if dups is None:
+        master_dup_check(out, skipped)
+    else:
+        dups.extend(skipped)
     return out
 
 
@@ -3448,6 +3612,7 @@ def parse_bundle_sheet(rows, sheet_name, force_col=None):
     hdr = [i for i, row in enumerate(rows)
            if any('fditemnum' in str(c).lower() for c in (row or []))]
     for bi, hr in enumerate(hdr):
+        w0 = len(warns)                    # v1.4.0 คำเตือนของบล็อกนี้ → ติดไปกับบันเดิล (ตรวจก่อนเริ่ม)
         header = [('' if c is None else str(c)).strip() for c in rows[hr]]
         low = [h.lower() for h in header]
 
@@ -3709,6 +3874,12 @@ def parse_bundle_sheet(rows, sheet_name, force_col=None):
                              % (sheet_name, name, r + 1))
                 continue
             qty = (src_int(row[amtc]) if (amtc is not None and amtc < len(row)) else None) or '1'
+            ichk = []
+            if amtc is not None and amtc < len(row):
+                araw = clean_text(row[amtc])
+                if araw and src_int(row[amtc]) is None:
+                    ichk.append(chk_new('stop', 'แถว %d: Amt “%s” อ่านไม่ออก — ใส่ 1' % (r + 1, araw[:12]),
+                                        'qty', qty))
             tier = DEFAULT_TIER
             if rankc is not None and rankc < len(row):
                 rv = ('' if row[rankc] is None else str(row[rankc])).strip()
@@ -3718,11 +3889,15 @@ def parse_bundle_sheet(rows, sheet_name, force_col=None):
                 elif rv and rv != '-':
                     warns.append('%s "%s" แถว %d: Rank "%s" ไม่รู้จัก -> %s'
                                  % (sheet_name, name, r + 1, rv, DEFAULT_TIER))
+                    ichk.append(chk_new('stop', 'แถว %d: Rank “%s” ไม่รู้จัก — ใส่ %s'
+                                        % (r + 1, rv[:12], DEFAULT_TIER), 'tier', DEFAULT_TIER))
             ikind = ''
             if kindc is not None and kindc < len(row):
                 ikind = src_int(row[kindc]) or ''
             items.append({'id': iid, 'qty': qty, 'tier': tier, 'disp': disp,
                           'kind': ikind})
+            if ichk:
+                items[-1]['chk'] = ichk
         if tier_guess is not None:
             hd = clean_text(header[tier_guess]) if tier_guess < len(header) else ''
             warns.append('%s "%s": ไม่มีหัวคอลัมน์ Tier ที่รู้จัก — ใช้คอลัมน์ %s%s เพราะค่าในช่องเป็น %s'
@@ -3760,6 +3935,18 @@ def parse_bundle_sheet(rows, sheet_name, force_col=None):
             bundles.append({'name': name, 'type': DEFAULT_BUNDLE_TYPE, 'deliver': True,
                             'items': items, 'rewards': bundle_rewards(rows, hr),
                             'sheet': sheet_name, 'src_bundle_id': bid})
+            # v1.4.0 คำเตือนของบล็อกนี้ = ข้อสงสัยของบันเดิล (แถวที่ข้าม/คอลัมน์ผิด = ⛔ · เดาคอลัมน์ Tier = ⚠)
+            bchk = []
+            pre = '%s "%s": ' % (sheet_name, name)
+            for w in warns[w0:]:
+                if 'ไม่มี Aztek Item Id -> ข้าม' in w or 'Rank "' in w:
+                    continue                       # รายแถว — ติดที่ไอเทม/สรุปแล้ว
+                lv = 'warn' if 'ไม่มีหัวคอลัมน์ Tier ที่รู้จัก' in w else 'stop'
+                bchk.append(chk_new(lv, w[len(pre):] if w.startswith(pre) else w))
+            if rankc is None:
+                bchk.append(chk_new('warn', 'ไม่เจอคอลัมน์ Tier (Rank) — ใช้ General ทั้งหมด'))
+            if bchk:
+                bundles[-1]['chk'] = bchk
     if no_tier:
         warns.append('%s: ไม่เจอคอลัมน์ Tier (Rank / Tier / ระดับ) ใน %d บันเดิล -> ใช้ General ทั้งหมด'
                      ' · ถ้าไม่ใช่ แก้ในตารางได้ (ดับเบิลคลิกช่อง Tier)' % (sheet_name, no_tier))
@@ -3964,6 +4151,37 @@ def wr_is_random(d):
     """โค้ดสุ่ม (Server Generate) = ไม่มี CODE ในชีท ระบบเว็บเจนเอง"""
     return (d.get('kind') == 'gen' and not str(d.get('code') or '').strip()
             and d.get('code_type') != 'Fix Codes')
+
+
+_WR_HINT_NOT = {'REWARD', 'REWARDS', 'BUNDLE', 'START', 'DETAIL', 'DETAILS', 'TOTAL', 'PRICE', 'LIMIT',
+                'EVENT', 'ITEMCODE', 'MASTER', 'SERVER', 'GENERATE', 'RANDOM', 'UNIQUE', 'PRODUCT', 'CATEGORY',
+                'CHANNEL', 'ANNOUNCE', 'STATUS', 'DISPLAY', 'PLAYER', 'WINNER', 'WINNERS', 'GENERAL',
+                'TALESRUNNER', 'TOURNAMENT', 'FDITEMNUM', 'FDPOSITION', 'FDITEMKIND', 'AMOUNT', 'REMARK'}
+
+
+def wr_precheck(d, now=None):
+    """WR Master / Item Code — ตรวจสดจากค่าในคิวตอนนี้ (v1.4.0) คืน [chk, ...]
+    ⛔ ไม่มีเวลา · ปีแปลก (69 → 1969) · เริ่มไม่ก่อนสิ้นสุด · สิ้นสุดผ่านไปแล้ว · ไม่มี Bundle · Fix ไม่มี CODE"""
+    now = now or datetime.now()
+    out = []
+    st, en = str(d.get('start') or '').strip(), str(d.get('end') or '').strip()
+    for v, what in ((st, 'เวลาเริ่ม'), (en, 'เวลาสิ้นสุด')):
+        if not v:
+            out.append(chk_new('stop', 'ยังไม่มี%s' % what))
+            continue
+        m = re.match(r'(\d{4})-', v)
+        if m and not 2020 <= int(m.group(1)) <= now.year + 3:
+            out.append(chk_new('stop', '%s ปี %s ดูแปลก — ในชีทเขียนปีย่อไหม (69 = พ.ศ. 2569 = ค.ศ. 2026)'
+                               % (what, m.group(1))))
+    if st and en and st >= en:
+        out.append(chk_new('stop', 'เวลาเริ่ม %s ไม่ได้อยู่ก่อนเวลาสิ้นสุด %s' % (st, en)))
+    if en and en < now.strftime('%Y-%m-%d %H:%M:%S'):
+        out.append(chk_new('stop', 'เวลาสิ้นสุด %s ผ่านไปแล้ว' % en))
+    if not str(d.get('bundle') or '').strip():
+        out.append(chk_new('stop', 'ยังไม่มีเลข Bundle'))
+    if not wr_is_random(d) and not str(d.get('code') or '').strip():
+        out.append(chk_new('stop', 'เป็น Fix Codes แต่ไม่มี CODE'))
+    return out + chk_active(d)
 
 
 def wr_cell(d, col, i=0):
@@ -4312,6 +4530,14 @@ def parse_gen_sheet(rows, sheet_name):
         name = (sheet_name + (' ' + title if title else ' #%d' % n)).strip()
         if fixcode:                    # v1.3.2: โค้ด Fix ต่อท้ายด้วย CODE — ชื่อไม่ซ้ำ หาบนเว็บง่าย
             name = ' '.join(x for x in (sheet_name, title, fixcode) if x)
+        hint = ''                      # v1.4.0: อ่านเป็นโค้ดสุ่ม แต่เหนือตารางมีคำหน้าตาเหมือนโค้ด = ⛔ ถามก่อน
+        if ctype == 'Server Generate':
+            for _r, _c, t in above:
+                tt = str(t or '').strip()
+                if re.fullmatch(r'[A-Z][A-Z0-9_\-]{5,39}', tt) and tt not in _WR_HINT_NOT \
+                        and re.sub(r'[\s_\-]+', '', tt.lower()) not in _GEN_CODE_NOT:
+                    hint = tt
+                    break
         slug = gen_slug(sheet_name, sy, n)
         cap = str(cnt + GEN_SPARE)
         d = {'kind': 'gen', 'code': fixcode, 'slug': slug, 'name': name, 'title': title,
@@ -4319,6 +4545,9 @@ def parse_gen_sheet(rows, sheet_name):
              'limit': str(cnt), 'cap': cap, 'unlimited': False, 'gen_count': cap,
              'per_user': cap if repeat else '1', 'repeat': repeat, 'code_type': ctype,
              'bundle': bid or ''}
+        if hint:
+            d['chk'] = [chk_new('stop', 'เหนือตารางมีคำ “%s” หน้าตาเหมือนโค้ด แต่อ่านเป็นโค้ดสุ่ม (Server Generate) — '
+                                        'ถ้าเป็นโค้ด Fix ดับเบิลคลิกใส่ CODE' % hint, 'code', '')]
         where = '%s "%s" (หัวตารางแถว %d)' % (sheet_name, title or '#%d' % n, hr + 1)
         if repeat is None:
             warns.append(where + ': ไม่เจอ “เติมซ้ำได้/ไม่ได้” -> ใส่ต่อ 1 User = 1')
@@ -4629,15 +4858,17 @@ class ImportDialog:
         try:
             with self.lock:
                 seen = set()          # ตัด ItemKind ซ้ำข้ามชีทให้เหลือตัวเดียว
+                dups = []             # v1.4.0 แถวที่ตัดทิ้ง — ไว้เทียบว่าขัดกันเองไหม (ข้ามชีทด้วย)
                 hit = []
                 for k, name in enumerate(names, 1):
                     if len(names) > 1:
                         self.q.put(('info', 'กำลังอ่าน %d/%d ชีท…  %s  (ได้แล้ว %d รายการ)'
                                     % (k, len(names), name, len(rows))))
-                    got = parse_master_rows(read_sheet_rows(self.wb, name), seen)
+                    got = parse_master_rows(read_sheet_rows(self.wb, name), seen, dups)
                     if got:
                         hit.append('%s (%d)' % (name, len(got)))
                     rows.extend(got)
+                master_dup_check(rows, dups)
                 if len(names) == 1:
                     note = 'ชีท “%s”' % names[0]
                 else:
@@ -4670,16 +4901,24 @@ class ImportDialog:
         self.rows = rows
         nwarn = mark_suspects(rows)
         self.tree.delete(*self.tree.get_children())
+        self.tree.tag_configure('stop', background=C['row_bad_bg'], foreground=C['row_bad_fg'])
+        nstop = sum(1 for r in rows if chk_tag(r) == 'stop')
         for r in rows[:400]:
             dur = 'ถาวร' if r['dur'] == '' else (r['dur'] + ' วัน')
             trade = trade_text(r)
-            self.tree.insert('', 'end', tags=('warn',) if r.get('warn') else (),
-                             values=('⚠' if r.get('warn') else '', r['kind'], r['disp'],
-                                     dur, trade, qty_text(r)))
+            tg = chk_tag(r)
+            self.tree.insert('', 'end', tags=(tg,) if tg else (),
+                             values=('⛔' if tg == 'stop' else ('⚠' if r.get('warn') else ''), r['kind'],
+                                     r['disp'], dur, trade, qty_text(r)))
         has_move = any(r.get('has_move') for r in rows)
         extra = '' if has_move else '   (ชีทนี้ไม่มีคอลัมน์ Itemmove → ไม่กรองแลกเปลี่ยน)'
         self.info.config(text=f'{note} · พบ {len(rows)} รายการ{extra}')
-        if nwarn:
+        if nstop:
+            self.warn_lbl.config(
+                text=f'⛔  มี {nstop} แถวที่น่าจะผิด (แถวแดง) · ⚠ ควรเช็ก {nwarn - nstop} แถว (เหลือง) — '
+                     'ยังนำเข้าให้ครบ คลิกที่แถวเพื่อดูเหตุผล · ก่อนกดเริ่มจะถามอีกที',
+                fg=C['err'])
+        elif nwarn:
             self.warn_lbl.config(
                 text=f'⚠  มี {nwarn} แถวที่หน้าตาไม่เหมือนไอเทมทั่วไป (แถวสีเหลือง) — '
                      'ยังนำเข้าให้ครบ คลิกที่แถวเพื่อดูว่าเตือนเพราะอะไร',
@@ -5175,6 +5414,21 @@ def run_logic_tests():
           [None, 'รางวัล', None, None, None, 'วันหมดอายุ', datetime(2026, 11, 3), '23:59 น.'],
           [4958, '100฿', 'fdItemNum', 'Display Name', 'Amt', 'เติมซ้ำไม่ได้'],
           [None, 2714, 129706, 'กล่องแดชจัมพ์ 3 ชิ้น', 1, 'จำนวน 100 โค้ด']]
+    gd30 = parse_master_rows([['fdItemNum', 'Display Name', 'ระยะเวลาของขวัญ', 'Amt'],
+                              ['129469', 'กล่องไดมอนด์ 20 ปี 1 ชิ้น', 30, 1], ['129470', 'ของถาวร 1 ชิ้น', 'ถาวร', 1],
+                              ['129471', 'ของสาม 1 ชิ้น', '3 วัน', 1]])
+    r.append(_t([x['dur'] for x in gd30] == ['30', '', '3']
+                and row_to_item(gd30[0])['name'] == 'กล่องไดมอนด์ 20 ปี (Gift) (30 วัน)',
+                'ระยะเวลาเขียนเลขเปล่าๆ 30 = 30 วัน · ถาวร = ถาวร · 3 วัน = 3', [x['dur'] for x in gd30]))
+    # ---- ตรวจก่อนเริ่ม (v1.4.0): อ่านค่าเหมือนเดิม แค่ติดข้อสงสัยไว้ ----
+    pk = parse_master_rows([['fdItemNum', 'Display Name', 'ระยะเวลาของขวัญ', 'Amt'],
+                            ['5001', 'ของ ก 1 ชิ้น', '1 ชั่วโมง', 1], ['5002', 'S', '3 วัน', 1],
+                            ['5003', 'ของ ค 1 ชิ้น', '3 วัน', 1], ['5003', 'ของ ค 1 ชิ้น', '7 วัน', 1]])
+    pt = [chk_tag(x) for x in pk]
+    pw = wr_precheck({'code': 'X', 'start': '1969-10-31 10:00:00', 'end': '1969-11-14 23:59:59', 'bundle': ''})
+    r.append(_t(pt == ['stop', 'stop', 'stop'] and pk[0]['dur'] == '' and len(pw) >= 3,
+                'ตรวจก่อนเริ่ม: ระยะเวลาอ่านไม่ออก / ชื่อเป็น Rank / fdItemNum ซ้ำแต่วันต่าง / ปี 1969 = ⛔',
+                (pt, [c['msg'][:20] for c in pw])))
     gc = parse_gen_sheet(gi, 'ทดสอบ')[0]
     gd = gc[0] if gc else {}
     r.append(_t(len(gc) == 1 and gd.get('code') == 'THAIPOONPOON' and gd.get('code_type') == 'Fix Codes'
@@ -6191,9 +6445,9 @@ class App:
         i = self._c_sel()
         if i is None or not (0 <= i < len(self.cq)):
             return
-        w = self.cq[i].get('warn') or []
+        w = (self.cq[i].get('warn') or []) + ['⛔ ' + c['msg'] for c in c_dyn_checks(self.cq[i])]
         self.c_warn.config(text=('⚠  แถว #%d : %s' % (i + 1, ' · '.join(w))) if w else '',
-                           fg=C['warn'])
+                           fg=C['err'] if any(x.startswith('⛔') for x in w) else C['warn'])
 
     def _c_pic_sfx(self):
         try:
@@ -6241,23 +6495,28 @@ class App:
         self._c_pic_moved = []
         # คิดใหม่ทุกครั้ง — แก้ ItemKind หรือชื่อแล้วคำเตือนจะหายไปเอง
         nwarn = mark_suspects(self.cq)
+        self.c_tree.tag_configure('stop', background=C['row_bad_bg'], foreground=C['row_bad_fg'])
+        nstop = sum(1 for d in self.cq if chk_tag(d, c_dyn_checks(d)) == 'stop')
         self.c_tree.delete(*self.c_tree.get_children())
         for i, d in enumerate(self.cq, 1):
-            self.c_tree.insert('', 'end', tags=('warn',) if d.get('warn') else (), values=(
-                i, '⚠' if d.get('warn') else '', d['kind'], d['name'], d['type'],
+            tg = chk_tag(d, c_dyn_checks(d))
+            self.c_tree.insert('', 'end', tags=(tg,) if tg else (), values=(
+                i, '⛔' if tg == 'stop' else ('⚠' if d.get('warn') else ''), d['kind'], d['name'], d['type'],
                 d['price'] or '—', (d['dur'] + ' วัน') if d['dur'] else 'ถาวร',
                 d['qty'] or '—', 'ได้' if d['trade'] else 'ไม่ได้',
                 self._c_img_cell(d)))
         self.c_count.config(text=('คิวว่าง' if not self.cq else f'ในคิว {len(self.cq)} ไอเทม'))
+        stop_txt = (f'⛔  {nstop} แถวน่าจะผิด (แดง) — คลิกที่แถวดูเหตุผล · ดับเบิลคลิกแก้ · '
+                    'ก่อนกดเริ่มจะถามอีกที' if nstop else '')
         self.c_warn.config(
-            text=(f'⚠  มี {nwarn} แถวหน้าตาไม่เหมือนไอเทมทั่วไป (สีเหลือง) — '
-                  'คลิกที่แถวเพื่อดูเหตุผล · ดับเบิลคลิกเพื่อแก้ · ไม่เอาก็ลบออกจากคิวได้'
-                  if nwarn else ''), fg=C['warn'])
+            text=stop_txt or (f'⚠  มี {nwarn} แถวหน้าตาไม่เหมือนไอเทมทั่วไป (สีเหลือง) — '
+                              'คลิกที่แถวเพื่อดูเหตุผล · ดับเบิลคลิกเพื่อแก้ · ไม่เอาก็ลบออกจากคิวได้'
+                              if nwarn else ''), fg=C['err'] if nstop else C['warn'])
         pic_txt = self._c_pic_text(pic_filled, pic_conf)
         if pic_txt:
-            cur = (f'⚠  มี {nwarn} แถวหน้าตาไม่เหมือนไอเทมทั่วไป (สีเหลือง) — '
-                   'คลิกที่แถวเพื่อดูเหตุผล · ดับเบิลคลิกเพื่อแก้ · ไม่เอาก็ลบออกจากคิวได้'
-                   if nwarn else '')
+            cur = stop_txt or (f'⚠  มี {nwarn} แถวหน้าตาไม่เหมือนไอเทมทั่วไป (สีเหลือง) — '
+                               'คลิกที่แถวเพื่อดูเหตุผล · ดับเบิลคลิกเพื่อแก้ · ไม่เอาก็ลบออกจากคิวได้'
+                               if nwarn else '')
             self.c_warn.config(text=(cur + '\n' if cur else '') + pic_txt,
                                fg=C['warn'] if (nwarn or pic_conf) else C['ok'])
         if pic_filled:
@@ -6299,6 +6558,8 @@ class App:
         self.cq.extend(got)
         self._c_refresh()
         self.log(f'นำเข้าเข้าคิวสร้างไอเทม {len(got)} รายการ (รวม {len(self.cq)})', 'OK')
+        self._pre_log('สร้าง Item', got, lambda d: chk_active(d) + c_dyn_checks(d),
+                      lambda d: '%s %s' % (d.get('kind', ''), d.get('name', '')))
         log_event('create_import', count=len(got), total=len(self.cq),
                   file=os.path.basename(path))
 
@@ -6475,6 +6736,114 @@ class App:
         self.c_cancel = True
         self.log('กำลังยกเลิกการสร้างไอเทม...', 'WARN')
 
+    # ==================================================================
+    #  v1.4.0 ตรวจก่อนเริ่ม (ใช้ร่วมทุกแท็บ: สร้าง Item · ค้นหา · Bundle · WR Master · Item Code)
+    # ==================================================================
+    def _pre_log(self, what, rows, issues_fn, label_fn, head='🔎 ตรวจข้อมูลที่นำเข้า'):
+        """ลง Log ทุกเรื่องที่ตรวจเจอ — ⛔ ก่อน ⚠ ตามหลัง · คืน (จำนวนแถว ⛔, จำนวนแถว ⚠)"""
+        st, wn = [], []
+        for i, d in enumerate(rows, 1):
+            cs = issues_fn(d)
+            s_ = [c for c in cs if c['lv'] == 'stop']
+            w_ = [c for c in cs if c['lv'] != 'stop']
+            if s_:
+                st.append((i, d, s_))
+            if w_:
+                wn.append((i, d, w_))
+        if not st and not wn:
+            return 0, 0
+        self.log('%s — %s: ⛔ น่าจะผิด %d · ⚠ ควรเช็ก %d' % (head, what, len(st), len(wn)),
+                 'WARN' if st else 'INFO')
+        for i, d, cs in st[:60]:
+            for c in cs:
+                self.log('  ⛔ #%d %s — %s' % (i, str(label_fn(d))[:60], c['msg']), 'WARN')
+        for i, d, cs in wn[:60]:
+            for c in cs:
+                self.log('  ⚠ #%d %s — %s' % (i, str(label_fn(d))[:60], c['msg']), 'INFO')
+        return len(st), len(wn)
+
+    def _pre_popup(self, what, unit, lines, n_all, n_bad):
+        """หน้าต่างถามก่อนเริ่ม — คืน 'back' (กลับไปแก้) / 'skip' (ข้ามตัวที่มีปัญหา) / 'all' (ทำต่อทั้งหมด)"""
+        res = {'v': 'back'}
+        top = tk.Toplevel(self.root)
+        top.title('ตรวจก่อนเริ่ม — %s' % what)
+        top.configure(bg=C['bg'])
+        top.transient(self.root)
+        body = tk.Frame(top, bg=C['bg'])
+        body.pack(fill='both', expand=True, padx=16, pady=(14, 6))
+        tk.Label(body, text='⛔  เจอ %d %s ที่น่าจะผิด — เช็กก่อนเริ่มนะ' % (n_bad, unit), bg=C['bg'],
+                 fg=C['err'], font=FB, anchor='w').pack(fill='x')
+        tk.Label(body, text='(เรื่อง ⚠ ที่แค่ควรเช็ก ไม่ได้อยู่ในนี้ — ดูในแถวเหลือง / แท็บ Log)',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(fill='x', pady=(2, 6))
+        fr = tk.Frame(body, bg=C['bg'])
+        fr.pack(fill='both', expand=True)
+        txt = tk.Text(fr, height=min(16, max(4, len(lines) + 1)), width=100, wrap='word', bg=C['input'],
+                      fg=C['fg'], relief='flat', font=FM, padx=8, pady=6)
+        sb = ttk.Scrollbar(fr, orient='vertical', command=txt.yview)
+        txt.configure(yscrollcommand=sb.set)
+        txt.insert('1.0', '\n'.join(lines))
+        txt.config(state='disabled')
+        txt.pack(side='left', fill='both', expand=True)
+        sb.pack(side='right', fill='y')
+        foot = tk.Frame(top, bg=C['card'])
+        foot.pack(fill='x', side='bottom')
+
+        def pick(v):
+            res['v'] = v
+            top.destroy()
+        rest = n_all - n_bad
+        b_all = self._btn(foot, 'ทำต่อทั้งหมด (รวมตัวที่ ⛔)', lambda: pick('all'))
+        b_all.pack(side='right', padx=(6, 14), pady=12, ipadx=8, ipady=4)
+        b_skip = self._btn(foot, 'ข้ามตัวที่ ⛔ — ทำที่เหลือ %d %s' % (rest, unit), lambda: pick('skip'))
+        b_skip.pack(side='right', pady=12, ipadx=8, ipady=4)
+        if rest <= 0:
+            b_skip.config(state='disabled')
+        b_back = self._btn(foot, '↩  กลับไปแก้ก่อน', lambda: pick('back'), primary=True)
+        b_back.pack(side='left', padx=14, pady=12, ipadx=12, ipady=4)
+        top.protocol('WM_DELETE_WINDOW', top.destroy)
+        top.bind('<Escape>', lambda e: top.destroy())
+        try:                                   # วางกลางหน้าต่างโปรแกรม
+            top.update_idletasks()
+            w, h = top.winfo_reqwidth(), top.winfo_reqheight()
+            x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - w) // 2)
+            y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - h) // 3)
+            top.geometry('+%d+%d' % (x, y))
+        except Exception:
+            pass
+        try:
+            top.grab_set()
+            b_back.focus_set()
+        except Exception:
+            pass
+        self.root.wait_window(top)
+        return res['v']
+
+    def _precheck(self, what, unit, rows, issues_fn, label_fn):
+        """ตรวจก่อนเริ่ม — คืนรายการที่จะทำ หรือ None = ยกเลิก (ผู้ใช้เลือกกลับไปแก้)
+        ⛔ = เด้งถาม · ⚠ = ลง Log อย่างเดียว · ไม่มีอะไร = ไม่เด้ง"""
+        nst, _ = self._pre_log(what, rows, issues_fn, label_fn, head='🔎 ตรวจก่อนเริ่ม')
+        if not nst:
+            return rows
+        bad = []
+        lines = []
+        for i, d in enumerate(rows, 1):
+            cs = [c for c in issues_fn(d) if c['lv'] == 'stop']
+            if cs:
+                bad.append(d)
+                lines.append('#%d  %s' % (i, str(label_fn(d))[:70]))
+                lines += ['      ⛔ ' + c['msg'] for c in cs]
+        ans = self._pre_popup(what, unit, lines, len(rows), len(bad))
+        if ans == 'skip':
+            ids = {id(d) for d in bad}
+            keep = [d for d in rows if id(d) not in ids]
+            self.log('ข้ามตัวที่ ⛔ %d %s — ทำที่เหลือ %d' % (len(bad), unit, len(keep)), 'WARN')
+            return keep if keep else None
+        if ans == 'all':
+            self.log('ผู้ใช้เลือกทำต่อทั้งหมด (รวมตัวที่ ⛔ %d %s)' % (len(bad), unit), 'WARN')
+            return rows
+        self.log('ยกเลิก — กลับไปแก้ตัวที่ ⛔ ก่อน', 'WARN')
+        return None
+
     def c_start(self):
         if chrome_held_ask(self, self.c_start):
             return
@@ -6482,11 +6851,17 @@ class App:
             return messagebox.showinfo('กำลังทำงาน', 'รอให้งานปัจจุบันเสร็จก่อนนะ')
         if not self.cq:
             return messagebox.showwarning('คิวว่าง', 'ยังไม่มีไอเทมในคิว — นำเข้าไฟล์ต้นฉบับก่อน')
+        # v1.4.0 ตรวจก่อนเริ่ม: ⛔ เด้งถาม (กลับไปแก้ / ข้ามตัวที่มีปัญหา / ทำต่อทั้งหมด) · ⚠ ลง Log
+        run = self._precheck('สร้าง Item', 'ไอเทม', list(self.cq),
+                             lambda d: chk_active(d) + c_dyn_checks(d),
+                             lambda d: '%s %s' % (d.get('kind', ''), d.get('name', '')))
+        if run is None:
+            return
         do = self.cv_do.get()
-        nwarn = sum(1 for d in self.cq if d.get('warn'))
-        nopic = sum(1 for d in self.cq if not check_item_image(d.get('img'))[0])
+        nwarn = sum(1 for d in run if d.get('warn'))
+        nopic = sum(1 for d in run if not check_item_image(d.get('img'))[0])
         if do:
-            msg = f'จะสร้างไอเทมจริงบนเว็บ {len(self.cq)} รายการ\n'
+            msg = f'จะสร้างไอเทมจริงบนเว็บ {len(run)} รายการ\n'
             if nopic:
                 msg += (f'\n🖼  มี {nopic} รายการที่ยังไม่มีรูป (หรือรูปใช้ไม่ได้)\n'
                         '    จะสร้างต่อให้โดยไม่มีรูป — ใส่รูปทีหลังในเว็บได้\n')
@@ -6504,13 +6879,13 @@ class App:
         self.nb.select(self.tab_log)
         self.log('=' * 46, 'STEP')
         self.log(('เริ่มสร้างไอเทมจริง ' if do else 'เริ่มทดสอบกรอกฟอร์ม ')
-                 + f'{len(self.cq)} รายการ', 'STEP')
+                 + f'{len(run)} รายการ', 'STEP')
         if nopic:
             self.log('ยังไม่มีรูป %d จาก %d รายการ — ตัวที่ไม่มีจะสร้างโดยไม่ใส่รูป'
-                     % (nopic, len(self.cq)), 'WARN')
-        log_event('create_start', count=len(self.cq), commit=bool(do),
+                     % (nopic, len(run)), 'WARN')
+        log_event('create_start', count=len(run), commit=bool(do),
                   no_image=nopic)
-        threading.Thread(target=self._c_thread, args=(list(self.cq), do), daemon=True).start()
+        threading.Thread(target=self._c_thread, args=(run, do), daemon=True).start()
 
     def _c_thread(self, queue_rows, do):
         try:
@@ -7990,6 +8365,8 @@ class App:
             top_frac = 0.0
 
         self.b_tree.delete(*self.b_tree.get_children())
+        self.b_tree.tag_configure('stop', background=C['row_bad_bg'], foreground=C['row_bad_fg'])
+        self.b_tree.tag_configure('warn', background=C['row_warn_bg'], foreground=C['row_warn_fg'])
         self._b_rowmap = {}
         self._b_open = was_open
         for i, b in enumerate(self.bq):
@@ -8002,16 +8379,18 @@ class App:
             if b.get('sheet'):
                 info += '  ·  ชีท ' + b['sheet']
             on = b.get('use', True)
-            pid = self.b_tree.insert('', 'end', text='📦  ' + b['name'],
+            btg = chk_tag({}, b_precheck(b))           # v1.4.0 ⛔ แดง · ⚠ เหลือง
+            pid = self.b_tree.insert('', 'end', text=('⛔ ' if btg == 'stop' else '') + '📦  ' + b['name'],
                                      values=('✔' if on else '✗', '', '', info),
                                      open=was_open.get(i, self.b_open_new),
-                                     tags=() if on else ('off',))
+                                     tags=(btg,) if (on and btg) else (() if on else ('off',)))
             self._b_rowmap[pid] = ('b', i)
             for j, it in enumerate(b['items']):
+                itg = chk_tag(it, b_item_dyn(it))
                 cid = self.b_tree.insert(
                     pid, 'end', text='      %d. %s' % (j + 1, it.get('disp') or ''),
                     values=('', it['qty'], it['tier'], 'Aztek Item Id = ' + it['id']),
-                    tags=() if on else ('off',))
+                    tags=(itg,) if (on and itg) else (() if on else ('off',)))
                 self._b_rowmap[cid] = ('i', i, j)
             for r in b.get('rewards', []):
                 nm = FAME_NAME if r['type'] == 'CREDIT' else 'Player Experience'
@@ -8425,6 +8804,7 @@ class App:
             self.bq.append(b)
         self._b_refresh()
         self.log('นำเข้าบันเดิล %d อัน (รวม %d)' % (len(dlg.result), len(self.bq)), 'OK')
+        self._pre_log('สร้าง Bundle', dlg.result, b_precheck, lambda b: b.get('name', ''))
         for w in (dlg.warns or [])[:40]:
             self.log('  ⚠ ' + w, 'WARN')
         # เรื่องที่ "ของหาย/เลขอาจผิด" ต้องเด้งบอกเลย ไม่ใช่ซ่อนไว้ในแท็บ Log
@@ -8718,6 +9098,9 @@ class App:
         use = [b for b in self.bq if b.get('use', True)]
         if not use:
             return messagebox.showwarning('ยังไม่ได้เลือก', 'ติ๊กเลือกบันเดิลที่จะสร้างก่อนนะ')
+        use = self._precheck('สร้าง Bundle', 'บันเดิล', use, b_precheck, lambda b: b.get('name', ''))
+        if use is None:
+            return
         do = self.bv_do.get()
         if do:
             msg = 'จะสร้างบันเดิลจริงบนเว็บ %d อัน\n\n' % len(use)
@@ -9691,6 +10074,7 @@ class App:
         dup, done = wr_queue_flags(self.wq, self.made_codes)
         shared = wr_shared_bundles(self.wq) if getattr(self, 'W_NAME', '') == 'WR Master' else {}
         nobd = 0
+        pre_bad = []
         for i, d in enumerate(self.wq, 1):
             iid = 'wq%d' % i
             if not self.w_tree.exists(iid):
@@ -9714,6 +10098,11 @@ class App:
                 tag = 'warn'                      # เลข Bundle เดียวกันกับโค้ดอื่น
             else:
                 tag = ''
+            if tag in ('', 'warn') and k not in done:     # v1.4.0 ⛔ = แถวแดง (เหมือนโค้ดซ้ำ)
+                pc = wr_precheck(d)
+                if any(c['lv'] == 'stop' for c in pc):
+                    tag = 'dup'
+                    pre_bad.append((i, d, [c for c in pc if c['lv'] == 'stop']))
             if not d.get('bundle'):
                 nobd += 1
             if len(v) > mi:
@@ -9733,6 +10122,10 @@ class App:
         if nobd:
             msgs.append('⚠  มี %d โค้ดที่ยังไม่มีเลข Bundle ในชีท (แถวเหลือง) — '
                         'ดับเบิลคลิกใส่เองก่อน ไม่งั้นตัวนั้นจะเลือก Bundle ไม่ได้' % nobd)
+        if pre_bad:
+            msgs.append('⛔  %d โค้ดน่าจะผิด (แถวแดง): %s — ก่อนกดเริ่มจะถามอีกที' % (
+                len(pre_bad), ' · '.join('แถว %d %s' % (i, cs[0]['msg'][:50]) for i, _, cs in pre_bad[:3])
+                + (' …' if len(pre_bad) > 3 else '')))
         if shared:
             msgs.append('⚠  เลข Bundle เดียวกันใส่ให้หลายโค้ด (แถวเหลือง): %s — ปกติ 1 โค้ด = 1 Bundle '
                         'ชื่อเดียวกับโค้ด เช็กเลขในชีทก่อนนะ (ตอนสร้าง ตัวที่ชื่อ Bundle ไม่ตรงโค้ดจะไม่สร้างให้)'
@@ -9740,7 +10133,7 @@ class App:
                                       for b, ks in list(shared.items())[:3])
                            + (' …' if len(shared) > 3 else '')))
         self.w_warn.config(text='\n'.join(msgs),
-                           fg=C['err'] if dup else C['warn'])
+                           fg=C['err'] if (dup or pre_bad) else C['warn'])
 
     def _w_sel(self):
         s = self.w_tree.selection()
@@ -9764,6 +10157,8 @@ class App:
         self.wq.extend(add)
         self._w_refresh()
         self.log('นำเข้า Item Code %d โค้ด (รวม %d)' % (len(add), len(self.wq)), 'OK')
+        self._pre_log(getattr(self, 'W_NAME', 'Item Code'), add, wr_precheck,
+                      lambda d: '%s  %s' % (wr_ident(d), d.get('name', '')))
         for w in (dlg.warns or [])[:20]:
             self.log('  ⚠ ' + w, 'WARN')
         if len(add) < len(dlg.result):
@@ -10144,6 +10539,15 @@ class App:
                                           'ยังไม่มีโค้ดในคิว — นำเข้าไฟล์ต้นฉบับก่อน')
         do = self.wv_do.get()
         rows = wr_test_rows(self.wq) if test_time else [dict(d) for d in self.wq]
+        _, done0 = wr_queue_flags(self.wq, self.made_codes)
+        # v1.4.0 ตรวจก่อนเริ่ม (โค้ดที่เคยสร้างแล้ว มีตัวถามแยกอยู่แล้ว ไม่นับซ้ำ)
+        chk_rows = [d for d in rows if wr_key(d) not in done0]
+        ok_rows = self._precheck(getattr(self, 'W_NAME', 'Item Code'), 'โค้ด', chk_rows, wr_precheck,
+                                 lambda d: '%s  %s' % (wr_ident(d), d.get('name', '')))
+        if ok_rows is None:
+            return
+        keep_ids = {id(d) for d in ok_rows}
+        rows = [d for d in rows if wr_key(d) in done0 or id(d) in keep_ids]
         dup, done = wr_queue_flags(self.wq, self.made_codes)
         if do and (dup or done):
             bad = set(dup) | done
@@ -10692,13 +11096,15 @@ class App:
         """วาดรายการที่จะค้นหาใหม่ — เรียกทุกครั้งที่ self.imported เปลี่ยน"""
         nwarn = mark_suspects(self.imported)
         self.imp_tree.delete(*self.imp_tree.get_children())
+        self.imp_tree.tag_configure('stop', background=C['row_bad_bg'], foreground=C['row_bad_fg'])
         for i, r in enumerate(self.imported, 1):
             dur = r.get('dur', '')
             dur = 'ถาวร' if dur == '' else ('— ไม่กรอง —' if dur == 'any' else str(dur) + ' วัน')
             trade = trade_text(r)
             name = r.get('disp') or r.get('name') or ''
-            self.imp_tree.insert('', 'end', tags=('warn',) if r.get('warn') else (),
-                                 values=(i, '⚠' if r.get('warn') else '',
+            tg = chk_tag(r)
+            self.imp_tree.insert('', 'end', tags=(tg,) if tg else (),
+                                 values=(i, '⛔' if tg == 'stop' else ('⚠' if r.get('warn') else ''),
                                          r.get('kind', ''), name, dur, trade,
                                          qty_text(r)))
         n = len(self.imported)
@@ -10757,6 +11163,8 @@ class App:
             self.imp_src = src
             self.lbl_file.config(text=f'{src} — {len(rows)} รายการ')
             self.refresh_imp()
+            self._pre_log('ค้นหา', rows, chk_active,
+                          lambda r: '%s %s' % (r.get('kind', ''), r.get('disp') or r.get('name') or ''))
             self.log(f'นำเข้าจาก {src}: {len(rows)} รายการ', 'OK')
             log_event('import', file=os.path.basename(path), source=src, rows=len(rows))
         except Exception as ex:
@@ -10827,11 +11235,18 @@ class App:
     def run_multi(self):
         if not self.imported:
             return
+        if not self.running:            # v1.4.0 ตรวจก่อนเริ่ม (⛔ เด้งถาม · ⚠ ลง Log)
+            crit = self._precheck('ค้นหา', 'รายการ', list(self.imported), chk_active,
+                                  lambda r: '%s %s' % (r.get('kind', ''), r.get('disp') or r.get('name') or ''))
+            if crit is None:
+                return
+        else:
+            crit = list(self.imported)
         n_deep = sum(1 for c in self.imported if has_deep(c))
         if n_deep:
             self.log('ไฟล์มีเงื่อนไข (ระยะเวลา/แลกเปลี่ยน/จำนวน) %d รายการ → '
                      'เข้าไปดูค่าจริงในหน้ารายละเอียดให้อัตโนมัติ' % n_deep, 'INFO')
-        self.start([dict(c) for c in self.imported])
+        self.start([dict(c) for c in crit])
 
     def start(self, criteria):
         if chrome_held_ask(self, lambda: self.start(criteria)):
@@ -15086,6 +15501,10 @@ def ev_days(raw):
     if 'ถาวร' in s or s.lower() in ('perm', 'permanent', 'forever'):
         return 'perm'
     m = re.search(r'(\d+)\s*(วัน|day)', s, re.I)
+    if not m:                          # v1.3.3: เลขเปล่าๆ 30 = 30 วัน (ถาวรต้องเขียนว่าถาวร)
+        m = re.fullmatch(r'(\d+)(?:\.0+)?', s.strip())
+        if m and int(m.group(1)) <= 0:
+            m = None
     return int(m.group(1)) if m else None
 
 
