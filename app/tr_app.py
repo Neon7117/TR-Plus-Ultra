@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.5.3 : หลักฐานเทส — กดบันทึกภาพตอนยังติ๊กตรวจไม่ครบ = เด้งเตือนแยกชัดๆ (บอกรายการที่ยังไม่ติ๊ก · ปุ่มหลัก = กลับไปติ๊กก่อน) · แถวที่ยังไม่ติ๊กเป็นสีเหลือง
 V1.5.2 : แท็บ 🛍 สร้าง Product — คำบนหน้าจอไม่ผูกกับชีทตัวอย่าง (ไฟล์ไหน ชีทไหนก็ได้ที่มีกล่อง Product) · อ่านป้ายได้หลายแบบขึ้น
 V1.5.1 : ย้ายแท็บ 🛍 สร้าง Product ไปอยู่ถัดจาก 📦 สร้าง Bundle (ใช้งานต่อกัน)
 V1.5.0 : แท็บใหม่ 🛍 สร้าง Product (Main Shop · Fame Shop) จากชีทที่มีกล่อง Product (ไฟล์ไหน ชีทไหนก็ได้) — หมวดหมู่ · ชื่อ · รูป · Dream Point · Bundle · เวลาขาย · จำกัดการซื้อ · ↺ รีเซ็ตเวลาเริ่มขาย
@@ -16531,10 +16532,17 @@ class EvTab:
         if full:
             msgs.append('มีภาพเต็มจอ %d ภาพ — ภาพรวมจะใหญ่มาก' % full)
         res = self.result()
-        if res[1] == 'todo' and s['items']:
-            msgs.append(res[0])
-        if msgs and not messagebox.askyesno('บันทึกเลยไหม?', '\n'.join('· ' + m for m in msgs) +
-                                            '\n\nบันทึกภาพเลยไหม? (ผลตรวจในภาพจะเขียนตามจริง)'):
+        # v1.5.3 ลืมติ๊กตรวจบ่อย — ยังติ๊กไม่ครบ = เด้งเตือนแยกชัดๆ (ปุ่มหลัก = กลับไปติ๊กก่อน)
+        its = s['items']
+        todo = [i for i in range(len(its)) if not self.checks.get(i)]
+        if its and todo:
+            if not self._ask_unchecked([its[i].get('name') or '?' for i in todo], len(its), msgs):
+                self._nag = self.cur
+                self.refresh_checks()
+                self._goto_todo(todo[0])
+                return
+        elif msgs and not messagebox.askyesno('บันทึกเลยไหม?', '\n'.join('· ' + m for m in msgs) +
+                                              '\n\nบันทึกภาพเลยไหม? (ผลตรวจในภาพจะเขียนตามจริง)'):
             return
         out = self._out_dir()
         try:
@@ -16577,6 +16585,67 @@ class EvTab:
             else:
                 self.tab.after(200, wait)
         self.tab.after(200, wait)
+
+    def _ask_unchecked(self, names, n_all, extra=()):
+        """เด้งเตือน “ยังไม่ได้ติ๊กตรวจ” — คืน True = บันทึกเลย · False = กลับไปติ๊กก่อน (ค่าเริ่มต้น)
+        Enter / Esc / ปิดหน้าต่าง = กลับไปติ๊ก (กันกดผ่านไปโดยไม่ได้อ่าน)"""
+        a = self.app
+        res = {'v': False}
+        top = tk.Toplevel(a.root)
+        top.title('ยังไม่ได้ติ๊กตรวจ')
+        top.configure(bg=C['bg'])
+        top.transient(a.root)
+        body = tk.Frame(top, bg=C['bg'])
+        body.pack(fill='both', expand=True, padx=18, pady=(14, 8))
+        tk.Label(body, text='⚠  ยังไม่ได้ติ๊กตรวจ %d จาก %d รายการ' % (len(names), n_all), bg=C['bg'],
+                 fg=C['err'], font=('Segoe UI', 12, 'bold'), anchor='w').pack(fill='x')
+        lines = ['☐  ' + str(nm) for nm in names[:12]]
+        if len(names) > 12:
+            lines.append('   … อีก %d รายการ' % (len(names) - 12))
+        tk.Label(body, text='\n'.join(lines), bg=C['bg'], fg=C['fg'], font=FM, anchor='w',
+                 justify='left').pack(fill='x', pady=(8, 0))
+        if extra:
+            tk.Label(body, text='\n'.join('· ' + m for m in extra), bg=C['bg'], fg=C['warn'], font=FM,
+                     anchor='w', justify='left').pack(fill='x', pady=(8, 0))
+        tk.Label(body, text='ติ๊กในตาราง “ตรวจเทียบกับชีท”: คลิกช่อง ☐ → ✓ ตรง → ✗ ไม่ตรง  (หรือกด ✓ ตรงทั้งหมด)\n'
+                            'บันทึกตอนนี้ = ในภาพจะเขียนว่า “ยังไม่ได้ตรวจ”',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w', justify='left').pack(fill='x', pady=(10, 0))
+        foot = tk.Frame(top, bg=C['card'])
+        foot.pack(fill='x', side='bottom')
+
+        def pick(v):
+            res['v'] = v
+            top.destroy()
+        b_back = a._btn(foot, '↩  กลับไปติ๊กก่อน', lambda: pick(False), primary=True)
+        b_back.pack(side='left', padx=14, pady=12, ipadx=14, ipady=4)
+        a._btn(foot, 'บันทึกเลย (ยังไม่ได้ตรวจ)', lambda: pick(True)).pack(
+            side='right', padx=14, pady=12, ipadx=8, ipady=4)
+        top.protocol('WM_DELETE_WINDOW', lambda: pick(False))
+        top.bind('<Escape>', lambda e: pick(False))
+        top.bind('<Return>', lambda e: pick(False))
+        try:                                   # วางกลางหน้าต่างโปรแกรม
+            top.update_idletasks()
+            w, h = top.winfo_reqwidth(), top.winfo_reqheight()
+            x = a.root.winfo_rootx() + max(0, (a.root.winfo_width() - w) // 2)
+            y = a.root.winfo_rooty() + max(0, (a.root.winfo_height() - h) // 3)
+            top.geometry('+%d+%d' % (x, y))
+            top.grab_set()
+            b_back.focus_set()
+        except Exception:
+            pass
+        a.root.wait_window(top)
+        self.app.log('หลักฐานเทส: ยังไม่ได้ติ๊กตรวจ %d/%d รายการ — %s'
+                     % (len(names), n_all, 'ผู้ใช้เลือกบันทึกเลย' if res['v'] else 'กลับไปติ๊กก่อน'), 'WARN')
+        return res['v']
+
+    def _goto_todo(self, i):
+        """พาไปแถวแรกที่ยังไม่ได้ติ๊ก"""
+        try:
+            self.ck.selection_set(str(i))
+            self.ck.see(str(i))
+            self.ck.focus_set()
+        except Exception:
+            pass
 
     def _saved(self, idx, path, res, box):
         self.saving = False
@@ -16787,11 +16856,14 @@ class EvTab:
         if self.shots:                    # วันที่รับของ = วันที่แคปภาพแรกของเซ็ต
             day = datetime.fromtimestamp(min(x['mtime'] for x in self.shots)).date()
         mark = {'': '☐', 'ok': '✓', 'bad': '✗'}
+        # v1.5.3 กดบันทึกแล้วกลับมาติ๊ก = แถวที่ยังไม่ติ๊กเป็นสีเหลือง (เฉพาะเซ็ตที่เพิ่งเตือน)
+        nag = self.cur is not None and getattr(self, '_nag', None) == self.cur
+        self.ck.tag_configure('need', background=C['row_warn_bg'], foreground=C['row_warn_fg'])
         for i, it in enumerate(its):
             gift, exp, bag = ev_expect(it, day)
             c = self.checks.get(i, '')
             self.ck.insert('', 'end', iid=str(i), values=(mark[c], gift, it.get('amt') or '1', exp, bag),
-                           tags=(c,) if c else ())
+                           tags=(c,) if c else (('need',) if nag else ()))
         t, kind = self.result() if self.cur is not None else ('', 'todo')
         self.lbl_res.config(text=t, fg={'ok': C['ok'], 'bad': C['err']}.get(kind, C['warn']))
 
