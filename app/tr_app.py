@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.5.4 : หลักฐานเทส — ปุ่ม 🧹 ล้างคิว ลบทุกเซ็ตในรายการทีเดียว (ไม่แตะไฟล์ชีท/ภาพที่เซฟ)
 V1.5.3 : หลักฐานเทส — กดบันทึกภาพตอนยังติ๊กตรวจไม่ครบ = เด้งเตือนแยกชัดๆ (บอกรายการที่ยังไม่ติ๊ก · ปุ่มหลัก = กลับไปติ๊กก่อน) · แถวที่ยังไม่ติ๊กเป็นสีเหลือง
 V1.5.2 : แท็บ 🛍 สร้าง Product — คำบนหน้าจอไม่ผูกกับชีทตัวอย่าง (ไฟล์ไหน ชีทไหนก็ได้ที่มีกล่อง Product) · อ่านป้ายได้หลายแบบขึ้น
 V1.5.1 : ย้ายแท็บ 🛍 สร้าง Product ไปอยู่ถัดจาก 📦 สร้าง Bundle (ใช้งานต่อกัน)
@@ -16000,6 +16001,7 @@ class EvTab:
         self.cb_sheet.set('ทุกชีท')
         self.cb_sheet.pack(side='left', padx=(6, 0))
         self.cb_sheet.bind('<<ComboboxSelected>>', lambda e: self.refresh())
+        a._btn(bar3, '🧹 ล้างคิว', self.clear_sets).pack(side='right', ipadx=4, ipady=1)
         self.lbl_file = tk.Label(s1, text='ยังไม่ได้นำเข้าไฟล์ชีท', bg=C['bg'], fg=C['dim'],
                                  font=('Segoe UI', 8), anchor='w', justify='left', wraplength=360)
         self.lbl_file.pack(fill='x', pady=(6, 4))
@@ -16313,6 +16315,28 @@ class EvTab:
         del self.sets[i]
         self._save()
         self.refresh()
+
+    def clear_sets(self):
+        """v1.5.4 ล้างคิวทั้งหมดทีเดียว (เดิมต้องลบทีละเซ็ต) — ไม่แตะไฟล์ชีท ไม่แตะภาพที่เซฟไว้"""
+        if self.saving:
+            return messagebox.showinfo('กำลังบันทึก', 'รอบันทึกภาพเสร็จก่อนนะ')
+        if not self.sets:
+            return messagebox.showinfo('ล้างคิว', 'คิวว่างอยู่แล้ว')
+        done = sum(1 for x in self.sets if x.get('done'))
+        msg = 'ล้างคิวทั้งหมด %d เซ็ต? (บันทึกแล้ว %d · ยังไม่บันทึก %d)' % (len(self.sets), done, len(self.sets) - done)
+        if self._busy_slots():
+            msg += '\n\n⚠ ภาพที่แคปค้างไว้ของเซ็ตที่ทำอยู่จะหายด้วย'
+        msg += '\n\nไม่แตะไฟล์ชีท ไม่แตะภาพที่เซฟไว้ · อยากได้คืนกด ↻ อ่านใหม่'
+        if not messagebox.askyesno('ล้างคิว', msg):
+            return
+        self._clear_slots()
+        self.cur = None
+        self.checks = {}
+        n = len(self.sets)
+        self.sets = []
+        self._save()
+        self.refresh()
+        self.app.log('หลักฐานเทส: ล้างคิว %d เซ็ต' % n, 'INFO')
 
     # ---------- รับภาพจากโฟลเดอร์ Screenshots ----------
     def _list_png(self):
