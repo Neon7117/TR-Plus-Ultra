@@ -7,6 +7,8 @@ V1.5.6 : สร้าง Bundle — หน้าต่างนำเข้า�
 V1.5.7 : สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) — ต่อท้ายชื่อด้วยเดือน เช่น “… Day 1 (Nov)” จากช่อง Start ในชีท เปลี่ยนเองได้
 V1.5.8 : สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) — ค้นไอเทมบนเว็บด้วย Aztek Item Id อย่างเดียว ไม่ใช้ fdItemNum
 V1.5.9 : สร้าง Bundle (ทุกโหมด) — ค้นไอเทมบนเว็บด้วย Aztek Item Id อย่างเดียว เลิกใช้ ItemKind/fdItemNum
+V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) — ไฟล์ชื่อ Check in Booster ตั้งชื่อ “Check in Booster : Mid - PAID Day 13 (Nov)” · ไฟล์อื่นตามชีท
+V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.5.5 : Item Code — กด ↺ รีเซ็ตเวลาเริ่ม แล้วกด Actions > ล็อก ให้ด้วย เหมือน WR Master
 V1.5.4 : หลักฐานเทส — ปุ่ม 🧹 ล้างคิว ลบทุกเซ็ตในรายการทีเดียว (ไม่แตะไฟล์ชีท/ภาพที่เซฟ)
 V1.5.3 : หลักฐานเทส — กดบันทึกภาพตอนยังติ๊กตรวจไม่ครบ = เด้งเตือนแยกชัดๆ (บอกรายการที่ยังไม่ติ๊ก · ปุ่มหลัก = กลับไปติ๊กก่อน) · แถวที่ยังไม่ติ๊กเป็นสีเหลือง
@@ -5301,9 +5303,11 @@ class BundleImportDialog:
 # ============================================================================
 _SPLIT_EVENT_LBL = ('webevent', 'event', 'eventname', 'กิจกรรม', 'ชื่อกิจกรรม')
 _SPLIT_DAY_LBL = ('day', 'วัน', 'วันที่', 'days')
+_SPLIT_ITEMNAME_LBL = ('itemname', 'displayname', 'ชื่อไอเทม', 'ชื่อของรางวัล', 'name')
 _SPLIT_SKIP_LBL = ('bundleno', 'bundle', 'bundleid', 'เลขbundle', 'no', 'ลำดับ')
 _SPLIT_START_LBL = ('start', 'startdate', 'เริ่ม', 'วันเริ่ม', 'วันที่เริ่ม', 'เริ่มกิจกรรม', 'วันเริ่มกิจกรรม')
 SPLIT_MON_AUTO = 'ตามชีท'
+_SPLIT_CIB_NAME = 'Check in Booster'      # v1.5.10 ไฟล์ชื่อ Check in Booster → ชื่อกิจกรรมขึ้นต้นแบบนี้ (ผู้ใช้สั่ง)
 SPLIT_MON_NONE = 'ไม่ใส่'
 
 
@@ -5334,6 +5338,7 @@ def bundle_split_info(rows, sheet):
         row = rows[hr] or []
         fc = next(c for c, v in enumerate(row) if _hkey(v) == 'fditemnum')
         dc = next((c for c, v in enumerate(row) if _hkey(v) in _SPLIT_DAY_LBL), None)
+        nc = next((c for c, v in enumerate(row) if _hkey(v) in _SPLIT_ITEMNAME_LBL), None)   # v1.5.11 ชื่อไอเทม
         label = ''
         for c in range(fc - 1, max(-1, fc - 7), -1):          # ใกล้หัวตารางที่สุด (ฝั่งซ้ายมักเป็นโน้ตยาวๆ)
             v = row[c] if c < len(row) else None
@@ -5345,7 +5350,7 @@ def bundle_split_info(rows, sheet):
                 label = t
             break
         end = heads[k + 1] if k + 1 < len(heads) else len(rows)
-        kinds, days, gap = [], [], 0
+        kinds, days, names, gap = [], [], [], 0
         for r in range(hr + 1, end):
             kd = src_int(cell(r, fc))
             if kd is None:
@@ -5357,9 +5362,28 @@ def bundle_split_info(rows, sheet):
             kinds.append(kd)
             d = cell(r, dc) if dc is not None else None
             days.append(src_int(d) or (clean_text(d) if d not in (None, '') else ''))
+            names.append(re.sub(r'\s+', ' ', clean_text(cell(r, nc))).strip() if nc is not None else '')
         if kinds:
-            tables.append({'label': label, 'kinds': kinds, 'days': days})
+            tables.append({'label': label, 'kinds': kinds, 'days': days, 'names': names})
     return {'event': event or (clean_text(sheet) or str(sheet)), 'tables': tables, 'month': month}
+
+
+def split_is_cib(path):
+    """ไฟล์ชื่อมีคำว่า Check in Booster ไหม (ไม่สนตัวพิมพ์/ช่องว่าง/ขีด เช่น "Nov Check in Booster 1.xlsx", "[Nov] Check-in Booster")"""
+    return 'checkinbooster' in re.sub(r'[^a-z]', '', os.path.basename(str(path or '')).lower())
+
+
+def split_event_name(event, path):
+    """ชื่อกิจกรรมสำหรับตั้งชื่อบันเดิ้ลแยก
+    ไฟล์ Check in Booster: "Premium Check-In : Mid" -> "Check in Booster : Mid" (เอาส่วนหลัง : ของชีทมาต่อ)
+    ไฟล์อื่น: ตามที่ชีทเขียน (ไม่แตะ)"""
+    event = re.sub(r'\s+', ' ', str(event or '')).strip()
+    if not split_is_cib(path):
+        return event
+    if 'checkinbooster' in re.sub(r'[^a-z]', '', event.lower()):
+        return event
+    tail = event.split(':', 1)[1].strip() if ':' in event else event
+    return _SPLIT_CIB_NAME + (' : ' + tail if tail else '')
 
 
 def split_month(info, choice=SPLIT_MON_AUTO):
@@ -5400,6 +5424,8 @@ def split_bundles(bundles, info, month=''):
             nb = {k: v for k, v in b.items() if k not in ('items', 'rewards', 'name', 'chk')}
             nm = '%s - %s %s' % (ev, label, tail) + ((' (%s)' % month) if month else '')
             one = {k: v for k, v in it.items() if k != 'kind'}   # v1.5.8 ค้นบนเว็บด้วย Aztek Item Id เท่านั้น (ไม่ใช้ fdItemNum)
+            if not one.get('disp') and t and i < len(t.get('names') or []) and t['names'][i]:
+                one['disp'] = t['names'][i]                        # v1.5.11 ชื่อไอเทมจากชีท (ไว้โชว์เท่านั้น)
             nb.update(name=nm, items=[one], rewards=[], src_bundle_id=None)
             out.append(nb)
     return out, warns
@@ -5463,6 +5489,8 @@ class BundleSplitImportDialog(BundleImportDialog):
             for b, r in zip(bs, raw):                       # จัดกลุ่มตามชีท (ข้อมูลตั้งชื่อเป็นของแต่ละชีท)
                 groups.setdefault(id(b.get('_split')), (b.get('_split'), []))[1].append(r)
             for info, grp in groups.values():
+                if info:                                    # v1.5.10 ไฟล์ Check in Booster ใช้ชื่อกิจกรรม "Check in Booster : …"
+                    info = dict(info, event=split_event_name(info.get('event'), getattr(self, 'path', '')))
                 mon = split_month(info, choice)
                 if not mon and choice == SPLIT_MON_AUTO:
                     extra.append('%s: ไม่เจอวันเริ่ม (Start) ในชีท — ไม่ได้ต่อท้ายเดือน · เลือกเดือนเองได้ที่ “เดือนท้ายชื่อ”'
@@ -9372,6 +9400,15 @@ class App:
                     self.set_progress(i - 1, len(bundles), b['name'][:30])
                     self.log('[%d/%d] %s  (%d ไอเทม)'
                              % (i, len(bundles), b['name'], len(b['items'])), 'STEP')
+                    if do:                      # v1.5.11 สร้างจริง: ยังไม่ได้สร้าง = ห้ามข้าม ลองจนได้ / ถามคน
+                        res = await self._b_one_sure(page, b, hold)
+                        if res == 'stop':
+                            self.b_cancel = True
+                        if res == 'ok':
+                            okc += 1
+                        else:
+                            errc += 1
+                        continue
                     try:
                         if await self._b_one(page, b, do, hold):
                             okc += 1
@@ -9392,7 +9429,85 @@ class App:
                 except Exception:
                     pass
 
+    async def _b_one_sure(self, page, b, hold, max_tries=3):
+        """v1.5.11 สร้างจริงแบบ “เน้นถูก ไม่เน้นรีบ” — ยังไม่ได้สร้าง ห้ามข้ามไปอันถัดไป
+        · ไม่ผ่านก่อนกดสร้าง / เว็บปฏิเสธชัดเจน -> โหลดหน้าใหม่ กรอกใหม่ (สูงสุด max_tries รอบ) แล้วถามคน
+        · กดสร้างแล้วไม่รู้ผล -> ห้ามกดซ้ำเอง (กันได้บันเดิลซ้ำ) ถามคนให้เช็กบนเว็บก่อน
+        คืน 'ok' / 'skip' / 'stop'"""
+        tries = 0
+        while not self.b_cancel:
+            tries += 1
+            self._b_state = 'pre'
+            try:
+                ok = await self._b_one(page, b, True, hold)
+            except Exception as ex:
+                ok = False
+                self.log('   ✗ ' + str(ex)[:160], 'ERR')
+                log_event('error', where='bundle_one', name=b['name'], message=str(ex)[:200])
+            if ok:
+                return 'ok'
+            if self.b_cancel:
+                break
+            st = getattr(self, '_b_state', 'pre')
+            if st == 'unknown':
+                ans = await asyncio.to_thread(self._b_ask, b['name'], True)
+            elif tries < max_tries:
+                self.log('   ↻ ยังไม่ได้สร้าง — โหลดหน้าใหม่แล้วลองอีกรอบ (%d/%d)' % (tries + 1, max_tries), 'WARN')
+                await page.wait_for_timeout(2000)
+                continue
+            else:
+                ans = await asyncio.to_thread(self._b_ask, b['name'], False, max_tries)
+            if ans == 'retry':
+                tries = 0
+                self.log('   ↻ ผู้ใช้ให้ลองสร้างใหม่', 'WARN')
+                continue
+            if ans == 'made':
+                self.log('   ✓ ผู้ใช้เช็กแล้วว่าสร้างบนเว็บแล้ว — ไปอันถัดไป', 'OK')
+                self.add_made_bundle(b['name'], '', len(b['items']))
+                return 'ok'
+            if ans == 'skip':
+                self.log('   ⚠ ผู้ใช้สั่งข้ามบันเดิลนี้ (ยังไม่ได้สร้าง)', 'WARN')
+                return 'skip'
+            self.log('   ■ ผู้ใช้สั่งหยุด', 'WARN')
+            return 'stop'
+        return 'stop'
+
+    def _b_ask(self, name, unknown, tries=3):
+        """ถามคนตอนสร้างไม่สำเร็จ (เรียกจากเธรดงาน — โชว์บนหน้าจอหลักแล้วรอคำตอบ)"""
+        ev = threading.Event()
+        box = {'v': 'stop'}
+
+        def _show():
+            try:
+                if unknown:
+                    a = messagebox.askyesnocancel(
+                        'เช็กบนเว็บก่อนนะ',
+                        'กดสร้าง “%s” แล้ว แต่เว็บไม่ตอบกลับ\n'
+                        'ไม่รู้ว่าสร้างไปแล้วหรือยัง — ไปดูในหน้า Bundles บนเว็บก่อน\n\n'
+                        'Yes  = ยังไม่มีบนเว็บ → สร้างใหม่\n'
+                        'No   = มีบนเว็บแล้ว → ไปอันถัดไป\n'
+                        'Cancel = หยุดทั้งหมด' % name, icon='warning')
+                    box['v'] = 'retry' if a else ('made' if a is False else 'stop')
+                else:
+                    a = messagebox.askyesnocancel(
+                        'สร้างไม่สำเร็จ',
+                        'ลองสร้าง “%s” %d รอบแล้วยังไม่ผ่าน (ยังไม่ได้กดสร้าง/เว็บไม่รับ — ดู Log)\n\n'
+                        'Yes  = ลองใหม่อีกรอบ\n'
+                        'No   = ข้ามอันนี้ไปก่อน\n'
+                        'Cancel = หยุดทั้งหมด' % (name, tries), icon='warning')
+                    box['v'] = 'retry' if a else ('skip' if a is False else 'stop')
+            except Exception:
+                box['v'] = 'stop'
+            finally:
+                ev.set()
+        self.root.after(0, _show)
+        ev.wait()
+        return box['v']
+
     async def _b_one(self, page, b, do, hold):
+        # v1.5.11 สถานะไว้ให้ตัววนรู้ว่าลองใหม่ได้ปลอดภัยไหม:
+        #   pre = ยังไม่ได้กดสร้าง / เว็บปฏิเสธชัดเจน (ลองใหม่ได้) · unknown = กดแล้วไม่รู้ผล (ต้องให้คนเช็กก่อน)
+        self._b_state = 'pre'
         await page.goto(BUNDLE_CREATE_URL, wait_until='domcontentloaded', timeout=45000)
         await page.wait_for_timeout(2500)
         if any(k in page.url.lower() for k in ('login', 'signin', 'auth')):
@@ -9418,14 +9533,22 @@ class App:
                 done.append(it)
             else:
                 missed.append(it['id'])
+        row_bad = []
         if done:
             await self._b_expand(page)
             nth = {}      # ไอเทมซ้ำ = คนละใบ ต้องตั้งค่าให้ครบทุกใบ
             for it in done:
                 nth[it['id']] = nth.get(it['id'], 0) + 1
-                await self._b_set_row(page, it['id'], it['qty'], it['tier'], nth[it['id']])
+                if await self._b_set_row(page, it['id'], it['qty'], it['tier'], nth[it['id']]) is False:
+                    row_bad.append(it['id'])
         if missed:
             self.log('   ⚠ ไอเทมที่เพิ่มไม่ได้: %s' % ', '.join(missed), 'ERR')
+        if do and (missed or row_bad or self.b_cancel):
+            # v1.5.11 เน้นถูก: ของไม่ครบ / Tier ไม่เข้า = ห้ามกดสร้าง (ไม่งั้นได้บันเดิลขาดของ หรือเว็บไม่รับ)
+            if row_bad:
+                self.log('   ✗ ตั้งจำนวน/Tier ไม่สำเร็จ: %s' % ', '.join(row_bad), 'ERR')
+            self.log('   ✗ ยังกรอกไม่ครบ — ไม่กดสร้าง', 'ERR')
+            return False
 
         # [3] famepoint / exp
         wallet_bad = []
@@ -9493,6 +9616,19 @@ class App:
         # ดักคำตอบของเว็บไว้ตั้งแต่ก่อนกด — เลข Bundle อยู่ในคำตอบนั้น
         hits = []
 
+        async def _hits_id(hs):
+            for rp in list(hs):
+                try:
+                    got = _dig_id(await rp.json())
+                except Exception:
+                    got = ''
+                if got:
+                    return got
+            try:
+                return str(await page.evaluate(JS_BUNDLE_MADE_ID) or '').strip()
+            except Exception:
+                return ''
+
         async def _grab(resp):
             try:
                 if resp.request.method in ('POST', 'PUT', 'PATCH') \
@@ -9502,6 +9638,7 @@ class App:
                 pass
         page.on('response', _grab)
         try:
+            self._b_state = 'unknown'
             await btn.click(timeout=10000)
             await page.wait_for_timeout(900)
 
@@ -9518,6 +9655,11 @@ class App:
                 await page.wait_for_timeout(300)
                 waited += 300
             await page.wait_for_timeout(1200)
+            # v1.5.11 เลข Bundle ยังไม่มา (เว็บช้า/คำตอบแรกเป็นอย่างอื่น) — รอคำตอบถัดไปอีกหน่อย
+            extra = 0
+            while hits and extra < 12000 and not await _hits_id(hits):
+                await page.wait_for_timeout(500)
+                extra += 500
         finally:
             try:
                 page.remove_listener('response', _grab)
@@ -9528,11 +9670,18 @@ class App:
         bid = ''
         for resp in hits:
             try:
-                code = resp.status
+                st = resp.status
+            except Exception:
+                st = 0
+            try:
                 body = await resp.json()
             except Exception:
                 body = None
-            bid = bid or _dig_id(body)
+            got = _dig_id(body)
+            if got and not bid:
+                bid, code = got, st          # ใช้สถานะของคำตอบที่มีเลข Bundle (คำตอบสร้างจริง)
+            elif not bid:
+                code = st
         if not bid:
             try:
                 bid = str(await page.evaluate(JS_BUNDLE_MADE_ID) or '').strip()
@@ -9540,6 +9689,10 @@ class App:
                 bid = ''
 
         good = 200 <= code < 300
+        if good:
+            self._b_state = 'ok'
+        elif code and code < 500:
+            self._b_state = 'pre'           # เว็บปฏิเสธชัดเจน (4xx) = ยังไม่ได้สร้าง ลองใหม่ได้
         if good:
             self.log('   ✓ สร้างบันเดิลแล้ว%s'
                      % ('  ·  Bundle ID = %s' % bid if bid else
@@ -9799,6 +9952,14 @@ class App:
 
         # <select> ธรรมดา ตั้งได้เลย
         r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'set', want, TIERS, nth])
+        waited = 0
+        while str(r).endswith('(ช่องนี้มี: )') and waited < 12000 and not getattr(self, 'b_cancel', False):
+            # v1.5.11 ตัวเลือกในช่องยังโหลดไม่เสร็จ (ว่างเปล่า) — รอเว็บแล้วลองใหม่ ไม่ปัดตก
+            await page.wait_for_timeout(500)
+            waited += 500
+            r = await page.evaluate(JS_BUNDLE_ACT, [how, str(key), what, 'set', want, TIERS, nth])
+        if waited and r == 'ok':
+            self.log('   · รอตัวเลือก %s โหลด %.1f วิ' % (what, waited / 1000.0), 'INFO')
         if r == 'ok':
             self.log('   · %s %s = %s' % (who, what, want), 'INFO')
             return True
@@ -9887,7 +10048,8 @@ class App:
         if r != 'ok':
             self.log('   ! ตั้งจำนวนของ%s ไม่ได้ (%s)' % (who, r), 'WARN')
         if tier:
-            await self._b_choose(page, 'id', item_id, 'tier', tier, label=who, nth=nth)
+            return await self._b_choose(page, 'id', item_id, 'tier', tier, label=who, nth=nth)
+        return r == 'ok'
 
     async def _b_pick(self, page, label, value):
         r = await page.evaluate(JS_PICK_TYPE, [value, label])
