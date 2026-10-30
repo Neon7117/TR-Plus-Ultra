@@ -3,6 +3,7 @@
 """
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
+V1.5.6 : สร้าง Bundle — หน้าต่างนำเข้ามีตัวเลือก “1 ไอเทม 1 บันเดิ้ล” (กิจกรรมพิเศษ เช่น Check-in Booster) ชื่อ = กิจกรรม - ตาราง Day N
 V1.5.5 : Item Code — กด ↺ รีเซ็ตเวลาเริ่ม แล้วกด Actions > ล็อก ให้ด้วย เหมือน WR Master
 V1.5.4 : หลักฐานเทส — ปุ่ม 🧹 ล้างคิว ลบทุกเซ็ตในรายการทีเดียว (ไม่แตะไฟล์ชีท/ภาพที่เซฟ)
 V1.5.3 : หลักฐานเทส — กดบันทึกภาพตอนยังติ๊กตรวจไม่ครบ = เด้งเตือนแยกชัดๆ (บอกรายการที่ยังไม่ติ๊ก · ปุ่มหลัก = กลับไปติ๊กก่อน) · แถวที่ยังไม่ติ๊กเป็นสีเหลือง
@@ -5283,6 +5284,157 @@ class BundleImportDialog:
         self.top.destroy()
 
 
+# ============================================================================
+#  [5.5.1] สร้าง Bundle — โหมด “1 ไอเทม 1 บันเดิ้ล” (v1.5.6) สำหรับกิจกรรมพิเศษ เช่น Check-in Booster
+#      ผู้ใช้เลือกในหน้าต่างนำเข้า: ปกติ (ตามชีท) / 1 ไอเทม 1 บันเดิ้ล
+#      ตัวอ่านชีทเดิม (parse_bundle_sheet) ไม่แตะ — แค่เอาผลมาแยกทีละไอเทม แล้วตั้งชื่อ
+#      ชื่อ = <ชื่อกิจกรรม> - <ชื่อตาราง> Day <วัน>   (ผู้ใช้เลือก) · 1 แถว = 1 บันเดิ้ล (ไอเทมซ้ำวันก็แยก)
+#        ชื่อกิจกรรม = ข้อความข้างป้าย Web-Event / Event / กิจกรรม (ไม่มี = ชื่อชีท)
+#        ชื่อตาราง   = ข้อความในแถวหัวตาราง (ฝั่งซ้ายของ fdItemNum) บรรทัดแรก เช่น “FREE” · ไม่มี = ตาราง N
+#        Day         = คอลัมน์ Day / วัน ในตาราง · ไม่มี = ลำดับแถว (#N)
+# ============================================================================
+_SPLIT_EVENT_LBL = ('webevent', 'event', 'eventname', 'กิจกรรม', 'ชื่อกิจกรรม')
+_SPLIT_DAY_LBL = ('day', 'วัน', 'วันที่', 'days')
+_SPLIT_SKIP_LBL = ('bundleno', 'bundle', 'bundleid', 'เลขbundle', 'no', 'ลำดับ')
+
+
+def bundle_split_info(rows, sheet):
+    """ข้อมูลสำหรับตั้งชื่อบันเดิ้ลแยก: {'event', 'tables': [{'label', 'kinds': [...], 'days': [...]}]}"""
+    cell = lambda r, c: (rows[r][c] if 0 <= r < len(rows) and rows[r] and 0 <= c < len(rows[r]) else None)
+    event = ''
+    for r in range(min(len(rows), 40)):
+        for c, v in enumerate(rows[r] or []):
+            if isinstance(v, str) and _hkey(v) in _SPLIT_EVENT_LBL and not event:
+                for c2 in range(c + 1, c + 5):
+                    t = clean_text(cell(r, c2))
+                    if t:
+                        event = re.sub(r'\s+', ' ', t)
+                        break
+    tables = []
+    heads = [r for r, row in enumerate(rows) if any(_hkey(v) == 'fditemnum' for v in (row or []))]
+    for k, hr in enumerate(heads):
+        row = rows[hr] or []
+        fc = next(c for c, v in enumerate(row) if _hkey(v) == 'fditemnum')
+        dc = next((c for c, v in enumerate(row) if _hkey(v) in _SPLIT_DAY_LBL), None)
+        label = ''
+        for c in range(fc - 1, max(-1, fc - 7), -1):          # ใกล้หัวตารางที่สุด (ฝั่งซ้ายมักเป็นโน้ตยาวๆ)
+            v = row[c] if c < len(row) else None
+            t = clean_text(v)
+            if not t or src_int(t) is not None or _hkey(t) in _SPLIT_SKIP_LBL or _hkey(t) in _SPLIT_DAY_LBL:
+                continue
+            t = re.sub(r'\s+', ' ', t.split('\n')[0]).strip()
+            if len(t) <= 40:
+                label = t
+            break
+        end = heads[k + 1] if k + 1 < len(heads) else len(rows)
+        kinds, days, gap = [], [], 0
+        for r in range(hr + 1, end):
+            kd = src_int(cell(r, fc))
+            if kd is None:
+                gap += 1
+                if kinds and gap >= 2:                          # จบตาราง (ใต้ตารางมักมีโน้ต/ตัวเลขอื่น)
+                    break
+                continue
+            gap = 0
+            kinds.append(kd)
+            d = cell(r, dc) if dc is not None else None
+            days.append(src_int(d) or (clean_text(d) if d not in (None, '') else ''))
+        if kinds:
+            tables.append({'label': label, 'kinds': kinds, 'days': days})
+    return {'event': event or (clean_text(sheet) or str(sheet)), 'tables': tables}
+
+
+def split_bundles(bundles, info):
+    """บันเดิ้ลตามชีท -> 1 ไอเทม 1 บันเดิ้ล · คืน (บันเดิ้ลใหม่, คำเตือน)
+    จับคู่ตารางกับบันเดิ้ลตามลำดับ และ fdItemNum ต้องเรียงตรงกัน ถึงใช้ Day จากชีท (ไม่ตรง = ใช้ลำดับ #N)"""
+    out, warns = [], []
+    tables = (info or {}).get('tables') or []
+    event = (info or {}).get('event') or ''
+    used = 0
+    for bi, b in enumerate(bundles):
+        items = b.get('items') or []
+        t = None
+        for j in range(used, len(tables)):
+            if items and [str(it.get('kind') or '') for it in items] == [str(x) for x in tables[j]['kinds']]:
+                t, used = tables[j], j + 1
+                break
+        label = (t or {}).get('label') or ('ตาราง %d' % (bi + 1))
+        ev = event or b.get('sheet') or ''
+        if t is None:
+            warns.append('%s · %s: หาคอลัมน์ Day ให้ตรงกับไอเทมไม่ได้ — ตั้งชื่อตามลำดับแถว (#1, #2, …)'
+                         % (b.get('sheet', ''), b.get('name', '')))
+        if b.get('rewards'):
+            warns.append('%s · %s: มี famepoint/exp %d รายการ — โหมด 1 ไอเทม 1 บันเดิ้ล ไม่ได้ใส่ให้ (ใส่เองถ้าต้องการ)'
+                         % (b.get('sheet', ''), b.get('name', ''), len(b['rewards'])))
+        for i, it in enumerate(items):
+            d = t['days'][i] if t and i < len(t['days']) else ''
+            tail = ('Day %s' % d) if d != '' else ('#%d' % (i + 1))
+            nb = {k: v for k, v in b.items() if k not in ('items', 'rewards', 'name', 'chk')}
+            nb.update(name='%s - %s %s' % (ev, label, tail), items=[dict(it)], rewards=[], src_bundle_id=None)
+            out.append(nb)
+    return out, warns
+
+
+def read_bundles_split_wb(wb, sheet, force_col=None):
+    """อ่านเหมือน read_bundles_wb (ตัวเดิม) + แนบข้อมูลตั้งชื่อแบบแยกไว้ (ใช้ตอนผู้ใช้เลือก 1 ไอเทม 1 บันเดิ้ล)"""
+    rows = [list(r) if r else [] for r in
+            wb[sheet].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True)]
+    bs, ws = parse_bundle_sheet(rows, sheet, force_col)
+    info = bundle_split_info(rows, sheet)
+    for b in bs:
+        b['_split'] = info
+    return bs, ws
+
+
+class BundleSplitImportDialog(BundleImportDialog):
+    """หน้าต่างนำเข้าของแท็บสร้าง Bundle + ตัวเลือก “ปกติ / 1 ไอเทม 1 บันเดิ้ล” (v1.5.6)
+    สืบทอดอย่างเดียว — ตัวอ่าน/หน้าต่างเดิมไม่แตะ · โหมดปกติได้ผลเหมือนเดิมเป๊ะ"""
+    read_fn = staticmethod(lambda wb, nm, col=None: read_bundles_split_wb(wb, nm, col))
+    SPLIT_NORMAL, SPLIT_ONE = 'normal', 'one'
+
+    def _split_bar(self):
+        if getattr(self, '_sbar', None) is not None:
+            return
+        self.v_split = tk.StringVar(value=self.SPLIT_NORMAL)
+        par = self.tree.master.master
+        bar = tk.Frame(par, bg=C['bg'])
+        bar.pack(fill='x', pady=(8, 0), before=self.tree.master)
+        tk.Label(bar, text='รูปแบบบันเดิ้ล', bg=C['bg'], fg=C['fg'], font=('Segoe UI', 9, 'bold')).pack(side='left')
+        for txt, val in (('ปกติ (ตามชีท)', self.SPLIT_NORMAL), ('1 ไอเทม 1 บันเดิ้ล', self.SPLIT_ONE)):
+            tk.Radiobutton(bar, text=txt, value=val, variable=self.v_split, command=self._split_changed,
+                           bg=C['bg'], fg=C['fg'], selectcolor=C['input'], activebackground=C['bg'],
+                           activeforeground=C['fg'], font=('Segoe UI', 9), bd=0,
+                           highlightthickness=0).pack(side='left', padx=(10, 0))
+        self.split_hint = tk.Label(bar, text='', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w')
+        self.split_hint.pack(side='left', padx=(12, 0))
+        self._sbar = bar
+
+    def _split_changed(self):
+        k = self._key()
+        if k in self.cache:
+            self._show(*self.cache[k])
+
+    def _show(self, bs, ws, note):
+        self._split_bar()
+        raw = [{kk: v for kk, v in b.items() if kk != '_split'} for b in bs]
+        days = any(any(d != '' for d in t['days']) for b in bs for t in (b.get('_split') or {}).get('tables', []))
+        if self.v_split.get() == self.SPLIT_ONE:
+            out, extra = [], []
+            groups = {}
+            for b, r in zip(bs, raw):                       # จัดกลุ่มตามชีท (ข้อมูลตั้งชื่อเป็นของแต่ละชีท)
+                groups.setdefault(id(b.get('_split')), (b.get('_split'), []))[1].append(r)
+            for info, grp in groups.values():
+                o, w = split_bundles(grp, info)
+                out += o
+                extra += w
+            BundleImportDialog._show(self, out, list(ws) + extra, note)
+            self.split_hint.config(text='แยกได้ %d บันเดิ้ล (บันเดิ้ลละ 1 ไอเทม)' % len(out), fg=C['ok'])
+        else:
+            BundleImportDialog._show(self, raw, ws, note)
+            self.split_hint.config(text=('ชีทนี้มีคอลัมน์ Day — ถ้าเป็นกิจกรรมแบบรายวัน เลือก “1 ไอเทม 1 บันเดิ้ล”'
+                                         if days else ''), fg=C['dim'])
+
+
 class CodeImportDialog(BundleImportDialog):
     """หน้าต่างนำเข้า Item Code — โครงเดียวกับนำเข้าบันเดิล เปลี่ยนแค่สิ่งที่อ่านกับที่โชว์"""
     TITLE = 'นำเข้า Item Code จาก Excel (WR Master)'
@@ -8812,7 +8964,7 @@ class App:
                                           filetypes=[('Excel', '*.xlsx *.xlsm'), ('ทุกไฟล์', '*.*')])
         if not path:
             return
-        dlg = BundleImportDialog(self.root, path)
+        dlg = BundleSplitImportDialog(self.root, path)       # v1.5.6 + ตัวเลือก 1 ไอเทม 1 บันเดิ้ล
         if not dlg.result:
             return
         for b in dlg.result:
