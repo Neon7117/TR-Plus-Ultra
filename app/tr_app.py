@@ -5,6 +5,8 @@ TR Plus Ultra — โปรแกรมหลัก
 ===========================
 V1.5.6 : สร้าง Bundle — หน้าต่างนำเข้ามีตัวเลือก “1 ไอเทม 1 บันเดิ้ล” (กิจกรรมพิเศษ เช่น Check-in Booster) ชื่อ = กิจกรรม - ตาราง Day N
 V1.5.7 : สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) — ต่อท้ายชื่อด้วยเดือน เช่น “… Day 1 (Nov)” จากช่อง Start ในชีท เปลี่ยนเองได้
+V1.5.8 : สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) — ค้นไอเทมบนเว็บด้วย Aztek Item Id อย่างเดียว ไม่ใช้ fdItemNum
+V1.5.9 : สร้าง Bundle (ทุกโหมด) — ค้นไอเทมบนเว็บด้วย Aztek Item Id อย่างเดียว เลิกใช้ ItemKind/fdItemNum
 V1.5.5 : Item Code — กด ↺ รีเซ็ตเวลาเริ่ม แล้วกด Actions > ล็อก ให้ด้วย เหมือน WR Master
 V1.5.4 : หลักฐานเทส — ปุ่ม 🧹 ล้างคิว ลบทุกเซ็ตในรายการทีเดียว (ไม่แตะไฟล์ชีท/ภาพที่เซฟ)
 V1.5.3 : หลักฐานเทส — กดบันทึกภาพตอนยังติ๊กตรวจไม่ครบ = เด้งเตือนแยกชัดๆ (บอกรายการที่ยังไม่ติ๊ก · ปุ่มหลัก = กลับไปติ๊กก่อน) · แถวที่ยังไม่ติ๊กเป็นสีเหลือง
@@ -5295,6 +5297,7 @@ class BundleImportDialog:
 #        Day         = คอลัมน์ Day / วัน ในตาราง · ไม่มี = ลำดับแถว (#N)
 #      v1.5.7: ต่อท้ายเดือน เช่น “… FREE Day 1 (Nov)” — เดือนจากช่อง Start ในชีท (แต่ละชีทของใครของมัน)
 #        ผู้ใช้เปลี่ยนได้ในหน้าต่างนำเข้า: ตามชีท / ไม่ใส่ / Jan…Dec
+#      v1.5.8: ไอเทมในโหมดนี้ไม่พก ItemKind (fdItemNum) — หน้าเว็บค้นด้วย Aztek Item Id (เลขคอลัมน์หน้าสุด) เท่านั้น
 # ============================================================================
 _SPLIT_EVENT_LBL = ('webevent', 'event', 'eventname', 'กิจกรรม', 'ชื่อกิจกรรม')
 _SPLIT_DAY_LBL = ('day', 'วัน', 'วันที่', 'days')
@@ -5396,7 +5399,8 @@ def split_bundles(bundles, info, month=''):
             tail = ('Day %s' % d) if d != '' else ('#%d' % (i + 1))
             nb = {k: v for k, v in b.items() if k not in ('items', 'rewards', 'name', 'chk')}
             nm = '%s - %s %s' % (ev, label, tail) + ((' (%s)' % month) if month else '')
-            nb.update(name=nm, items=[dict(it)], rewards=[], src_bundle_id=None)
+            one = {k: v for k, v in it.items() if k != 'kind'}   # v1.5.8 ค้นบนเว็บด้วย Aztek Item Id เท่านั้น (ไม่ใช้ fdItemNum)
+            nb.update(name=nm, items=[one], rewards=[], src_bundle_id=None)
             out.append(nb)
     return out, warns
 
@@ -9232,7 +9236,7 @@ class App:
         cb = ttk.Combobox(body, values=TIERS, width=12, state='readonly', font=FM)
         cb.set(it.get('tier', DEFAULT_TIER))
         cb.grid(row=2, column=1, sticky='w', padx=(12, 0))
-        tk.Label(body, text='ItemKind (ไม่บังคับ — ช่วยค้นเร็วขึ้น)', bg=C['bg'], fg=C['dim'],
+        tk.Label(body, text='ItemKind (ไว้ดูเฉยๆ — ไม่ใช้ค้นหา)', bg=C['bg'], fg=C['dim'],
                  font=('Segoe UI', 9)).grid(row=3, column=0, sticky='w', pady=5)
         vs['kind'] = tk.StringVar(value=str(it.get('kind') or ''))
         ek = self._entry(body, width=18)
@@ -9594,17 +9598,14 @@ class App:
         return False, {'page': checked, 'total': total, 'over': True}
 
     async def _b_add_item(self, page, it):
-        """แท็บ Item -> ค้นหา -> กดปุ่มเพิ่มของแถวที่ ID ตรงเป๊ะเท่านั้น
+        """แท็บ Item -> ค้นหาด้วย Aztek Item Id -> กดปุ่มเพิ่มของแถวที่ ID ตรงเป๊ะเท่านั้น
 
-        ค้นด้วย ItemKind ก่อนถ้ามี เพราะเจาะจงกว่า ผลน้อยกว่ามาก
-        ไม่เจอค่อยค้นด้วย Aztek Item Id แล้วไล่หน้าไปเรื่อยๆ
-        (เลขสั้นๆ อย่าง 51 / 134 ผลจะเยอะและกระจายหลายหน้า)
+        v1.5.9: ค้นด้วย Aztek Item Id อย่างเดียว — ห้ามใช้ ItemKind / fdItemNum (ผู้ใช้สั่ง)
+        fdItemNum เดียวกันมีหลาย Item Id ที่พารามิเตอร์ข้างในต่างกัน ต้องแยกด้วย Item Id
+        (เลขสั้นๆ อย่าง 51 / 134 ผลเยอะหลายหน้า — _b_seek ไล่ดูทีละหน้าจนเจอ ID ตรง)
         """
         await self._b_tab(page, SEL_BUNDLE['tab_item'])
-        terms = []
-        if str(it.get('kind') or '').strip():
-            terms.append((str(it['kind']).strip(), 'ItemKind'))
-        terms.append((str(it['id']), 'Item ID'))
+        terms = [(str(it['id']).strip(), 'Item ID')]
 
         last = {}
         for term, what in terms:
