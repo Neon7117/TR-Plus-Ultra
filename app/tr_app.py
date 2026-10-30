@@ -4,6 +4,7 @@
 TR Plus Ultra — โปรแกรมหลัก
 ===========================
 V1.5.6 : สร้าง Bundle — หน้าต่างนำเข้ามีตัวเลือก “1 ไอเทม 1 บันเดิ้ล” (กิจกรรมพิเศษ เช่น Check-in Booster) ชื่อ = กิจกรรม - ตาราง Day N
+V1.5.7 : สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) — ต่อท้ายชื่อด้วยเดือน เช่น “… Day 1 (Nov)” จากช่อง Start ในชีท เปลี่ยนเองได้
 V1.5.5 : Item Code — กด ↺ รีเซ็ตเวลาเริ่ม แล้วกด Actions > ล็อก ให้ด้วย เหมือน WR Master
 V1.5.4 : หลักฐานเทส — ปุ่ม 🧹 ล้างคิว ลบทุกเซ็ตในรายการทีเดียว (ไม่แตะไฟล์ชีท/ภาพที่เซฟ)
 V1.5.3 : หลักฐานเทส — กดบันทึกภาพตอนยังติ๊กตรวจไม่ครบ = เด้งเตือนแยกชัดๆ (บอกรายการที่ยังไม่ติ๊ก · ปุ่มหลัก = กลับไปติ๊กก่อน) · แถวที่ยังไม่ติ๊กเป็นสีเหลือง
@@ -5292,10 +5293,15 @@ class BundleImportDialog:
 #        ชื่อกิจกรรม = ข้อความข้างป้าย Web-Event / Event / กิจกรรม (ไม่มี = ชื่อชีท)
 #        ชื่อตาราง   = ข้อความในแถวหัวตาราง (ฝั่งซ้ายของ fdItemNum) บรรทัดแรก เช่น “FREE” · ไม่มี = ตาราง N
 #        Day         = คอลัมน์ Day / วัน ในตาราง · ไม่มี = ลำดับแถว (#N)
+#      v1.5.7: ต่อท้ายเดือน เช่น “… FREE Day 1 (Nov)” — เดือนจากช่อง Start ในชีท (แต่ละชีทของใครของมัน)
+#        ผู้ใช้เปลี่ยนได้ในหน้าต่างนำเข้า: ตามชีท / ไม่ใส่ / Jan…Dec
 # ============================================================================
 _SPLIT_EVENT_LBL = ('webevent', 'event', 'eventname', 'กิจกรรม', 'ชื่อกิจกรรม')
 _SPLIT_DAY_LBL = ('day', 'วัน', 'วันที่', 'days')
 _SPLIT_SKIP_LBL = ('bundleno', 'bundle', 'bundleid', 'เลขbundle', 'no', 'ลำดับ')
+_SPLIT_START_LBL = ('start', 'startdate', 'เริ่ม', 'วันเริ่ม', 'วันที่เริ่ม', 'เริ่มกิจกรรม', 'วันเริ่มกิจกรรม')
+SPLIT_MON_AUTO = 'ตามชีท'
+SPLIT_MON_NONE = 'ไม่ใส่'
 
 
 def bundle_split_info(rows, sheet):
@@ -5309,6 +5315,15 @@ def bundle_split_info(rows, sheet):
                     t = clean_text(cell(r, c2))
                     if t:
                         event = re.sub(r'\s+', ' ', t)
+                        break
+    month = None                                            # เดือนจากช่อง Start (ป้าย + วันที่ทางขวา)
+    for r in range(min(len(rows), 40)):
+        for c, v in enumerate(rows[r] or []):
+            if month is None and isinstance(v, str) and _hkey(v) in _SPLIT_START_LBL:
+                for c2 in range(c + 1, c + 5):
+                    d = wr_date(cell(r, c2))
+                    if d and 1 <= d[1] <= 12:
+                        month = d[1]
                         break
     tables = []
     heads = [r for r, row in enumerate(rows) if any(_hkey(v) == 'fditemnum' for v in (row or []))]
@@ -5341,10 +5356,20 @@ def bundle_split_info(rows, sheet):
             days.append(src_int(d) or (clean_text(d) if d not in (None, '') else ''))
         if kinds:
             tables.append({'label': label, 'kinds': kinds, 'days': days})
-    return {'event': event or (clean_text(sheet) or str(sheet)), 'tables': tables}
+    return {'event': event or (clean_text(sheet) or str(sheet)), 'tables': tables, 'month': month}
 
 
-def split_bundles(bundles, info):
+def split_month(info, choice=SPLIT_MON_AUTO):
+    """เดือนท้ายชื่อ: ตามชีท -> 'Nov' (ไม่เจอ Start = '') · ไม่ใส่ -> '' · เลือกเอง 'Jan'…'Dec' -> ตามนั้น"""
+    if choice == SPLIT_MON_NONE:
+        return ''
+    if choice in _WR_MONTH:
+        return choice
+    m = (info or {}).get('month')
+    return _WR_MONTH[m - 1] if m and 1 <= m <= 12 else ''
+
+
+def split_bundles(bundles, info, month=''):
     """บันเดิ้ลตามชีท -> 1 ไอเทม 1 บันเดิ้ล · คืน (บันเดิ้ลใหม่, คำเตือน)
     จับคู่ตารางกับบันเดิ้ลตามลำดับ และ fdItemNum ต้องเรียงตรงกัน ถึงใช้ Day จากชีท (ไม่ตรง = ใช้ลำดับ #N)"""
     out, warns = [], []
@@ -5370,7 +5395,8 @@ def split_bundles(bundles, info):
             d = t['days'][i] if t and i < len(t['days']) else ''
             tail = ('Day %s' % d) if d != '' else ('#%d' % (i + 1))
             nb = {k: v for k, v in b.items() if k not in ('items', 'rewards', 'name', 'chk')}
-            nb.update(name='%s - %s %s' % (ev, label, tail), items=[dict(it)], rewards=[], src_bundle_id=None)
+            nm = '%s - %s %s' % (ev, label, tail) + ((' (%s)' % month) if month else '')
+            nb.update(name=nm, items=[dict(it)], rewards=[], src_bundle_id=None)
             out.append(nb)
     return out, warns
 
@@ -5405,6 +5431,13 @@ class BundleSplitImportDialog(BundleImportDialog):
                            bg=C['bg'], fg=C['fg'], selectcolor=C['input'], activebackground=C['bg'],
                            activeforeground=C['fg'], font=('Segoe UI', 9), bd=0,
                            highlightthickness=0).pack(side='left', padx=(10, 0))
+        tk.Label(bar, text='เดือนท้ายชื่อ', bg=C['bg'], fg=C['fg'],
+                 font=('Segoe UI', 9, 'bold')).pack(side='left', padx=(16, 0))
+        self.v_month = tk.StringVar(value=SPLIT_MON_AUTO)
+        self.month_box = ttk.Combobox(bar, textvariable=self.v_month, width=7, state='disabled',
+                                      values=[SPLIT_MON_AUTO, SPLIT_MON_NONE] + list(_WR_MONTH))
+        self.month_box.pack(side='left', padx=(6, 0))
+        self.month_box.bind('<<ComboboxSelected>>', lambda e: self._split_changed())
         self.split_hint = tk.Label(bar, text='', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w')
         self.split_hint.pack(side='left', padx=(12, 0))
         self._sbar = bar
@@ -5419,17 +5452,27 @@ class BundleSplitImportDialog(BundleImportDialog):
         raw = [{kk: v for kk, v in b.items() if kk != '_split'} for b in bs]
         days = any(any(d != '' for d in t['days']) for b in bs for t in (b.get('_split') or {}).get('tables', []))
         if self.v_split.get() == self.SPLIT_ONE:
-            out, extra = [], []
+            self.month_box.config(state='readonly')
+            choice = self.v_month.get()
+            out, extra, mons = [], [], []
             groups = {}
             for b, r in zip(bs, raw):                       # จัดกลุ่มตามชีท (ข้อมูลตั้งชื่อเป็นของแต่ละชีท)
                 groups.setdefault(id(b.get('_split')), (b.get('_split'), []))[1].append(r)
             for info, grp in groups.values():
-                o, w = split_bundles(grp, info)
+                mon = split_month(info, choice)
+                if not mon and choice == SPLIT_MON_AUTO:
+                    extra.append('%s: ไม่เจอวันเริ่ม (Start) ในชีท — ไม่ได้ต่อท้ายเดือน · เลือกเดือนเองได้ที่ “เดือนท้ายชื่อ”'
+                                 % (grp[0].get('sheet', '') if grp else ''))
+                if mon and mon not in mons:
+                    mons.append(mon)
+                o, w = split_bundles(grp, info, mon)
                 out += o
                 extra += w
             BundleImportDialog._show(self, out, list(ws) + extra, note)
-            self.split_hint.config(text='แยกได้ %d บันเดิ้ล (บันเดิ้ลละ 1 ไอเทม)' % len(out), fg=C['ok'])
+            self.split_hint.config(text='แยกได้ %d บันเดิ้ล (บันเดิ้ลละ 1 ไอเทม)%s' % (
+                len(out), (' · เดือน ' + ', '.join(mons)) if mons else ''), fg=C['ok'])
         else:
+            self.month_box.config(state='disabled')
             BundleImportDialog._show(self, raw, ws, note)
             self.split_hint.config(text=('ชีทนี้มีคอลัมน์ Day — ถ้าเป็นกิจกรรมแบบรายวัน เลือก “1 ไอเทม 1 บันเดิ้ล”'
                                          if days else ''), fg=C['dim'])
