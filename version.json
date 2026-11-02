@@ -1,6 +1,18 @@
 {
-  "version": "1.5.11",
+  "version": "1.6.0",
   "history": [
+    {
+      "version": "1.6.0",
+      "date": "2026-10-30",
+      "changes": [
+        "แท็บใหม่ 🗓 Check in Booster (อยู่หน้า หลักฐานเทส) — สร้าง Premium Check In จากชีท: 1 ชีท = 1 ตัว",
+        "กรอกให้: Slug (check-in-booster-<เดือน>-<ปี>-<ชื่อชีท>) · Activity Tag (First Track = early / Next Track = mid) · ชื่อ [Check-in Booster Nov 2026] : Early · ราคา · หัวข้อ/คำอธิบาย (ไทย)",
+        "รายการ Bundle: Free / Premium = Position ตาม Day · เลือก bundle ตามเลขในชีท · Bundle Name = DAY N · รูปตามไอเทม · Instant = Position 0 · FP",
+        "วันที่เริ่ม = ตอนกดเริ่ม (เทส) · วันที่สิ้นสุด = ตามชีท · ไม่แตะ สถานะ / Info URL / Banner / Background",
+        "รูปเลือกครั้งเดียวต่อไอเทม ใช้ทุก Day และทุกชีท · ชีทยังไม่มีเลข Bundle กด 🔗 เอาจากแท็บสร้าง Bundle",
+        "มีโหมดทดสอบ (ไม่กดสร้าง) · สร้างจริง: ตรวจทุกช่องก่อนกด · ยังไม่ได้สร้างห้ามข้าม (ลองใหม่/ถาม)"
+      ]
+    },
     {
       "version": "1.5.11",
       "date": "2026-10-30",

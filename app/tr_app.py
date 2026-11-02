@@ -9,6 +9,7 @@ V1.5.8 : สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.9 : สร้าง Bundle (ทุกโหมด) — ค้นไอเทมบนเว็บด้วย Aztek Item Id อย่างเดียว เลิกใช้ ItemKind/fdItemNum
 V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) — ไฟล์ชื่อ Check in Booster ตั้งชื่อ “Check in Booster : Mid - PAID Day 13 (Nov)” · ไฟล์อื่นตามชีท
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
+V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.5.5 : Item Code — กด ↺ รีเซ็ตเวลาเริ่ม แล้วกด Actions > ล็อก ให้ด้วย เหมือน WR Master
 V1.5.4 : หลักฐานเทส — ปุ่ม 🧹 ล้างคิว ลบทุกเซ็ตในรายการทีเดียว (ไม่แตะไฟล์ชีท/ภาพที่เซฟ)
 V1.5.3 : หลักฐานเทส — กดบันทึกภาพตอนยังติ๊กตรวจไม่ครบ = เด้งเตือนแยกชัดๆ (บอกรายการที่ยังไม่ติ๊ก · ปุ่มหลัก = กลับไปติ๊กก่อน) · แถวที่ยังไม่ติ๊กเป็นสีเหลือง
@@ -6081,6 +6082,8 @@ class App:
         self.nb.add(self.tab_wr, '🎟  WR Master')
         self.nb.add(self.tab_gen, '🎲  Item Code')
         self.nb.add(self.tab_oung, '🎰  Oung Machine')
+        self.tab_cib = tk.Frame(self.nb.body, bg=C['bg'])       # v1.6.0 อยู่หน้าหลักฐานเทส (ผู้ใช้สั่ง)
+        self.nb.add(self.tab_cib, '🗓  Check in Booster')
         self.tab_ev = tk.Frame(self.nb.body, bg=C['bg'])
         self.nb.add(self.tab_ev, '📸  หลักฐานเทส')
         self.nb.add(self.tab_check, '🩺  ตรวจระบบ', side='right')
@@ -6136,6 +6139,14 @@ class App:
             tk.Label(self.tab_shop, text='แท็บนี้เปิดไม่ขึ้น: %s' % str(ex)[:200], bg=C['bg'],
                      fg=C['err'], font=FM, wraplength=900, justify='left').pack(padx=20, pady=20)
             self.log('แท็บสร้าง Product เปิดไม่ขึ้น: %s' % str(ex)[:200], 'ERR')
+        # แท็บ 🗓 Check in Booster (Premium Check In) — ของใหม่แยกทั้งก้อน พังเองก็พังแค่แท็บนี้
+        try:
+            self.cib = CibTab(self, self.tab_cib)
+        except Exception as ex:
+            self.cib = None
+            tk.Label(self.tab_cib, text='แท็บนี้เปิดไม่ขึ้น: %s' % str(ex)[:200], bg=C['bg'],
+                     fg=C['err'], font=FM, wraplength=900, justify='left').pack(padx=20, pady=20)
+            self.log('แท็บ Check in Booster เปิดไม่ขึ้น: %s' % str(ex)[:200], 'ERR')
         # เพิ่มแท็บแล้วแถบแท็บยาวขึ้น — ถ้าหน้าต่างแคบกว่าแถบ ขยายให้พอดี (แท็บ Log จะได้ไม่ถูกตัด)
         try:
             self.root.update_idletasks()
@@ -19359,6 +19370,1864 @@ class ShopTab:
             'หน้าเว็บที่กรอก: หมวดหมู่ = ร้าน - Category · ชื่อไทย = อังกฤษ · ลำดับการแสดง 0 · '
             'สกุลเงิน Dream Point (ราคาเต็ม = ราคาที่ขายจริง) · Bundle (Primary) · จำกัดการซื้อ PLAYER / ไม่จำกัด\n'
             'ไม่ทำ “เงื่อนไขการซื้อ” · ชีทที่มี Reset / Limit ต่อรอบรีเซ็ต ต้องกรอกส่วนนั้นเองบนเว็บ'))
+
+
+# ============================================================================
+#  [13] แท็บ "🗓 Check in Booster" (Premium Check In) — ของใหม่ทั้งก้อน (v1.6.0) ไม่แตะของเดิม
+#
+#      1 ชีท = 1 Premium Check In (ชีทไหน ไฟล์ไหนก็ได้ที่หน้าตาแบบนี้ — อ่านจากป้าย ไม่ยึดตำแหน่ง/ชื่อไฟล์)
+#         Web-Event | Premium Check-In : Early          Date | Start | <วันเริ่ม>
+#                                                              End   | <วันจบ>
+#         ราคาพรีเมียม (WP) / <ราคา ใต้ป้าย>             Bundle | <เลข Bundle ของ Instant (FP/EXP)>
+#         <Aztek Id> | FREE | Bundle No. | Day | fdItemNum | … | Item Name | …   <- ตาราง Free (14 วัน)
+#         <Aztek Id> | PAID | Bundle No. | Day | fdItemNum | … | Item Name | …   <- ตาราง Premium (14 วัน)
+#      หน้าเว็บ (ตามคลิปที่ผู้ใช้อัด Check in Booster.mp4):
+#         Slug = check-in-booster-<เดือน>-<ปี>-<ชื่อชีท>  (First Track -> first-track)
+#         Activity Tag = early (First Track) / mid (Next Track)
+#         ชื่อ (Internal Note) = [Check-in Booster Nov 2026] : Early · ราคา 1490 (ตามชีท)
+#         รายละเอียด (แท็บ ไทย): หัวข้อ = Check in Booster · คำอธิบาย = ข้อความคงที่ · Info URL / Banner / Background ไม่แตะ
+#         รายการ Bundle: Free / Premium = Position = Day · เลือก bundle ตามเลข · Bundle Name = DAY N · รูปตามไอเทม
+#                         Instant = Position 0 · Bundle ตามป้าย Bundle · Bundle Name = FP · ไม่มีรูป
+#         สถานะ (เปิดใช้งาน / โหมดทดสอบ) ห้ามแตะ · เวลาเริ่ม = ตอนกดเริ่ม (เทส) · วันสิ้นสุด = ตามชีท 23:59:59
+#         โหมดทดสอบ = กรอกครบ ตรวจทุกช่อง ไม่กดสร้าง · ติ๊ก “กดปุ่ม สร้าง จริง” = กดสร้าง + ยืนยัน
+#      ตัวกรอกหน้าเว็บยืมตัวช่วยของ PdRunner / WR Master (พิมพ์+อ่านกลับ · ปฏิทิน · ป๊อปอัปยืนยัน) มาใช้อย่างเดียว
+# ============================================================================
+CIB_STATE = 'checkin_booster.json'
+CIB_CREATE_URL = BASE + '/hof/talesrunner/activity/premium-check-in/create'
+CIB_LIST_URL = BASE + '/hof/talesrunner/activity/premium-check-in'
+CIB_TITLE = 'Check in Booster'
+CIB_DESC = ('Runner Pass รายวันให้คุณรับของได้ง่ายเพียงคลิ๊กเดียว <br/> และ อัปเกรด Boost Runner '
+            'เพื่อรับไอเทมสุดพรีเมี่ยมทุกวัน !')
+CIB_PRICE = '1490'
+CIB_TAGS = ('early', 'mid')
+CIB_INSTANT_NAME = 'FP'
+CIB_SECS = ('Free', 'Premium', 'Instant')
+CIB_KEEP = 200
+SEL_CIB = {
+    'slug':   'Slug',
+    'tag':    'Activity Tag',
+    'name':   'ชื่อ (Internal Note)',
+    'price':  'ราคา',
+    'title':  'หัวข้อ',
+    'desc':   'คำอธิบาย',
+    'start':  'วันที่เริ่ม',
+    'end':    'วันที่สิ้นสุด',
+    'lang':   'ไทย',
+    'add':    'Add Bundle',
+    'pick':   'เลือก bundle',
+    'submit': 'สร้าง',
+}
+_CIB_START_LBL = ('start', 'startdate', 'เริ่ม', 'วันเริ่ม', 'วันที่เริ่ม')
+_CIB_END_LBL = ('end', 'enddate', 'สิ้นสุด', 'วันสิ้นสุด', 'วันที่สิ้นสุด', 'หมดเขต')
+_CIB_BNO_LBL = ('bundleno', 'bundleid', 'เลขbundle', 'bundle')
+_CIB_MON = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+
+
+def cib_slug_part(s):
+    """ชื่อชีท -> ส่วนท้าย slug: “First Track” -> first-track"""
+    t = re.sub(r'[^a-z0-9]+', '-', clean_text(s).lower()).strip('-')
+    return t
+
+
+def cib_tag_of(sheet, event):
+    """Activity Tag: ชื่อชีท First… = early · Next… = mid (ผู้ใช้สั่ง) · ไม่รู้จัก = ดูท้ายชื่อกิจกรรม (… : Early)
+    คืน (tag, ข้อสงสัย|None)"""
+    k = _hkey(sheet)
+    by_sheet = 'early' if k.startswith('first') else ('mid' if k.startswith('next') else '')
+    tail = clean_text(event).split(':', 1)[1].strip().lower() if ':' in clean_text(event) else ''
+    by_ev = tail if tail in CIB_TAGS else ''
+    if by_sheet and by_ev and by_sheet != by_ev:
+        return by_sheet, chk_new('stop', 'ชื่อชีท “%s” = %s แต่ชื่อกิจกรรมในชีทบอก “%s” — เช็กแล้วแก้ Activity Tag'
+                                 % (clean_text(sheet), by_sheet, tail), 'tag', by_sheet)
+    tag = by_sheet or by_ev
+    if not tag:
+        return '', chk_new('stop', 'ไม่รู้ว่าชีทนี้เป็น early หรือ mid — ดับเบิลคลิกเลือก Activity Tag', 'tag', '')
+    return tag, None
+
+
+def _cib_right(rows, r, c, fn, span=4):
+    row = rows[r] if 0 <= r < len(rows) else []
+    for cc in range(c + 1, min(len(row or []), c + 1 + span)):
+        got = fn(row[cc])
+        if got:
+            return got
+    return None
+
+
+def cib_parse_rows(rows, sheet):
+    """อ่าน 1 ชีท -> dict ของ Premium Check In 1 ตัว · ไม่ใช่ชีทแบบนี้ -> None"""
+    cell = lambda r, c: (rows[r][c] if 0 <= r < len(rows) and rows[r] and 0 <= c < len(rows[r]) else None)
+    heads = []
+    for r, row in enumerate(rows):
+        ks = [_hkey(v) for v in (row or [])]
+        if 'fditemnum' in ks and any(k in _CIB_BNO_LBL for k in ks) and any(k in _SPLIT_DAY_LBL for k in ks):
+            heads.append(r)
+    if not heads:
+        return None
+    event, start, end, price, instant = '', '', '', '', ''
+    chk = []
+    for r in range(min(len(rows), 60)):
+        if r in heads:
+            continue
+        for c, v in enumerate(rows[r] or []):
+            if not isinstance(v, str):
+                continue
+            k = _hkey(v)
+            if k in _SPLIT_EVENT_LBL and not event:
+                event = _cib_right(rows, r, c, lambda x: re.sub(r'\s+', ' ', clean_text(x)).strip() or None) or ''
+            elif k in _CIB_START_LBL and not start:
+                start = _cib_right(rows, r, c, lambda x: shop_dt(x) or None) or ''
+            elif k in _CIB_END_LBL and not end:
+                end = _cib_right(rows, r, c, lambda x: shop_dt(x, end=True) or None) or ''
+            elif (k.startswith('ราคาพรีเมียม') or k.startswith('premiumprice')) and not price:
+                below = cell(r + 1, c)
+                price = shop_num(below) if below not in (None, '') else ''
+                if not price:
+                    price = _cib_right(rows, r, c, lambda x: shop_num(x) or None) or ''
+            elif k == 'bundle' and not instant:
+                got = _cib_right(rows, r, c, lambda x: str(src_int(x)) if src_int(x) else None, span=3)
+                instant = got or ''
+    tables = []
+    for k_, hr in enumerate(heads):
+        row = rows[hr] or []
+        ks = [_hkey(v) for v in row]
+        fc = ks.index('fditemnum')
+        bc = next(c for c, k in enumerate(ks) if k in _CIB_BNO_LBL)
+        dc = next(c for c, k in enumerate(ks) if k in _SPLIT_DAY_LBL)
+        nc = next((c for c, k in enumerate(ks) if k in _SPLIT_ITEMNAME_LBL), None)
+        first = min(bc, dc, fc)
+        label, lc = '', None
+        for c in range(first - 1, max(-1, first - 4), -1):
+            t = clean_text(cell(hr, c))
+            if t and src_int(t) is None:
+                label, lc = re.sub(r'\s+', ' ', t.split('\n')[0]).strip(), c
+                break
+        idc_from = (lc if lc is not None else first) - 1
+        end_r = heads[k_ + 1] if k_ + 1 < len(heads) else len(rows)
+        items, gap = [], 0
+        for r in range(hr + 1, end_r):
+            kd = src_int(cell(r, fc))
+            if kd is None:
+                gap += 1
+                if items and gap >= 2:
+                    break
+                continue
+            gap = 0
+            iid = ''
+            for c in range(idc_from, max(-1, idc_from - 3), -1):
+                n = src_int(cell(r, c))
+                if n:
+                    iid = str(n)
+                    break
+            b = src_int(cell(r, bc))
+            d = src_int(cell(r, dc))
+            items.append({'day': int(d) if d else len(items) + 1, 'bundle': str(b) if b else '',
+                          'bundle_src': 'ชีท' if b else '', 'id': iid, 'kind': str(kd),
+                          'item': re.sub(r'\s+', ' ', clean_text(cell(r, nc))).strip() if nc is not None else '',
+                          'row': r + 1})
+        if items:
+            low = label.lower()
+            sec = 'Free' if 'free' in low else ('Premium' if ('paid' in low or 'premium' in low) else '')
+            tables.append({'label': label, 'sec': sec, 'items': items})
+    free = next((t for t in tables if t['sec'] == 'Free'), None)
+    prem = next((t for t in tables if t['sec'] == 'Premium'), None)
+    rest = [t for t in tables if not t['sec']]
+    if free is None and rest:
+        free = rest.pop(0)
+        chk.append(chk_new('warn', 'ตาราง “%s” ไม่มีคำว่า FREE — ถือเป็นแถว Free (ตารางแรก)' % free['label']))
+    if prem is None and rest:
+        prem = rest.pop(0)
+        chk.append(chk_new('warn', 'ตาราง “%s” ไม่มีคำว่า PAID/Premium — ถือเป็นแถว Premium' % prem['label']))
+    if free is None and prem is None:
+        return None
+    tag, why = cib_tag_of(sheet, event)
+    if why:
+        chk.append(why)
+    dt = wr_parse_dt(start) if start else None
+    mon = _CIB_MON[dt[1] - 1] if dt else ''
+    year = dt[0] if dt else 0
+    slug = ('check-in-booster-%s-%d-%s' % (mon.lower(), year, cib_slug_part(sheet))) if dt else ''
+    name = ('[Check-in Booster %s %d] : %s' % (mon, year, tag.capitalize())) if (dt and tag) else ''
+    if not price:
+        price = CIB_PRICE
+        chk.append(chk_new('warn', 'ชีทไม่บอกราคาพรีเมียม — ใช้ %s' % CIB_PRICE, 'price', CIB_PRICE))
+    sheet_c = clean_text(sheet) or str(sheet)
+    return {'key': '%s|%s' % (sheet_c, event), 'sheet': sheet_c, 'sheet_raw': str(sheet), 'event': event,
+            'tag': tag, 'slug': slug, 'name': name, 'price': price, 'start_sheet': start, 'end': end,
+            'mon': mon, 'year': year,
+            'free': free['items'] if free else [], 'prem': prem['items'] if prem else [],
+            'free_label': free['label'] if free else '', 'prem_label': prem['label'] if prem else '',
+            'instant': instant, 'instant_src': 'ชีท' if instant else '', 'chk': chk, 'use': True}
+
+
+def cib_items(t):
+    """ไอเทมไม่ซ้ำ (ตาม Aztek Item Id) ที่ต้องมีรูป: [(id, ชื่อ, [Free Day…], [Premium Day…])]"""
+    out = {}
+    for sec, rows in (('Free', t.get('free') or []), ('Premium', t.get('prem') or [])):
+        for x in rows:
+            k = str(x.get('id') or '') or ('kind:' + str(x.get('kind') or ''))
+            o = out.setdefault(k, {'id': str(x.get('id') or ''), 'item': x.get('item') or '', 'Free': [], 'Premium': []})
+            o[sec].append(x.get('day'))
+            if not o['item'] and x.get('item'):
+                o['item'] = x['item']
+    return list(out.values())
+
+
+def cib_pic_of(pics, x):
+    return str((pics or {}).get(str(x.get('id') or '')) or '')
+
+
+def cib_dyn(t, pics=None, now=None):
+    """ตรวจสดจากค่าตอนนี้ (แก้แล้วหายเอง) — ⛔ น่าจะผิด / ⚠ ควรเช็ก"""
+    out = []
+    S = lambda m: out.append(chk_new('stop', m))
+    W = lambda m: out.append(chk_new('warn', m))
+    if t.get('made'):
+        m = t['made']
+        S('สร้างไปแล้ว%s — สั่งอีกรอบ = สร้างซ้ำบนเว็บ' % (' (id %s)' % m['id'][:13] if m.get('id') else ''))
+    if t.get('tag') not in CIB_TAGS:
+        S('ไม่มี Activity Tag (early / mid)')
+    if not re.fullmatch(r'[a-z0-9]+(-[a-z0-9]+)*', str(t.get('slug') or '')):
+        S('Slug “%s” ใช้ไม่ได้ (ตัวเล็ก a-z 0-9 และขีด - เท่านั้น)' % (t.get('slug') or '') if t.get('slug')
+          else 'ไม่มี Slug (ชีทไม่มีวันเริ่ม Start) — ดับเบิลคลิกใส่')
+    if not str(t.get('name') or '').strip():
+        S('ไม่มีชื่อ (Internal Note)')
+    if not re.fullmatch(r'\d+', str(t.get('price') or '')):
+        S('ราคา “%s” ไม่ใช่ตัวเลข' % (t.get('price') or ''))
+    en = str(t.get('end') or '')
+    now = now or datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    if not pd_dt_ok(en):
+        S('ไม่มีวันสิ้นสุด (End) — ดับเบิลคลิกใส่')
+    elif pd_dt_ok(en) <= now:
+        S('วันสิ้นสุด %s ผ่านไปแล้ว' % en)
+    seen = {}
+    for sec, rows in (('Free', t.get('free') or []), ('Premium', t.get('prem') or [])):
+        if not rows:
+            S('ไม่มีแถว %s' % sec)
+            continue
+        days = [x.get('day') for x in rows]
+        if days != list(range(1, len(rows) + 1)):
+            W('%s: Day ไม่เรียง 1…%d (%s)' % (sec, len(rows), ', '.join(str(d) for d in days[:16])))
+        elif len(rows) != 14:
+            W('%s มี %d วัน (ปกติ 14)' % (sec, len(rows)))
+        nob = [str(x.get('day')) for x in rows if not re.fullmatch(r'\d+', str(x.get('bundle') or ''))]
+        if nob:
+            S('%s Day %s ไม่มีเลข Bundle — กด 🔗 เอาจากแท็บสร้าง Bundle หรือดับเบิลคลิกใส่' % (sec, ', '.join(nob[:6])))
+        for x in rows:
+            b = str(x.get('bundle') or '')
+            if b:
+                seen.setdefault(b, []).append('%s Day %s' % (sec, x.get('day')))
+    ib = str(t.get('instant') or '')
+    if not re.fullmatch(r'\d+', ib):
+        S('ไม่มีเลข Bundle ของ Instant (ป้าย Bundle ข้าง FP ในชีท) — ดับเบิลคลิกใส่')
+    else:
+        seen.setdefault(ib, []).append('Instant')
+    dup = ['#%s (%s)' % (b, ' / '.join(w)) for b, w in seen.items() if len(w) > 1]
+    if dup:
+        S('เลข Bundle ซ้ำ: %s' % ' · '.join(dup[:3]))
+    if pics is not None:
+        miss = [it for it in cib_items(t) if not cib_pic_of(pics, it)]
+        bad = [it for it in cib_items(t) if cib_pic_of(pics, it) and not check_item_image(cib_pic_of(pics, it))[0]]
+        if bad:
+            S('รูปของ %s ใช้ไม่ได้ (%s)' % (bad[0]['item'] or bad[0]['id'],
+                                            check_item_image(cib_pic_of(pics, bad[0]))[1][:50]))
+        if miss:
+            W('ยังไม่มีรูป %d ไอเทม (เช่น %s) — สร้างได้ แต่แถวนั้นจะไม่มีรูป'
+              % (len(miss), miss[0]['item'] or miss[0]['id']))
+    return out
+
+
+def cib_issues(t, pics=None, now=None):
+    return chk_active(t) + cib_dyn(t, pics, now)
+
+
+def cib_read_sheet_wb(wb, sheet):
+    t = cib_parse_rows(ou_read_rows(wb, sheet), sheet)
+    if t is None:
+        return [], []
+    warns = ['%s: %s' % (t['sheet'], c['msg']) for c in cib_issues(t) if c['lv'] == 'stop']
+    return [t], warns
+
+
+def cib_scan_sheets_wb(wb, progress=None):
+    out = []
+    names = wb.sheetnames
+    for k, s in enumerate(names, 1):
+        if progress:
+            progress(k, len(names), s)
+        try:
+            n = 1 if cib_parse_rows(ou_read_rows(wb, s), s) else 0
+        except Exception:
+            n = 0
+        out.append((s, n))
+    return out
+
+
+def cib_new_state():
+    return {'file': '', 'sheets': [], 'read_at': '', 'rows': [], 'pics': {}, 'made': []}
+
+
+def cib_carry(old_rows, new_rows):
+    """อ่านชีทซ้ำ: ของที่สร้างแล้ว / ค่าที่ผู้ใช้แก้เอง / เลข Bundle ที่เติมเอง ยังอยู่ (จับคู่ด้วย ชีท)"""
+    idx = {o.get('sheet'): o for o in old_rows or []}
+    for t in new_rows:
+        o = idx.get(t.get('sheet'))
+        if not o:
+            continue
+        for k in ('made', 'last'):
+            if o.get(k):
+                t[k] = o[k]
+        for k in ('slug', 'name', 'price', 'tag', 'end'):
+            if o.get(k + '_user'):
+                t[k], t[k + '_user'] = o[k], True
+        for sec in ('free', 'prem'):
+            od = {x.get('day'): x for x in o.get(sec) or []}
+            for x in t.get(sec) or []:
+                y = od.get(x.get('day'))
+                if y and not x.get('bundle') and y.get('bundle') and y.get('bundle_src') in ('พิมพ์เอง', 'แท็บ Bundle'):
+                    x['bundle'], x['bundle_src'] = y['bundle'], y['bundle_src']
+        if not t.get('instant') and o.get('instant') and o.get('instant_src') == 'พิมพ์เอง':
+            t['instant'], t['instant_src'] = o['instant'], 'พิมพ์เอง'
+        if t.get('made'):
+            t['use'] = False
+    return new_rows
+
+
+def cib_bundle_names(t, sec, x):
+    """ชื่อ Bundle ที่แท็บสร้าง Bundle ตั้งให้ (โหมด 1 ไอเทม 1 บันเดิ้ล) ของแถวนี้ — ทั้งชื่อแบบ Check in Booster และแบบตามชีท"""
+    ev = t.get('event') or t.get('sheet') or ''
+    lab = t.get('free_label' if sec == 'Free' else 'prem_label') or ''
+    out = []
+    for e in (ev, split_event_name(ev, 'Check in Booster.xlsx')):
+        for tail in ((' (%s)' % t['mon']) if t.get('mon') else '', ''):
+            out.append('%s - %s Day %s%s' % (e, lab, x.get('day'), tail))
+    return list(dict.fromkeys(out))
+
+
+def cib_bundle_match(rows, made):
+    """เลข Bundle จาก “Bundle ที่สร้างแล้ว” ของแท็บสร้าง Bundle — ชื่อต้องตรงเป๊ะ (ไม่สนช่องว่าง) และได้เลขเดียว
+    คืน (เติมได้ [(แถวไอเทม, เลข)], ชื่อที่เจอหลายเลข [(แถวไอเทม, [เลข])])"""
+    by = {}
+    for m in made or []:
+        bid = str(m.get('id') or '').strip()
+        if re.fullmatch(r'\d+', bid):
+            by.setdefault(shop_norm(m.get('name')), []).append(bid)
+    fill, many = [], []
+    for t in rows:
+        if t.get('made'):
+            continue
+        for sec, key in (('Free', 'free'), ('Premium', 'prem')):
+            for x in t.get(key) or []:
+                if re.fullmatch(r'\d+', str(x.get('bundle') or '')):
+                    continue
+                ids = []
+                for nm in cib_bundle_names(t, sec, x):
+                    for b in by.get(shop_norm(nm), []):
+                        if b not in ids:
+                            ids.append(b)
+                if len(ids) == 1:
+                    fill.append((x, ids[0]))
+                elif ids:
+                    many.append((x, ids))
+    return fill, many
+
+
+def cib_plan(t, pics):
+    """สิ่งที่จะกรอกในรายการ Bundle ทั้ง 3 ส่วน: {sec: [{'pos','bid','name','img'}]}"""
+    plan = {}
+    for sec, key in (('Free', 'free'), ('Premium', 'prem')):
+        plan[sec] = [{'pos': str(x.get('day')), 'bid': str(x.get('bundle') or ''), 'name': 'DAY %s' % x.get('day'),
+                      'img': cib_pic_of(pics, x), 'day': x.get('day')} for x in t.get(key) or []]
+    plan['Instant'] = [{'pos': '0', 'bid': str(t.get('instant') or ''), 'name': CIB_INSTANT_NAME, 'img': ''}]
+    return plan
+
+
+def cib_now():
+    """เวลาเริ่มตอนเทส = นาทีปัจจุบัน (วินาที 00)"""
+    return datetime.now().strftime('%Y-%m-%d %H:%M') + ':00'
+
+
+def cib_uuid(obj, depth=0):
+    """id ของ Premium Check In จากคำตอบเว็บ (เป็น uuid หรือเลข)"""
+    if obj is None or depth > 6:
+        return ''
+    if isinstance(obj, dict):
+        for k in ('id', 'activityId', 'activity_id', 'uuid'):
+            v = obj.get(k)
+            if isinstance(v, (str, int)) and re.fullmatch(r'[0-9a-fA-F-]{8,}|\d+', str(v).strip()):
+                return str(v).strip()
+        for v in obj.values():
+            g = cib_uuid(v, depth + 1)
+            if g:
+                return g
+    elif isinstance(obj, list):
+        for v in obj:
+            g = cib_uuid(v, depth + 1)
+            if g:
+                return g
+    return ''
+
+
+def cib_id_from_url(u):
+    m = re.search(r'/premium-check-in/(?:edit/)?([0-9a-fA-F-]{8,})(?:[/?#]|$)', str(u or ''))
+    return m.group(1) if m else ''
+
+
+# ---- JS ของแท็บ Check in Booster (หาจากข้อความ/โครงสร้าง ไม่ยึดตำแหน่ง) ----
+JS_CIB = r"""
+([act, a, b, c]) => {
+  const vis = el => { if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const txt = e => (e.textContent || '').replace(/\s+/g, ' ').trim();
+  const own = e => [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('')
+                     .replace(/\s+/g, ' ').trim();
+  const mark = (el, key) => {
+    document.querySelectorAll('[' + key + ']').forEach(e => e.removeAttribute(key));
+    if (el) { el.setAttribute(key, '1'); try { el.scrollIntoView({block: 'center'}); } catch (e) {} }
+    return el; };
+  const SECS = ['Free', 'Premium', 'Instant'];
+  const POP = '[role=dialog],[role=listbox],[data-radix-popper-content-wrapper],[cmdk-root],[data-trw-cibpop]';
+  const before = (x, y) => !!(x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING);
+  // หัวข้อส่วน (Free / Premium / Instant) ในกล่อง “รายการ Bundle”
+  let _H = null;
+  function heads() {
+    if (_H) return _H;
+    const out = {};
+    for (const e of document.querySelectorAll('body *')) {
+      if (!vis(e) || e.closest(POP) || e.closest('nav,aside')) continue;
+      const t = own(e);
+      if (SECS.indexOf(t) >= 0 && !out[t]) out[t] = e;
+    }
+    _H = out;
+    return out;
+  }
+  function inSec(name, el) {
+    const hs = heads(), h = hs[name];
+    if (!h || !el || !before(h, el)) return false;
+    for (const s of SECS) {
+      const o = hs[s];
+      if (o && o !== h && before(h, o) && before(o, el)) return false;   // เลยหัวข้อถัดไปแล้ว
+    }
+    // ต้องอยู่ในกล่องเดียวกับหัวข้อ (กล่องที่ครอบทุกหัวข้อที่มี)
+    let card = h.parentElement;
+    const all = SECS.map(s => hs[s]).filter(Boolean);
+    while (card && card !== document.body && !all.every(x => card.contains(x))) card = card.parentElement;
+    if (!card || card === document.body) {
+      card = h.parentElement;
+      for (let i = 0; i < 4 && card && card.parentElement !== document.body; i++) card = card.parentElement;
+    }
+    return !!card && card.contains(el);
+  }
+  const numIns = name => [...document.querySelectorAll('input[type=number]')]
+      .filter(i => vis(i) && !i.closest(POP) && inSec(name, i));
+  function rowOf(inp, name) {
+    const tr = inp.closest('tr,[role=row]');
+    if (tr) return tr;
+    let r = inp;
+    while (r.parentElement && r.parentElement !== document.body) {
+      const p = r.parentElement;
+      const n = [...p.querySelectorAll('input[type=number]')].filter(vis).length;
+      if (n > 1 || !inSec(name, p.querySelector('input[type=number]')) || SECS.some(s => heads()[s] && p.contains(heads()[s]))) break;
+      r = p;
+    }
+    return r;
+  }
+  function rows(name) { return numIns(name).map(i => rowOf(i, name)); }
+  const nameIn = row => [...row.querySelectorAll('input')].filter(i => vis(i) && !i.closest(POP) &&
+      ['number', 'file', 'checkbox', 'radio', 'hidden'].indexOf((i.type || '').toLowerCase()) < 0)[0] || null;
+  const rowInfo = row => {
+    const m = txt(row).match(/ID\s*:\s*(\d+)/i);
+    const n = row.querySelector('input[type=number]');
+    const ni = nameIn(row);
+    const imgs = [...row.querySelectorAll('img')].filter(vis).length;
+    const pick = [...row.querySelectorAll('button')].filter(x => vis(x) && txt(x).toLowerCase() === String(b || 'เลือก bundle').toLowerCase()).length;
+    return {pos: n ? String(n.value) : '', bid: m ? m[1] : '', name: ni ? String(ni.value) : null, img: imgs,
+            pick: pick, file: row.querySelectorAll('input[type=file]').length};
+  };
+  if (act === 'rows') return JSON.stringify(rows(a).map(rowInfo));
+  if (act === 'add') {                         // ปุ่ม Add Bundle ของส่วน a
+    const bs = [...document.querySelectorAll('button')].filter(x => vis(x) && !x.closest(POP) &&
+        /add\s*bundle/i.test(txt(x)) && inSec(a, x));
+    if (!bs.length) return 'ไม่เจอปุ่ม Add Bundle ของ ' + a;
+    mark(bs[0], 'data-trw-cibadd');
+    return 'ok';
+  }
+  if (act === 'cell') {                        // ช่องในแถวที่ b ของส่วน a: c = pos / name / pick / edit / file
+    const rs = rows(a);
+    const row = rs[+b];
+    if (!row) return 'ไม่มีแถวที่ ' + (+b + 1) + ' ของ ' + a + ' (มี ' + rs.length + ')';
+    let el = null;
+    if (c === 'pos') el = row.querySelector('input[type=number]');
+    else if (c === 'name') el = nameIn(row);
+    else if (c === 'file') el = row.querySelector('input[type=file]');
+    else if (c === 'pick') el = [...row.querySelectorAll('button')].filter(x => vis(x) &&
+        txt(x).toLowerCase() === 'เลือก bundle')[0];
+    else if (c === 'edit') {                   // ปุ่มแก้ (ไอคอน) ข้างชื่อ Bundle ที่เลือกไว้แล้ว
+      const id = [...row.querySelectorAll('*')].find(e => /^ID\s*:/i.test(own(e)));
+      const bs = [...row.querySelectorAll('button')].filter(vis).filter(x => !txt(x));
+      el = bs.find(x => id && before(id, x)) || bs[0] || null;
+      if (bs.length > 1) el = bs.find(x => id && before(id, x) && !x.closest('[class*=danger],[class*=red],[class*=destructive]')) || el;
+    }
+    if (!el) return 'ไม่เจอช่อง ' + c + ' ในแถวที่ ' + (+b + 1) + ' ของ ' + a;
+    if (c === 'file') { document.querySelectorAll('[data-trw-cibf]').forEach(e => e.removeAttribute('data-trw-cibf'));
+      el.setAttribute('data-trw-cibf', '1'); try { row.scrollIntoView({block: 'center'}); } catch (e) {} return 'ok'; }
+    mark(el, 'data-trw-cibc');
+    return 'ok|' + (el.value !== undefined ? String(el.value) : txt(el));
+  }
+  if (act === 'pick_q') {                      // ช่องค้นหาในป๊อปอัปเลือก bundle
+    const ins = [...document.querySelectorAll('input')].filter(i => vis(i) &&
+        /ค้นหา|search/i.test(i.getAttribute('placeholder') || '') && !i.closest('nav,aside') &&
+        !/premium check in|activity/i.test(i.getAttribute('placeholder') || ''));
+    const pop = ins.filter(i => { for (let e = i; e && e !== document.body; e = e.parentElement) {
+        const p = getComputedStyle(e).position; if (p === 'fixed' || p === 'absolute' || e.matches(POP)) return true; }
+        return false; });
+    const q = pop[pop.length - 1] || null;
+    if (!q) return 'none';
+    mark(q, 'data-trw-cibq');
+    let box = q.parentElement;
+    for (let i = 0; i < 6 && box && box !== document.body; i++) {
+      const p = getComputedStyle(box).position;
+      if (p === 'fixed' || p === 'absolute' || box.matches(POP)) break;
+      box = box.parentElement;
+    }
+    document.querySelectorAll('[data-trw-cibpop]').forEach(e => e.removeAttribute('data-trw-cibpop'));
+    if (box) box.setAttribute('data-trw-cibpop', '1');
+    return 'ok';
+  }
+  if (act === 'pick_opts') {                   // ตัวเลือกในป๊อปอัป: ตัวที่มีเลข a เป๊ะๆ
+    const box = document.querySelector('[data-trw-cibpop]');
+    if (!box || !vis(box)) return 'closed';
+    const all = txt(box);
+    // ไอเทม 1 ตัว = กล่องรอบข้อความที่มีเลขนี้ ขยายออกได้จนกว่าจะไปกินเลข bundle ตัวอื่น
+    const nums = t => new Set((t.match(/(?:ID\s*:?\s*|#)(\d+)/gi) || []).map(x => x.replace(/\D/g, '')));
+    function items(re) {
+      const els = [...box.querySelectorAll('*')].filter(e => vis(e) && e.tagName !== 'INPUT' && re.test(txt(e)));
+      const mins = els.filter(e => !els.some(x => x !== e && e.contains(x)));
+      const out = [];
+      for (const m of mins) {
+        let it = m;
+        while (it.parentElement && it.parentElement !== box && !it.matches('[role=option],[cmdk-item],li,button')) {
+          if (nums(txt(it.parentElement)).size > 1) break;
+          it = it.parentElement;
+        }
+        if (out.indexOf(it) < 0) out.push(it);
+      }
+      return out;
+    }
+    const strong = items(new RegExp('(ID\\s*:?\\s*|#)' + a + '(?![0-9])', 'i'));
+    const use = strong.length ? strong : items(new RegExp('(^|[^0-9])' + a + '(?![0-9])'));
+    if (!use.length) {
+      if (/กำลังโหลด|loading/i.test(all)) return 'loading';
+      if (/ไม่พบ|no result|not found|ไม่มี/i.test(all)) return 'empty|' + all.slice(0, 80);
+      return 'none|' + all.slice(0, 120);
+    }
+    if (use.length > 1) return 'many|' + use.map(txt).join(' ¦ ').slice(0, 200);
+    mark(use[0], 'data-trw-cibo');
+    return 'ok|' + txt(use[0]).slice(0, 120);
+  }
+  if (act === 'tag') {                         // Activity Tag: radio ที่ป้ายเป็น a (early / mid)
+    let box = null;
+    for (const e of document.querySelectorAll('body *')) {
+      if (vis(e) && own(e).replace(/\s*\*\s*$/, '') === 'Activity Tag') { box = e; break; }
+    }
+    if (!box) return 'ไม่เจอ Activity Tag';
+    let card = box.parentElement;
+    for (let i = 0; i < 5 && card && card.querySelectorAll('input[type=radio],[role=radio]').length < 2; i++)
+      card = card.parentElement;
+    if (!card) return 'ไม่เจอตัวเลือก Activity Tag';
+    const rs = [...card.querySelectorAll('input[type=radio],[role=radio]')];
+    let hit = null, cur = '';
+    for (const r of rs) {
+      const lab = r.closest('label') || r.parentElement;
+      let t = (r.getAttribute('value') || '') + ' ' + (r.getAttribute('aria-label') || '') + ' ' + txt(lab);
+      if (r.id) { const l = document.querySelector('label[for="' + r.id + '"]'); if (l) t += ' ' + txt(l); }
+      if (!r.closest('label') && r.nextElementSibling) t += ' ' + txt(r.nextElementSibling);
+      const words = t.toLowerCase().split(/[^a-z]+/);
+      const on = r.checked === true || r.getAttribute('aria-checked') === 'true' || r.getAttribute('data-state') === 'checked';
+      const v = ['early', 'mid'].find(w => words.indexOf(w) >= 0) || '';
+      if (on) cur = v;
+      if (v === a && !hit) hit = r;
+    }
+    const sel = (txt(card).match(/Selected\s*:\s*([a-z]+)/i) || [])[1] || '';
+    if (b === 'read') return 'ok|' + (sel || cur).toLowerCase();
+    if (!hit) return 'ไม่มีตัวเลือก ' + a;
+    mark(hit, 'data-trw-cibtag');
+    return 'ok|' + (sel || cur).toLowerCase();
+  }
+  if (act === 'lang') {                        // แท็บภาษาในกล่อง “รายละเอียด”
+    let card = null, cl = 1e9;
+    for (const el of document.querySelectorAll('div,section,form,fieldset')) {
+      const t = el.textContent || '';
+      if (t.indexOf('รายละเอียด') < 0 || t.indexOf(b) < 0 || !el.querySelector('textarea')) continue;
+      if (t.length < cl) { cl = t.length; card = el; }
+    }
+    const tabs = [...(card || document).querySelectorAll('[role=tab],button')].filter(vis).filter(x => txt(x) === a);
+    if (!tabs.length) return 'none';
+    const t = tabs[0];
+    mark(t, 'data-trw-ciblang');
+    const on = t.getAttribute('aria-selected') === 'true' || t.getAttribute('data-state') === 'active' ||
+               t.getAttribute('aria-pressed') === 'true';
+    return 'ok|' + (on ? 'on' : 'off');
+  }
+  if (act === 'submit') {                      // ปุ่ม “สร้าง” (ข้อความตรงเป๊ะ ไม่ใช่ บันทึกและสร้างต่อ)
+    const bs = [...document.querySelectorAll('button')].filter(x => vis(x) && !x.closest(POP) && txt(x) === a);
+    if (!bs.length) return 'ไม่เจอปุ่ม ' + a;
+    mark(bs[bs.length - 1], 'data-trw-cibgo');
+    return 'ok';
+  }
+  if (act === 'switches') {                    // อ่านสถานะ (เปิดใช้งาน / โหมดทดสอบ) — ไว้ยืนยันว่าไม่ได้แตะ
+    const out = [];
+    for (const s of document.querySelectorAll('[role=switch],input[type=checkbox]')) {
+      if (!vis(s)) continue;
+      let lab = s.parentElement ? txt(s.parentElement) : '';
+      const on = s.getAttribute('aria-checked') === 'true' || s.getAttribute('data-state') === 'checked' || s.checked === true;
+      out.push(lab.slice(0, 20) + '=' + (on ? 1 : 0));
+    }
+    return out.join(',');
+  }
+  return 'ไม่รู้จักคำสั่ง ' + act;
+}"""
+
+
+class CibRunner(PdRunner):
+    """กรอกหน้าสร้าง Premium Check In (แท็บ 🗓 Check in Booster) ทีละตัว
+    ยืมตัวช่วยเดิมมาใช้อย่างเดียว: _w_text (พิมพ์+อ่านกลับ) · _w_date / _w_date_ok (ปฏิทิน) · _click_confirm
+    ของใหม่: Activity Tag (radio) · แท็บภาษา · รายการ Bundle 3 ส่วน (Add Bundle · Position · เลือก bundle ตามเลข ·
+             Bundle Name · รูป) + ตรวจรอบสุดท้ายทั้งใบก่อนกดสร้าง · สถานะ (เปิดใช้งาน/โหมดทดสอบ) ไม่แตะ"""
+
+    async def _cj(self, page, act, a='', b='', c=''):
+        try:
+            r = await page.evaluate(JS_CIB, [act, a, b, c])
+            return str(r)
+        except Exception as ex:
+            return 'error: %s' % str(ex)[:80]
+
+    async def _rows(self, page, sec):
+        r = await self._cj(page, 'rows', sec)
+        try:
+            return json.loads(r)
+        except Exception:
+            return None
+
+    async def _cib_tag(self, page, tag):
+        r = await self._cj(page, 'tag', tag)
+        if not r.startswith('ok|'):
+            self.log('   ! Activity Tag: %s' % r, 'WARN')
+            return False
+        if r[3:] == tag:
+            self.log('   · Activity Tag = %s  (เลือกไว้อยู่แล้ว)' % tag, 'INFO')
+            return True
+        for _ in range(3):
+            try:
+                await page.locator('[data-trw-cibtag="1"]').first.click(timeout=4000, force=True)
+            except Exception:
+                await page.evaluate("() => { const e = document.querySelector('[data-trw-cibtag]'); if (e) e.click(); }")
+            for _ in range(8):
+                await page.wait_for_timeout(150)
+                if (await self._cj(page, 'tag', tag, 'read')) == 'ok|' + tag:
+                    self.log('   · Activity Tag = %s' % tag, 'INFO')
+                    return True
+            await self._cj(page, 'tag', tag)
+        self.log('   ! เลือก Activity Tag = %s ไม่ติด (ตอนนี้ “%s”)' % (tag, (await self._cj(page, 'tag', tag, 'read'))[3:]),
+                 'WARN')
+        return False
+
+    async def _cib_lang(self, page):
+        """กล่องรายละเอียด: ให้อยู่แท็บ ไทย ก่อนกรอกหัวข้อ/คำอธิบาย (ในคลิปกรอกแท็บไทย)"""
+        r = await self._cj(page, 'lang', SEL_CIB['lang'], 'หัวข้อ')
+        if r == 'ok|on' or r == 'none':
+            return True
+        if r == 'ok|off':
+            try:
+                await page.locator('[data-trw-ciblang="1"]').first.click(timeout=4000)
+            except Exception:
+                return False
+            for _ in range(10):
+                await page.wait_for_timeout(150)
+                if (await self._cj(page, 'lang', SEL_CIB['lang'], 'หัวข้อ')) == 'ok|on':
+                    return True
+            return True                       # ปุ่มไม่บอกสถานะ — กดแล้วถือว่าอยู่แท็บไทย
+        return False
+
+    async def _cib_fill(self, page, sec, i, what, val):
+        """พิมพ์ช่อง Position / Bundle Name ของแถว i แล้วอ่านกลับ"""
+        for k in range(3):
+            r = await self._cj(page, 'cell', sec, str(i), what)
+            if not r.startswith('ok'):
+                return False, r
+            if wr_same(r.split('|', 1)[1] if '|' in r else '', val):
+                return True, ''
+            loc = page.locator('[data-trw-cibc="1"]').first
+            try:
+                if k < 2:
+                    await loc.fill(str(val), timeout=4000)
+                else:
+                    await loc.click(timeout=3000)
+                    await loc.press('Control+A')
+                    await loc.press_sequentially(str(val), delay=15)
+            except Exception:
+                pass
+            await page.wait_for_timeout(150)
+        r = await self._cj(page, 'cell', sec, str(i), what)
+        got = r.split('|', 1)[1] if r.startswith('ok|') else r
+        return wr_same(got, val), got
+
+    async def _cib_pick(self, page, sec, i, bid):
+        """เลือก bundle เลข bid ให้แถว i: กด “เลือก bundle” (หรือปุ่มแก้ถ้าเลือกตัวอื่นไว้) -> พิมพ์เลข -> คลิกตัวที่เลขตรงเป๊ะ
+        -> อ่านกลับว่าแถวขึ้น ID ตรง"""
+        rs = await self._rows(page, sec) or []
+        if i < len(rs) and rs[i].get('bid') == bid:
+            return True, ''
+        why = ''
+        for attempt in range(3):
+            btn = 'pick' if (i < len(rs) and not rs[i].get('bid')) else 'edit'
+            r = await self._cj(page, 'cell', sec, str(i), btn)
+            if not r.startswith('ok'):
+                return False, r
+            try:
+                await page.locator('[data-trw-cibc="1"]').first.click(timeout=4000)
+            except Exception as ex:
+                why = 'กดปุ่มเลือก bundle ไม่ได้ (%s)' % str(ex)[:40]
+                continue
+            got_q = False
+            for _ in range(20):
+                await page.wait_for_timeout(150)
+                if (await self._cj(page, 'pick_q')) == 'ok':
+                    got_q = True
+                    break
+            if not got_q:
+                why = 'ป๊อปอัปค้นหา bundle ไม่เด้ง'
+                continue
+            try:
+                await page.locator('[data-trw-cibq="1"]').first.fill(bid, timeout=4000)
+            except Exception:
+                pass
+            res = ''
+            for _ in range(40):                      # รอผลค้นหาโหลด (สูงสุด ~10 วิ)
+                await page.wait_for_timeout(250)
+                res = await self._cj(page, 'pick_opts', bid)
+                if res.startswith('ok|') or res.startswith('many|') or res.startswith('empty|'):
+                    break
+            if not res.startswith('ok|'):
+                why = ('ค้นเลข %s แล้วเจอหลายตัว: %s' % (bid, res[5:]) if res.startswith('many|') else
+                       'ค้นเลข %s แล้วไม่เจอ bundle (%s)' % (bid, res.split('|', 1)[-1][:60]))
+                try:
+                    await page.keyboard.press('Escape')
+                except Exception:
+                    pass
+                await page.wait_for_timeout(300)
+                if res.startswith('empty|') or res.startswith('many|'):
+                    return False, why
+                continue
+            try:
+                await page.locator('[data-trw-cibo="1"]').first.click(timeout=4000)
+            except Exception:
+                await page.evaluate("() => { const e = document.querySelector('[data-trw-cibo]'); if (e) e.click(); }")
+            for _ in range(16):
+                await page.wait_for_timeout(200)
+                rs = await self._rows(page, sec) or []
+                if i < len(rs) and rs[i].get('bid') == bid:
+                    return True, ''
+            why = 'กดเลือกแล้วแถวไม่ขึ้น ID %s' % bid
+        return False, why
+
+    async def _cib_pic(self, page, sec, i, path):
+        """ใส่รูปแถว i (ไม่มีรูป = ข้าม) · รอจนแถวขึ้นรูป · คืน None/True/False"""
+        if not path:
+            return None
+        ok, why = check_item_image(path)
+        if not ok:
+            self.log('   ! รูปใช้ไม่ได้ (%s)' % why, 'WARN')
+            return False
+        rs = await self._rows(page, sec) or []
+        if i < len(rs) and rs[i].get('img'):
+            return True                          # มีรูปอยู่แล้ว (เว็บโหลดของเดิม/ใส่ไปแล้ว)
+        if (await self._cj(page, 'cell', sec, str(i), 'file')) != 'ok':
+            self.log('   ! %s แถวที่ %d ไม่เจอช่องใส่รูป' % (sec, i + 1), 'WARN')
+            return False
+        try:
+            await page.locator('input[type="file"][data-trw-cibf]').first.set_input_files(path, timeout=15000)
+        except Exception as ex:
+            self.log('   ! ใส่รูปไม่สำเร็จ: %s' % str(ex)[:80], 'WARN')
+            return False
+        for _ in range(30):                          # รออัปโหลดเสร็จ (รูปขึ้นในแถว) สูงสุด ~9 วิ
+            await page.wait_for_timeout(300)
+            rs = await self._rows(page, sec) or []
+            if i < len(rs) and rs[i].get('img'):
+                return True
+        return False
+
+    async def _cib_section(self, page, sec, plan, bad):
+        """กรอกส่วน sec ให้ครบตาม plan (ลำดับแถว = ลำดับในเว็บ)"""
+        rs = await self._rows(page, sec)
+        if rs is None:
+            self.log('   ! ไม่เจอส่วน “%s” ในรายการ Bundle' % sec, 'WARN')
+            bad.append(sec)
+            return
+        if len(rs) > len(plan):
+            self.log('   ! ส่วน %s มีแถวอยู่แล้ว %d แถว (ต้องการ %d) — ไม่ลบเอง ลบแถวเกินบนเว็บก่อน'
+                     % (sec, len(rs), len(plan)), 'WARN')
+            bad.append(sec)
+            return
+        for _ in range(len(plan) - len(rs)):
+            if (await self._cj(page, 'add', sec)) != 'ok':
+                self.log('   ! ไม่เจอปุ่ม “%s” ของส่วน %s' % (SEL_CIB['add'], sec), 'WARN')
+                bad.append(sec)
+                return
+            n0 = len(await self._rows(page, sec) or [])
+            try:
+                await page.locator('[data-trw-cibadd="1"]').first.click(timeout=4000)
+            except Exception:
+                pass
+            for _ in range(12):
+                await page.wait_for_timeout(150)
+                if len(await self._rows(page, sec) or []) > n0:
+                    break
+        rs = await self._rows(page, sec) or []
+        if len(rs) != len(plan):
+            self.log('   ! ส่วน %s เพิ่มแถวได้ %d / %d แถว' % (sec, len(rs), len(plan)), 'WARN')
+            bad.append(sec)
+            return
+        nopic = []
+        for i, w in enumerate(plan):
+            if self._cancel():
+                bad.append('ยกเลิก')
+                return
+            who = '%s แถว %d' % (sec, i + 1) + (' (Day %s)' % w['day'] if w.get('day') else '')
+            ok, got = await self._cib_fill(page, sec, i, 'pos', w['pos'])
+            if not ok:
+                self.log('   ! %s: Position อยากได้ %s แต่เป็น “%s”' % (who, w['pos'], got), 'WARN')
+                bad.append('%s Position' % who)
+            ok, why = await self._cib_pick(page, sec, i, w['bid'])
+            if not ok:
+                self.log('   ! %s: เลือก Bundle #%s ไม่ได้ — %s' % (who, w['bid'], why), 'WARN')
+                bad.append('%s Bundle' % who)
+            ok, got = await self._cib_fill(page, sec, i, 'name', w['name'])
+            if not ok:
+                self.log('   ! %s: Bundle Name อยากได้ “%s” แต่เป็น “%s”' % (who, w['name'], got), 'WARN')
+                bad.append('%s Bundle Name' % who)
+            pr = await self._cib_pic(page, sec, i, w.get('img'))
+            if pr is False:
+                self.log('   ! %s: ใส่รูป %s แล้วเว็บยังไม่ขึ้นรูป' % (who, os.path.basename(w['img'])), 'WARN')
+                bad.append('%s รูป' % who)
+            elif pr is None and sec != 'Instant':
+                nopic.append(str(w.get('day') or i + 1))
+        self.log('   · %s: %d แถว (Position · Bundle · Bundle Name%s)' % (
+            sec, len(plan), ' · รูป' if any(w.get('img') for w in plan) else ''), 'INFO')
+        if nopic:
+            self.log('   · %s ไม่มีรูป: Day %s' % (sec, ', '.join(nopic)), 'INFO')
+
+    def _cancel(self):
+        try:
+            return bool(object.__getattribute__(self, '_tab').cancel)
+        except Exception:
+            return False
+
+    async def make_cib(self, page, t, pics, start, do, hold):
+        """กรอก Premium Check In 1 ตัวให้ครบ อ่านกลับทั้งใบ — ช่องไหนไม่ตรง ไม่กดสร้างเด็ดขาด
+        คืน {'ok', 'created', 'unsure', 'id', 'why', 'state'}  state: pre (ยังไม่กดสร้าง/เว็บปฏิเสธ) / unknown / ok"""
+        res = {'ok': False, 'created': False, 'unsure': False, 'id': '', 'why': '', 'state': 'pre'}
+        await page.goto(CIB_CREATE_URL, wait_until='domcontentloaded', timeout=45000)
+        await page.wait_for_timeout(1500)
+        if any(k in page.url.lower() for k in ('login', 'signin', 'auth')):
+            self.log('   ✗ ยังไม่ได้ล็อกอิน — กด “เปิดหน้า Login” ด้านบนก่อน', 'ERR')
+            res['why'] = 'ยังไม่ได้ล็อกอิน'
+            return res
+        for _ in range(40):                             # รอฟอร์มโหลด (เห็นช่อง Slug)
+            if (await self._w_read(page, SEL_CIB['slug'], 'left')) is not None:
+                break
+            await page.wait_for_timeout(500)
+        sw0 = await self._cj(page, 'switches')
+        bad, texts = [], []
+
+        async def T(label, val, what):
+            texts.append((label, str(val), what))
+            if not await self._w_text(page, label, 'left', val, what):
+                bad.append(what)
+
+        await T(SEL_CIB['slug'], t['slug'], 'Slug')
+        if not await self._cib_tag(page, t['tag']):
+            bad.append('Activity Tag')
+        await T(SEL_CIB['name'], t['name'], 'ชื่อ (Internal Note)')
+        await T(SEL_CIB['price'], t['price'], 'ราคา')
+        if not await self._cib_lang(page):
+            self.log('   ! กดแท็บ “ไทย” ในกล่องรายละเอียดไม่ได้', 'WARN')
+            bad.append('แท็บภาษา ไทย')
+        else:
+            await T(SEL_CIB['title'], CIB_TITLE, 'หัวข้อ')
+            await T(SEL_CIB['desc'], CIB_DESC, 'คำอธิบาย')
+        for key, when, what in (('start', start, 'วันที่เริ่ม'), ('end', t['end'], 'วันที่สิ้นสุด')):
+            if not await self._w_date(page, SEL_CIB[key], when, what):
+                bad.append(what)
+        plan = cib_plan(t, pics)
+        for sec in CIB_SECS:
+            if self._cancel():
+                bad.append('ยกเลิก')
+                break
+            await self._cib_section(page, sec, plan[sec], bad)
+
+        # ---------- ตรวจรอบสุดท้ายทั้งใบ ----------
+        for lbl, want, what in texts:
+            if what in bad:
+                continue
+            got = await self._w_read(page, lbl, 'left')
+            if not wr_same(got, want):
+                self.log('   ! ตรวจรอบสุดท้าย: %s อยากได้ “%s” แต่ในฟอร์มเป็น “%s”'
+                         % (what, want[:40], (got or '')[:40]), 'WARN')
+                bad.append(what)
+        if 'Activity Tag' not in bad and (await self._cj(page, 'tag', t['tag'], 'read')) != 'ok|' + t['tag']:
+            self.log('   ! ตรวจรอบสุดท้าย: Activity Tag ไม่ใช่ %s' % t['tag'], 'WARN')
+            bad.append('Activity Tag')
+        for key, when, what in (('start', start, 'วันที่เริ่ม'), ('end', t['end'], 'วันที่สิ้นสุด')):
+            if what in bad:
+                continue
+            ok, shown = await self._w_date_ok(page, SEL_CIB[key], when)
+            if not ok:
+                self.log('   ! ตรวจรอบสุดท้าย: %s ช่องบนเว็บขึ้น “%s”' % (what, shown[:40]), 'WARN')
+                bad.append(what)
+        for sec in CIB_SECS:
+            if any(str(x).startswith(sec) for x in bad):
+                continue
+            rs = await self._rows(page, sec) or []
+            want = plan[sec]
+            got = [(r.get('pos'), r.get('bid'), r.get('name')) for r in rs]
+            exp = [(w['pos'], w['bid'], w['name']) for w in want]
+            if got != exp:
+                diff = next((k for k in range(max(len(got), len(exp)))
+                             if (got[k] if k < len(got) else None) != (exp[k] if k < len(exp) else None)), 0)
+                self.log('   ! ตรวจรอบสุดท้าย: %s แถว %d เป็น %s (ต้องเป็น %s)'
+                         % (sec, diff + 1, got[diff] if diff < len(got) else 'ไม่มี',
+                            exp[diff] if diff < len(exp) else 'ไม่มี'), 'WARN')
+                bad.append('%s (ตรวจรอบสุดท้าย)' % sec)
+            miss = [str(w.get('day') or k + 1) for k, (w, r) in enumerate(zip(want, rs)) if w.get('img') and not r.get('img')]
+            if miss:
+                self.log('   ! ตรวจรอบสุดท้าย: %s Day %s ไม่มีรูป' % (sec, ', '.join(miss)), 'WARN')
+                bad.append('%s รูป' % sec)
+        sw1 = await self._cj(page, 'switches')
+        if sw0 != sw1:
+            self.log('   ! สถานะ (เปิดใช้งาน/โหมดทดสอบ) เปลี่ยนไปจากตอนเปิดหน้า (%s → %s) — ไม่กดสร้าง' % (sw0, sw1), 'WARN')
+            bad.append('สถานะ')
+
+        if bad:
+            miss = ', '.join(dict.fromkeys(bad))
+            res['why'] = 'กรอกไม่ครบ: ' + miss[:200]
+            if not do:
+                self.log('   ⚠ กรอกไม่ครบ %d จุด: %s  (โหมดทดสอบ — ไม่กดสร้าง)' % (len(dict.fromkeys(bad)), miss[:300]),
+                         'WARN')
+                if hold:
+                    await page.wait_for_timeout(hold * 1000)
+            else:
+                self.log('   ✗ ไม่กดสร้าง เพราะกรอกไม่ครบ: %s' % miss[:300], 'ERR')
+            return res
+        if not do:
+            self.log('   ✓ กรอกครบ ตรวจแล้วทุกช่อง (โหมดทดสอบ — ไม่กดสร้าง)', 'OK')
+            if hold:
+                await page.wait_for_timeout(hold * 1000)
+            res['ok'] = True
+            return res
+
+        # ---------- กด “สร้าง” + ป๊อปอัปยืนยัน ----------
+        if (await self._cj(page, 'submit', SEL_CIB['submit'])) != 'ok':
+            self.log('   ✗ ไม่เจอปุ่ม “%s”' % SEL_CIB['submit'], 'ERR')
+            res['why'] = 'ไม่เจอปุ่ม “%s”' % SEL_CIB['submit']
+            return res
+        hits = []
+
+        def _grab(resp):
+            try:
+                u = resp.url.lower()
+                if resp.request.method in ('POST', 'PUT', 'PATCH') and \
+                        ('premium' in u or 'check-in' in u or 'checkin' in u or 'activit' in u):
+                    hits.append(resp)
+            except Exception:
+                pass
+        url0 = page.url
+        page.on('response', _grab)
+        try:
+            res['state'] = 'unknown'
+            await page.locator('[data-trw-cibgo="1"]').first.click(timeout=10000)
+            await page.wait_for_timeout(600)
+            await self._click_confirm(page, hits)
+            waited = 0
+            while waited < 25000 and not hits:
+                await page.wait_for_timeout(300)
+                waited += 300
+            await page.wait_for_timeout(1500)
+        finally:
+            try:
+                page.remove_listener('response', _grab)
+            except Exception:
+                pass
+        code, cid, good = 0, '', False
+        for resp in hits:
+            try:
+                st_ = resp.status
+            except Exception:
+                st_ = 0
+            try:
+                body = await resp.json()
+            except Exception:
+                body = None
+            if 200 <= st_ < 300:
+                good, code = True, st_
+                cid = cid or cib_uuid(body)
+            elif not good:
+                code = st_
+        if hits and good:
+            cid = cid or cib_id_from_url(page.url)
+            res.update(ok=True, created=True, id=cid, state='ok')
+            self.log('   ✓ สร้าง Premium Check In แล้ว%s  (HTTP %d)' % ('  ·  id = %s' % cid if cid else '', code), 'OK')
+        elif hits and code < 500:
+            res.update(state='pre', why='เว็บตอบ HTTP %d — ยังไม่ได้สร้าง' % code)
+            self.log('   ✗ ' + res['why'], 'ERR')
+        else:
+            cid = cib_id_from_url(page.url) if page.url != url0 else ''
+            res.update(unsure=True, id=cid, why=('เว็บตอบ HTTP %d' % code if hits else 'กดสร้างแล้วไม่เห็นคำตอบจากเว็บ')
+                       + ' — อาจสร้างไปแล้วก็ได้ ตรวจในหน้า Premium Check In ก่อนสั่งใหม่')
+            self.log('   ? ' + res['why'], 'WARN')
+        log_event('create_premium_checkin', slug=t.get('slug'), tag=t.get('tag'), ok=bool(res['created']),
+                  http=code, unsure=res['unsure'], commit=True)
+        return res
+
+
+class CibImportDialog(BundleImportDialog):
+    """หน้าต่างเลือกชีทของแท็บ 🗓 Check in Booster — หน้าต่างเดียวกับนำเข้าบันเดิล (สืบทอดอย่างเดียว ไม่แก้ของเดิม)"""
+    TITLE = 'นำเข้าชีท — 🗓 Check in Booster'
+    PICK_ALL = 'เลือกชีท Check in Booster ทั้งหมด'
+    HINT = ('เลือกชีทที่จะสร้าง (เลือกได้หลายชีท) — 1 ชีท = 1 Premium Check In · อ่านตาราง FREE / PAID '
+            '(Bundle No. · Day · Item Name) · Start / End · ราคาพรีเมียม · ป้าย Bundle ข้าง FP (Instant)')
+    TREE_TITLE = 'Premium Check In ที่เจอ'
+    TREE_HEAD = 'ชีท / Slug'
+    scan_fn = staticmethod(lambda wb, progress=None: cib_scan_sheets_wb(wb, progress))
+    read_fn = staticmethod(lambda wb, nm: cib_read_sheet_wb(wb, nm))
+    ALLOW_COL = False
+
+    def _show(self, bs, ws, note):
+        self.bundles = bs
+        self.warns = ws
+        for c, t, w in (('qty', 'Tag', 60), ('tier', 'Free/Premium', 100), ('info', 'ช่วงเวลา (ชีท) · Instant', 360)):
+            self.tree.heading(c, text=t)
+            self.tree.column(c, width=w)
+        self.tree.tag_configure('stop', background=C['row_bad_bg'], foreground=C['row_bad_fg'])
+        self.tree.delete(*self.tree.get_children())
+        for t in bs:
+            stop = [c for c in cib_issues(t) if c['lv'] == 'stop']
+            info = '%s → %s · Instant %s' % ((t.get('start_sheet') or '?')[:10], (t.get('end') or '?')[:10],
+                                            t.get('instant') or '⚠ ไม่มี')
+            if stop:
+                info += ' · ⛔ ' + stop[0]['msg']
+            self.tree.insert('', 'end', text='🗓  %s · %s' % (t['sheet'], t.get('slug') or '?'),
+                             values=(t.get('tag') or '?', '%d / %d' % (len(t['free']), len(t['prem'])), info),
+                             tags=('stop',) if stop else ())
+        self.info.config(text='%s · พบ %d ตัว' % (note, len(bs)))
+        self.warn_lbl.config(text=('⛔  %d จุดที่ต้องดู เช่น %s' % (len(ws), ws[0][:110])) if ws else '')
+        self.count_lbl.config(text='จะนำเข้า %d ตัว' % len(bs) if bs else '')
+        self.ok_btn.config(state='normal' if bs else 'disabled',
+                           bg=C['btn1_bg'] if bs else C['input'], fg='white' if bs else C['dim'])
+
+    def _ok(self):
+        self.picked = self._selected()
+        BundleImportDialog._ok(self)
+
+
+class CibTab:
+    """แท็บ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (1 ชีท = 1 ตัว) · ของใหม่ทั้งก้อน
+    ใช้ Chrome ตัวเดียวกับแท็บอื่น (ตอนทำงานตั้ง b_running กันแท็บอื่นเปิดชน เหมือนแท็บสร้าง Product)"""
+    COLS = (('use', 'ใช้', 40), ('sheet', 'ชีท', 96), ('tag', 'Tag', 52), ('slug', 'Slug', 250),
+            ('name', 'ชื่อ (Internal Note)', 220), ('price', 'ราคา', 56), ('free', 'Free', 54), ('prem', 'Premium', 64),
+            ('inst', 'Instant', 60), ('end', 'วันสิ้นสุด', 132), ('pic', 'รูป', 52), ('st', 'สถานะ', 260))
+    ICOLS = (('id', 'Item Id', 64), ('item', 'ไอเทม', 220), ('days', 'ใช้ใน', 230), ('pic', 'รูป', 220))
+    MCOLS = (('n', '#', 30), ('slug', 'Slug', 220), ('tag', 'Tag', 50), ('id', 'id', 150), ('at', 'สร้างเมื่อ', 84))
+
+    def __init__(self, app, tab):
+        self.app = app
+        self.tab = tab
+        self.st = cib_new_state()
+        self.running = False
+        self.cancel = False
+        self._rowmap = {}
+        self._imap = {}
+        self._mmap = {}
+        self._build()
+        self._load()
+        self.refresh()
+
+    # ---------- หน้าจอ ----------
+    def _build(self):
+        a, p = self.app, self.tab
+        _, left, right = a._split_lr(p, 0.70)
+        s1 = a._card(left, '1) นำเข้าจากไฟล์ต้นฉบับ — เลือกชีท Check in Booster (1 ชีท = 1 Premium Check In)')
+        bar = tk.Frame(s1, bg=C['bg'])
+        bar.pack(fill='x')
+        a._btn(bar, '📂  นำเข้าไฟล์ชีท (.xlsx)', self.open_file, primary=True).pack(side='left', ipadx=10, ipady=4)
+        a._btn(bar, '↻  อ่านใหม่', self.reread).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
+        a._btn(bar, '🗑  ล้าง', self.clear).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
+        a._btn(bar, '❓  วิธีใช้', self.help).pack(side='right', ipadx=10, ipady=4)
+        self.lbl_file = tk.Label(s1, text='', bg=C['bg'], fg=C['dim'], font=FM, anchor='w', justify='left')
+        self.lbl_file.pack(fill='x', pady=(8, 0))
+        a._wrap_to(s1, self.lbl_file)
+
+        s2 = a._card(left, '2) ตรวจ / แก้ — ติ๊ก ☑ ตัวที่จะสร้าง · ดับเบิลคลิกแถว = แก้ไข', grow=True)
+        tb = tk.Frame(s2, bg=C['bg'])
+        tb.pack(fill='x', pady=(0, 6))
+        a._btn(tb, '✏️  แก้ไข', self.edit_selected).pack(side='left', ipadx=6, ipady=2)
+        a._btn(tb, '🔗  เลข Bundle จากแท็บ Bundle', self.bundle_from_tab).pack(side='left', padx=(6, 0), ipadx=6, ipady=2)
+        a._btn(tb, '🗑  ลบแถวที่เลือก', self.remove_selected).pack(side='right', ipadx=6, ipady=2)
+        tw = tk.Frame(s2, bg=C['bg'])
+        tw.pack(fill='both', expand=True)
+        self.tree = ttk.Treeview(tw, columns=[c[0] for c in self.COLS], show='headings', style='TR.Treeview',
+                                 height=3, selectmode='extended')
+        for c, t, w in self.COLS:
+            self.tree.heading(c, text=t)
+            self.tree.column(c, width=w, minwidth=30, stretch=(c == 'st'),
+                             anchor='center' if c in ('use', 'tag', 'free', 'prem', 'inst', 'pic', 'price') else 'w')
+        xs = ttk.Scrollbar(tw, orient='horizontal', command=self.tree.xview)
+        self.tree.configure(xscrollcommand=xs.set)
+        self.tree.grid(row=0, column=0, sticky='nsew')
+        xs.grid(row=1, column=0, sticky='ew')
+        tw.rowconfigure(0, weight=1)
+        tw.columnconfigure(0, weight=1)
+        self.tree.bind('<Button-1>', self._click)
+        self.tree.bind('<Double-1>', self._dbl)
+        self.tree.bind('<Return>', lambda e: self.edit_selected())
+        self.tree.bind('<Delete>', lambda e: self.remove_selected())
+        self.tree.bind('<<TreeviewSelect>>', lambda e: self._info(), add='+')
+        self.lbl_info = tk.Label(s2, text='', bg=C['bg'], fg=C['fg'], font=('Segoe UI', 9), anchor='w', justify='left')
+        self.lbl_info.pack(fill='x', pady=(4, 0))
+        a._wrap_to(s2, self.lbl_info)
+        # ---- รูปไอเทม (1 ไอเทม = 1 รูป ใช้ทุกวันที่ไอเทมนั้นอยู่ ทั้ง 2 ชีท) ----
+        ih = tk.Frame(s2, bg=C['bg'])
+        ih.pack(fill='x', pady=(8, 4))
+        tk.Label(ih, text='🖼  รูปไอเทม — เลือกครั้งเดียวต่อไอเทม ใส่ให้ทุก Day ที่ใช้ไอเทมนั้น (ดับเบิลคลิกแถว = เลือกรูป)',
+                 bg=C['bg'], fg=C['fg'], font=FB).pack(side='left')
+        a._btn(ih, '✕  เอารูปออก', self.drop_pic).pack(side='right', ipadx=6, ipady=2)
+        a._btn(ih, '📁  เลือกรูป…', self.pick_pic).pack(side='right', padx=(0, 6), ipadx=6, ipady=2)
+        iw = tk.Frame(s2, bg=C['bg'])
+        iw.pack(fill='both', expand=True)
+        self.tree_i = ttk.Treeview(iw, columns=[c[0] for c in self.ICOLS], show='headings', style='TR.Treeview',
+                                   height=5, selectmode='extended')
+        for c, t, w in self.ICOLS:
+            self.tree_i.heading(c, text=t)
+            self.tree_i.column(c, width=w, minwidth=40, stretch=(c == 'pic'), anchor='w')
+        iys = ttk.Scrollbar(iw, orient='vertical', command=self.tree_i.yview)
+        self.tree_i.configure(yscrollcommand=iys.set)
+        self.tree_i.grid(row=0, column=0, sticky='nsew')
+        iys.grid(row=0, column=1, sticky='ns')
+        iw.rowconfigure(0, weight=1)
+        iw.columnconfigure(0, weight=1)
+        self.tree_i.bind('<Double-1>', lambda e: self.pick_pic())
+        self.tree_i.tag_configure('nopic', foreground=C['warn'])
+        self.lbl_sum = tk.Label(s2, text='', bg=C['bg'], fg=C['fg'], font=FB, anchor='w', justify='left')
+        self.lbl_sum.pack(fill='x', pady=(4, 0))
+
+        s3 = a._card(left, '3) ลงมือสร้าง Premium Check In')
+        tk.Label(s3, text='วันที่เริ่ม = เวลาตอนกดเริ่ม (ไว้เทส)  ·  วันที่สิ้นสุด = ตามชีท  ·  สถานะ (เปิดใช้งาน / โหมดทดสอบ) '
+                          'ไม่แตะ  ·  Info URL / Banner / Background ไม่แตะ',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w', justify='left').pack(fill='x')
+        hd = tk.Frame(s3, bg=C['bg'])
+        hd.pack(fill='x', pady=(8, 0))
+        tk.Label(hd, text='โหมดทดสอบ: กรอกเสร็จแล้วค้างหน้าไว้ให้ดู (วินาที)', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9)).pack(side='left')
+        self.v_hold = tk.StringVar(value=str(a.prefs.get('cib_hold', '8')))
+        eh = a._entry(hd, width=6)
+        eh.config(textvariable=self.v_hold)
+        eh.pack(side='left', padx=(10, 0), ipady=3)
+        b3 = tk.Frame(s3, bg=C['bg'])
+        b3.pack(fill='x', pady=(10, 0))
+        self.btn_run = a._btn(b3, '▶  เริ่มทำงาน', self.create, primary=True)
+        self.btn_run.pack(side='left', ipadx=18, ipady=5)
+        self.btn_stop = a._btn(b3, '■  ยกเลิก', self.stop)
+        self.btn_stop.config(state='disabled')
+        self.btn_stop.pack(side='left', padx=(8, 0), ipadx=12, ipady=5)
+        self.v_do = tk.BooleanVar(value=False)
+        tk.Checkbutton(b3, variable=self.v_do, command=self._do_changed, text='กดปุ่ม “สร้าง” จริง',
+                       bg=C['bg'], fg=C['fg'], selectcolor=C['input'], activebackground=C['bg'],
+                       activeforeground=C['fg'], font=FB, bd=0, highlightthickness=0).pack(side='left', padx=(16, 0))
+        self.lbl_mode = tk.Label(s3, text='', bg=C['bg'], font=('Segoe UI', 9), anchor='w', justify='left')
+        self.lbl_mode.pack(fill='x', pady=(6, 0))
+        a._wrap_to(s3, self.lbl_mode)
+        self._do_changed()
+        try:
+            s3.master.pack_configure(side='bottom', pady=(8, 8), before=s2.master)
+        except Exception:
+            pass
+
+        h1 = tk.Frame(right, bg=C['bg'])
+        h1.pack(fill='x', padx=(8, 14), pady=(10, 2))
+        tk.Label(h1, text='Premium Check In ที่สร้างแล้ว', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9, 'bold')).pack(side='left')
+        self.lbl_made = tk.Label(h1, text='', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w')
+        self.lbl_made.pack(side='left', padx=10)
+        mw = tk.Frame(right, bg=C['bg'])
+        mw.pack(fill='both', expand=True, padx=(8, 14), pady=(0, 12))
+        self.tree_made = ttk.Treeview(mw, columns=[c[0] for c in self.MCOLS], show='headings',
+                                      style='TR.Treeview', height=4, selectmode='extended')
+        for c, t, w in self.MCOLS:
+            self.tree_made.heading(c, text=t)
+            self.tree_made.column(c, width=w, anchor='w', stretch=(c == 'at'))
+        msb = ttk.Scrollbar(mw, orient='vertical', command=self.tree_made.yview)
+        self.tree_made.configure(yscrollcommand=msb.set)
+        self.tree_made.grid(row=0, column=0, sticky='nsew')
+        msb.grid(row=0, column=1, sticky='ns')
+        mw.rowconfigure(0, weight=1)
+        mw.columnconfigure(0, weight=1)
+
+    def _do_changed(self):
+        if self.v_do.get():
+            self.lbl_mode.config(text='⚠  จะสร้างจริงบนเว็บ (กดสร้าง + ยืนยันในป๊อปอัป) — ช่องไหนกรอกไม่เข้า / อ่านกลับไม่ตรง '
+                                      '= ไม่กดสร้าง · ยังไม่ได้สร้างห้ามข้าม (ลองใหม่เอง / ถามก่อน)', fg=C['err'])
+        else:
+            self.lbl_mode.config(text='โหมดทดสอบ — กรอกให้ดูครบทุกช่อง ตรวจทุกช่องแล้วไม่กดสร้าง '
+                                      '(ติ๊ก “กดปุ่ม สร้าง จริง” ถึงจะสร้าง)', fg=C['ok'])
+
+    def _pics(self):
+        return self.st.setdefault('pics', {})
+
+    def _issues(self, t):
+        return cib_issues(t, self._pics())
+
+    # ---------- เก็บ/โหลด ----------
+    def _path(self):
+        return os.path.join(DATA_DIR, CIB_STATE)
+
+    def _save(self):
+        try:
+            os.makedirs(DATA_DIR, exist_ok=True)
+            tmp = self._path() + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(self.st, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, self._path())
+        except Exception as ex:
+            self.app.log('เก็บข้อมูลแท็บ Check in Booster ไม่ได้: %s' % str(ex)[:80], 'WARN')
+
+    def _load(self):
+        try:
+            if not os.path.exists(self._path()):
+                return
+            with open(self._path(), 'r', encoding='utf-8') as f:
+                d = json.load(f)
+            if not isinstance(d, dict) or not isinstance(d.get('rows'), list):
+                raise ValueError('รูปแบบไฟล์ไม่ถูก')
+            st = cib_new_state()
+            st.update(d)
+            if not isinstance(st.get('pics'), dict):
+                st['pics'] = {}
+            self.st = st
+        except Exception as ex:
+            try:
+                os.replace(self._path(), self._path() + '.bad')
+            except Exception:
+                pass
+            why = str(ex)[:60]
+            self.app.root.after(0, lambda: self.app.log(
+                'ไฟล์ข้อมูลแท็บ Check in Booster อ่านไม่ได้ (%s) — เริ่มใหม่' % why, 'WARN'))
+
+    # ---------- นำเข้า ----------
+    def open_file(self):
+        if self.running:
+            return messagebox.showinfo('กำลังทำงาน', 'รอให้งานเสร็จก่อนนะ')
+        f0 = self.st.get('file') or ''
+        path = filedialog.askopenfilename(
+            title='เลือกไฟล์ต้นฉบับ (.xlsx)',
+            initialdir=os.path.dirname(f0) if f0 and os.path.isdir(os.path.dirname(f0)) else None,
+            filetypes=[('Excel', '*.xlsx *.xlsm'), ('ทุกไฟล์', '*.*')])
+        if not path:
+            return
+        dlg = CibImportDialog(self.app.root, path)
+        if dlg.result is None:
+            return
+        self._apply(path, getattr(dlg, 'picked', []), dlg.result)
+
+    def reread(self):
+        f, sheets = self.st.get('file') or '', self.st.get('sheets') or []
+        if not f or not sheets:
+            return messagebox.showinfo('ยังไม่มีไฟล์', 'กด “นำเข้าไฟล์ชีท” ก่อนนะ')
+        if not os.path.exists(f):
+            return messagebox.showwarning('หาไฟล์ไม่เจอ', 'ไม่เจอไฟล์เดิมแล้ว:\n%s\n\nนำเข้าไฟล์ใหม่แทนนะ' % f)
+        if self.running:
+            return messagebox.showinfo('กำลังทำงาน', 'รอให้งานเสร็จก่อนนะ')
+        try:
+            wb = open_workbook(f)
+            try:
+                ts, miss = [], []
+                for s in sheets:
+                    if s in wb.sheetnames:
+                        ts += cib_read_sheet_wb(wb, s)[0]
+                    else:
+                        miss.append(s)
+            finally:
+                wb.close()
+        except Exception as ex:
+            self.app.log('Check in Booster: อ่านไฟล์ไม่ได้ — %s' % ex, 'ERR')
+            return messagebox.showerror('อ่านไฟล์ไม่ได้', str(ex)[:300])
+        if miss:
+            self.app.log('Check in Booster: ไม่เจอชีท %s ในไฟล์แล้ว' % ', '.join(miss), 'WARN')
+        self._apply(f, [s for s in sheets if s not in miss], ts)
+
+    def _apply(self, path, sheets, ts):
+        old = self.st.get('rows') or []
+        rows = cib_carry(old, [dict(t) for t in ts])
+        self.st.update(file=path, sheets=list(sheets), rows=rows, read_at=datetime.now().isoformat(timespec='seconds'))
+        self._save()
+        self.refresh()
+        self.app.log('Check in Booster: อ่าน %s (%d ชีท) — เจอ %d ตัว' % (os.path.basename(path), len(sheets), len(rows)),
+                     'OK' if rows else 'WARN')
+        self.app._pre_log('Check in Booster', rows, self._issues, lambda t: t.get('sheet') or '?')
+        log_event('cib_read', file=os.path.basename(path), sheets=len(sheets), items=len(rows))
+
+    def clear(self):
+        if self.running or not self.st.get('rows'):
+            return
+        if not messagebox.askyesno('ล้าง', 'ล้างรายการในคิวทั้งหมด?\n(รูปไอเทมที่เลือกไว้ และประวัติที่สร้างแล้ว ยังอยู่)'):
+            return
+        self.st.update(rows=[], file='', sheets=[])
+        self._save()
+        self.refresh()
+
+    # ---------- ตาราง ----------
+    def _t(self, iid):
+        k = self._rowmap.get(iid)
+        return next((t for t in self.st.get('rows') or [] if t.get('key') == k), None)
+
+    def _sel(self):
+        return [t for t in (self._t(i) for i in self.tree.selection()) if t]
+
+    def _status(self, t, stop, warn):
+        m = t.get('made')
+        if m:
+            return '? กดสร้างแล้วไม่เห็นคำตอบ — ตรวจบนเว็บ' if m.get('unsure') else '✓ สร้างแล้ว'
+        if not t.get('use'):
+            return '— ไม่เลือก' + (' · ⛔ %s' % stop[0]['msg'] if stop else '')
+        if stop:
+            return '⛔ ' + stop[0]['msg']
+        la = t.get('last') or {}
+        if la and not la.get('ok'):
+            return '✗ ' + (la.get('why') or 'ไม่ผ่าน')
+        if warn:
+            return '⚠ ' + warn[0]['msg']
+        if la.get('ok') and not la.get('do'):
+            return '✓ ทดสอบผ่าน (%s)' % la.get('at', '')
+        return '✓ พร้อม'
+
+    @staticmethod
+    def _nb(rows):
+        n = sum(1 for x in rows if re.fullmatch(r'\d+', str(x.get('bundle') or '')))
+        return '%d/%d' % (n, len(rows))
+
+    def refresh(self):
+        tr = self.tree
+        keys = [self._rowmap.get(i) for i in tr.selection()]
+        tr.delete(*tr.get_children())
+        self._rowmap = {}
+        tr.tag_configure('stop', background=C['row_bad_bg'], foreground=C['row_bad_fg'])
+        tr.tag_configure('warn', background=C['row_warn_bg'], foreground=C['row_warn_fg'])
+        tr.tag_configure('made', foreground=C['ok'])
+        tr.tag_configure('off', foreground=C['dim'])
+        rows = self.st.get('rows') or []
+        pics = self._pics()
+        n = {'use': 0, 'stop': 0, 'warn': 0}
+        back = []
+        for t in rows:
+            cs = self._issues(t)
+            stop = [c for c in cs if c['lv'] == 'stop']
+            warn = [c for c in cs if c['lv'] != 'stop']
+            use = bool(t.get('use'))
+            tag = 'made' if t.get('made') else ('off' if not use else ('stop' if stop else ('warn' if warn else '')))
+            if use:
+                n['use'] += 1
+                n['stop'] += bool(stop)
+                n['warn'] += bool(warn and not stop)
+            its = cib_items(t)
+            npic = sum(1 for it in its if cib_pic_of(pics, it))
+            cb = PD_CB_ON if use else (PD_CB_DONE if t.get('made') else PD_CB_OFF)
+            vals = (cb, t.get('sheet'), t.get('tag') or '?', t.get('slug') or '—', t.get('name') or '—',
+                    t.get('price') or '—', self._nb(t.get('free') or []), self._nb(t.get('prem') or []),
+                    t.get('instant') or '—', (t.get('end') or '—')[:19], '%d/%d' % (npic, len(its)),
+                    self._status(t, stop, warn))
+            iid = tr.insert('', 'end', values=vals, tags=(tag,) if tag else ())
+            self._rowmap[iid] = t.get('key')
+            if t.get('key') in keys:
+                back.append(iid)
+        if back:
+            tr.selection_set(back)
+        f = self.st.get('file') or ''
+        self.lbl_file.config(
+            text=('📄 %s  ·  ชีท: %s' % (os.path.basename(f), ', '.join(self.st.get('sheets') or []) or '—')) if f else
+            'ยังไม่ได้นำเข้าไฟล์ — กด “📂 นำเข้าไฟล์ชีท” แล้วเลือกชีท Check in Booster (ไฟล์ไหนก็ได้ที่หน้าตาแบบนี้)',
+            fg=C['fg'] if f else C['dim'])
+        txt = ''
+        if rows:
+            txt = 'ทั้งหมด %d · ติ๊กไว้ %d' % (len(rows), n['use'])
+            if n['stop']:
+                txt += '  ·  ⛔ น่าจะผิด %d' % n['stop']
+            if n['warn']:
+                txt += '  ·  ⚠ ควรเช็ก %d' % n['warn']
+        self.lbl_sum.config(text=txt, fg=C['err'] if n['stop'] else (C['warn'] if n['warn'] else C['fg']))
+        self._refresh_items()
+        self._info()
+        self._refresh_made()
+
+    def _all_items(self):
+        """ไอเทมไม่ซ้ำจากทุกชีทในคิว (รูปผูกกับ Item Id ใช้ร่วมกันทุกชีท)"""
+        out = {}
+        for t in self.st.get('rows') or []:
+            for it in cib_items(t):
+                k = it['id'] or it['item']
+                o = out.setdefault(k, {'id': it['id'], 'item': it['item'], 'use': []})
+                tr = t.get('tag') or t.get('sheet')
+                if it['Free']:
+                    o['use'].append('%s Free D%s' % (tr, ','.join(str(d) for d in it['Free'])))
+                if it['Premium']:
+                    o['use'].append('%s Prem D%s' % (tr, ','.join(str(d) for d in it['Premium'])))
+        return list(out.values())
+
+    def _refresh_items(self):
+        tr = self.tree_i
+        sel = [self._imap.get(i) for i in tr.selection()]
+        tr.delete(*tr.get_children())
+        self._imap = {}
+        pics = self._pics()
+        for it in self._all_items():
+            pth = cib_pic_of(pics, it)
+            iid = tr.insert('', 'end', values=(it['id'] or '—', it['item'] or '—', ' · '.join(it['use']),
+                                               os.path.basename(pth) if pth else '— ยังไม่มีรูป'),
+                            tags=() if pth else ('nopic',))
+            self._imap[iid] = it['id']
+            if it['id'] in sel:
+                tr.selection_add(iid)
+
+    def _info(self):
+        ts = self._sel()
+        if len(ts) != 1:
+            self.lbl_info.config(text='')
+            return
+        t = ts[0]
+        bits = ['ชีท %s' % t.get('sheet'), 'กิจกรรมในชีท “%s”' % (t.get('event') or '—'),
+                'เริ่ม (ชีท) %s' % (t.get('start_sheet') or '—')[:16]]
+        lines = ['  ·  '.join(bits)] + [chk_text(c) for c in self._issues(t)]
+        self.lbl_info.config(text='\n'.join(lines))
+
+    def _refresh_made(self):
+        tr = self.tree_made
+        tr.delete(*tr.get_children())
+        self._mmap = {}
+        made = self.st.get('made') or []
+        for i, m in enumerate(made, 1):
+            iid = tr.insert('', 'end', values=(i, m.get('slug', ''), m.get('tag', ''),
+                                               ('? ตรวจบนเว็บ' if m.get('unsure') else (m.get('id') or '-')), m.get('at', '')))
+            self._mmap[iid] = m
+        self.lbl_made.config(text=('สร้างแล้ว %d ตัว' % len(made)) if made else 'ยังไม่ได้สร้าง',
+                             fg=C['ok'] if made else C['dim'])
+
+    def _click(self, ev):
+        if self.tree.identify_region(ev.x, ev.y) != 'cell' or self.tree.identify_column(ev.x) != '#1':
+            return None
+        t = self._t(self.tree.identify_row(ev.y))
+        if not t or self.running:
+            return 'break'
+        t['use'] = not t.get('use')
+        self._save()
+        self.refresh()
+        return 'break'
+
+    def _dbl(self, ev):
+        if self.tree.identify_column(ev.x) == '#1':
+            return 'break'
+        t = self._t(self.tree.identify_row(ev.y))
+        if t:
+            self.edit(t)
+        return 'break'
+
+    def remove_selected(self):
+        if self.running:
+            return
+        ts = self._sel()
+        if not ts:
+            return messagebox.showinfo('ยังไม่ได้เลือก', 'คลิกเลือกแถวที่จะลบออกจากคิวก่อนนะ')
+        if not messagebox.askyesno('ลบออกจากคิว', 'ลบ %d แถวออกจากคิว? (ไม่ได้ลบในชีท · กด ↻ อ่านใหม่ = กลับมา)' % len(ts)):
+            return
+        ids = {id(t) for t in ts}
+        self.st['rows'] = [t for t in self.st['rows'] if id(t) not in ids]
+        self._save()
+        self.refresh()
+
+    def edit_selected(self):
+        ts = self._sel()
+        if len(ts) != 1:
+            return messagebox.showinfo('เลือกแถว', 'คลิกเลือก 1 แถวที่จะแก้ก่อนนะ (หรือดับเบิลคลิกที่แถวเลย)')
+        self.edit(ts[0])
+
+    # ---------- รูป ----------
+    def pick_pic(self):
+        if self.running:
+            return
+        ids = [self._imap.get(i) for i in self.tree_i.selection() if self._imap.get(i)]
+        if not ids:
+            return messagebox.showinfo('ยังไม่ได้เลือก', 'คลิกเลือกไอเทมในตาราง “รูปไอเทม” ก่อนนะ (เลือกหลายแถว = ใช้รูปเดียวกัน)')
+        path = filedialog.askopenfilename(
+            title='เลือกรูปไอเทม', filetypes=[('รูปภาพ (.png .jpg .webp)', '*.png *.jpg *.jpeg *.webp'), ('ทุกไฟล์', '*.*')])
+        if not path:
+            return
+        ok, why = check_item_image(path)
+        if not ok:
+            return messagebox.showwarning('รูปนี้ใช้ไม่ได้', why)
+        for k in ids:
+            self._pics()[k] = path
+        self.app.log('Check in Booster: ใส่รูป %s ให้ไอเทม %s' % (os.path.basename(path), ', '.join(ids)), 'INFO')
+        self._save()
+        self.refresh()
+
+    def drop_pic(self):
+        if self.running:
+            return
+        ids = [self._imap.get(i) for i in self.tree_i.selection() if self._imap.get(i)]
+        for k in ids:
+            self._pics().pop(k, None)
+        if ids:
+            self._save()
+            self.refresh()
+
+    def bundle_from_tab(self):
+        """เลข Bundle ที่ชีทยังไม่มี: เอาจาก “Bundle ที่สร้างแล้ว” ของแท็บสร้าง Bundle (ชื่อต้องตรงเป๊ะ ได้เลขเดียว)"""
+        if self.running:
+            return
+        rows = self.st.get('rows') or []
+        fill, many = cib_bundle_match(rows, getattr(self.app, 'made', []))
+        for x, bid in fill:
+            x['bundle'], x['bundle_src'] = bid, 'แท็บ Bundle'
+        for x, ids in many:
+            self.app.log('Check in Booster: Day %s — แท็บสร้าง Bundle มีชื่อนี้ %d ตัว (%s) ไม่เดา ใส่เองนะ'
+                         % (x.get('day'), len(ids), ', '.join(ids)), 'WARN')
+        if fill:
+            self.app.log('Check in Booster: เติมเลข Bundle จากแท็บสร้าง Bundle %d แถว' % len(fill), 'OK')
+            self._save()
+            self.refresh()
+        empty = sum(1 for t in rows for k in ('free', 'prem') for x in t.get(k) or []
+                    if not re.fullmatch(r'\d+', str(x.get('bundle') or '')))
+        messagebox.showinfo('เลข Bundle', 'เติมเลข Bundle ให้ %d แถว%s%s' % (
+            len(fill), ('\nชื่อซ้ำหลายเลข %d แถว (ไม่เดา — ดูใน Log)' % len(many)) if many else '',
+            ('\nยังไม่มีเลข %d แถว — ดับเบิลคลิกแถวเพื่อพิมพ์เอง' % empty) if empty else ''))
+
+    # ---------- หน้าต่างแก้ไข ----------
+    def edit(self, t):
+        if self.running:
+            return messagebox.showinfo('กำลังทำงาน', 'รอให้งานเสร็จก่อนค่อยแก้นะ')
+        a = self.app
+        top = tk.Toplevel(a.root)
+        top.title('แก้ไข Premium Check In — ชีท %s' % t.get('sheet'))
+        top.configure(bg=C['bg'])
+        top.transient(a.root)
+        body = tk.Frame(top, bg=C['bg'])
+        body.pack(fill='both', expand=True, padx=16, pady=12)
+        fields = (('Slug', 'slug', 44), ('ชื่อ (Internal Note)', 'name', 44), ('ราคา', 'price', 12),
+                  ('วันที่สิ้นสุด (YYYY-MM-DD HH:MM:SS)', 'end', 22), ('เลข Bundle ของ Instant (FP)', 'instant', 12))
+        ents = {}
+        for r, (lbl, k, w) in enumerate(fields):
+            tk.Label(body, text=lbl, bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w').grid(row=r, column=0,
+                                                                                                    sticky='w', pady=3)
+            e = a._entry(body, width=w)
+            e.insert(0, str(t.get(k) or ''))
+            e.grid(row=r, column=1, sticky='w', padx=(12, 0), pady=3, ipady=3)
+            ents[k] = e
+        r = len(fields)
+        tk.Label(body, text='Activity Tag', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9)).grid(row=r, column=0, sticky='w')
+        cb = ttk.Combobox(body, values=list(CIB_TAGS), state='readonly', width=10, font=FM)
+        cb.set(t.get('tag') if t.get('tag') in CIB_TAGS else '')
+        cb.grid(row=r, column=1, sticky='w', padx=(12, 0), pady=3)
+        tk.Label(body, text='เลข Bundle รายวัน (ดับเบิลคลิกช่อง Bundle เพื่อแก้)', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9)).grid(row=r + 1, column=0, columnspan=2, sticky='w', pady=(10, 2))
+        cols = (('sec', 'ส่วน', 70), ('day', 'Day', 40), ('bundle', 'Bundle', 70), ('id', 'Item Id', 64),
+                ('item', 'ไอเทม', 220))
+        tv = ttk.Treeview(body, columns=[c[0] for c in cols], show='headings', style='TR.Treeview', height=10)
+        for c, h, w in cols:
+            tv.heading(c, text=h)
+            tv.column(c, width=w, anchor='w')
+        tv.grid(row=r + 2, column=0, columnspan=2, sticky='nsew')
+        work = {}
+        bmap = {}
+        for sec, key in (('Free', 'free'), ('Premium', 'prem')):
+            for x in t.get(key) or []:
+                iid = tv.insert('', 'end', values=(sec, x.get('day'), x.get('bundle') or '—', x.get('id') or '—',
+                                                   x.get('item') or ''))
+                bmap[iid] = x
+                work[iid] = str(x.get('bundle') or '')
+
+        def _edit_cell(ev):
+            iid = tv.identify_row(ev.y)
+            if not iid:
+                return
+            x0, y0, w0, h0 = tv.bbox(iid, '#3')
+            e = tk.Entry(tv, font=FM)
+            e.insert(0, work[iid])
+            e.place(x=x0, y=y0, width=w0, height=h0)
+            e.focus_set()
+
+            def _ok(*_):
+                v = e.get().strip()
+                work[iid] = v
+                vals = list(tv.item(iid, 'values'))
+                vals[2] = v or '—'
+                tv.item(iid, values=vals)
+                e.destroy()
+            e.bind('<Return>', _ok)
+            e.bind('<FocusOut>', _ok)
+            e.bind('<Escape>', lambda *_: e.destroy())
+        tv.bind('<Double-1>', _edit_cell)
+        err = tk.Label(body, text='', bg=C['bg'], fg=C['err'], font=('Segoe UI', 9), anchor='w', justify='left')
+        err.grid(row=r + 3, column=0, columnspan=2, sticky='w', pady=(8, 0))
+
+        def _save():
+            v = {k: e.get().strip() for k, e in ents.items()}
+            if v['end'] and not pd_dt_ok(v['end']):
+                err.config(text='วันที่สิ้นสุดต้องเป็นแบบ 2026-12-09 23:59:59')
+                return
+            v['end'] = pd_dt_ok(v['end']) or ''
+            bad = [k for k in work.values() if k and not re.fullmatch(r'\d+', k)]
+            if bad or (v['instant'] and not re.fullmatch(r'\d+', v['instant'])):
+                err.config(text='เลข Bundle ต้องเป็นตัวเลข')
+                return
+            for k in ('slug', 'name', 'price', 'end'):
+                if v[k] != str(t.get(k) or ''):
+                    t[k + '_user'] = True
+            if v['instant'] != str(t.get('instant') or ''):
+                t['instant_src'] = 'พิมพ์เอง' if v['instant'] else ''
+            t.update(slug=v['slug'], name=v['name'], price=v['price'], end=v['end'], instant=v['instant'])
+            if cb.get() != (t.get('tag') or ''):
+                t['tag'], t['tag_user'] = cb.get(), True
+            for iid, x in bmap.items():
+                if work[iid] != str(x.get('bundle') or ''):
+                    x['bundle'], x['bundle_src'] = work[iid], ('พิมพ์เอง' if work[iid] else '')
+            self._save()
+            self.refresh()
+            top.destroy()
+        foot = tk.Frame(top, bg=C['card'])
+        foot.pack(fill='x', side='bottom')
+        a._btn(foot, 'บันทึก', _save, primary=True).pack(side='right', padx=14, pady=10, ipadx=18, ipady=3)
+        a._btn(foot, 'ยกเลิก', top.destroy).pack(side='right', pady=10, ipadx=12, ipady=3)
+        top.bind('<Escape>', lambda e: top.destroy())
+        try:
+            top.update_idletasks()
+            x = a.root.winfo_rootx() + max(0, (a.root.winfo_width() - top.winfo_reqwidth()) // 2)
+            y = a.root.winfo_rooty() + max(0, (a.root.winfo_height() - top.winfo_reqheight()) // 4)
+            top.geometry('+%d+%d' % (x, y))
+            top.grab_set()
+        except Exception:
+            pass
+
+    # ---------- ลงมือ ----------
+    def _busy(self):
+        a = self.app
+        return bool(self.running or a.running or getattr(a, 'c_running', False) or a.b_running
+                    or getattr(a, 'w_running', False) or getattr(getattr(a, 'gen', None), 'w_running', False))
+
+    def _hold(self):
+        try:
+            h = max(0, int(float(self.v_hold.get() or 0)))
+        except Exception:
+            h = 8
+        try:
+            self.app.prefs['cib_hold'] = str(h)
+            save_prefs(self.app.prefs)
+        except Exception:
+            pass
+        return h
+
+    def create(self):
+        a = self.app
+        if chrome_held_ask(a, self.create):
+            return
+        if self._busy():
+            return messagebox.showinfo('กำลังทำงาน', 'รองานที่ทำอยู่ให้เสร็จก่อนนะ (ใช้ Chrome ตัวเดียวกัน)')
+        use = [t for t in self.st.get('rows') or [] if t.get('use')]
+        if not use:
+            return messagebox.showwarning('ยังไม่ได้เลือก', 'ติ๊ก ☑ ตัวที่จะสร้างก่อนนะ')
+        run = a._precheck('Check in Booster', 'ตัว', use, self._issues, lambda t: t.get('sheet') or '?')
+        if run is None:
+            return
+        do = bool(self.v_do.get())
+        if do:
+            msg = 'จะสร้าง Premium Check In จริงบนเว็บ %d ตัว\n\n' % len(run)
+            msg += '\n'.join('• %s  (%s · Free %d · Premium %d · Instant #%s)' % (
+                t['slug'], t['tag'], len(t['free']), len(t['prem']), t['instant']) for t in run)
+            msg += '\n\nวันที่เริ่ม = ตอนนี้ (เทส) · วันที่สิ้นสุดตามชีท\nตรวจเลข Bundle / รูป เรียบร้อยแล้วใช่ไหม?'
+            if not messagebox.askyesno('ยืนยัน', msg):
+                return
+        hold = self._hold()
+        jobs = [(t.get('key'), json.loads(json.dumps(t))) for t in run]
+        self.running = True
+        self.cancel = False
+        a.b_running = True
+        self.btn_run.config(state='disabled')
+        self.btn_stop.config(state='normal')
+        a.nb.select(a.tab_log)
+        a.log('=' * 46, 'STEP')
+        a.log('Check in Booster: %s %d ตัว' % ('เริ่มสร้างจริง' if do else 'เริ่มทดสอบกรอก', len(jobs)), 'STEP')
+        log_event('cib_start', count=len(jobs), commit=do)
+        threading.Thread(target=self._thread, args=(jobs, do, hold, dict(self._pics())), daemon=True).start()
+
+    def stop(self):
+        self.cancel = True
+        self.app.log('Check in Booster: กำลังยกเลิก (จบขั้นที่ทำอยู่ก่อน)...', 'WARN')
+
+    def _thread(self, jobs, do, hold, pics):
+        try:
+            asyncio.run(self._work(jobs, do, hold, pics))
+        except Exception as ex:
+            log_event('error', where='cib', message=str(ex)[:300])
+            self.app.log('ผิดพลาด: ' + str(ex), 'ERR')
+            self.app.log(traceback.format_exc(), 'ERR')
+        finally:
+            def _rst():
+                self.running = False
+                self.app.b_running = False
+                try:
+                    self.btn_run.config(state='normal')
+                    self.btn_stop.config(state='disabled')
+                    self._save()
+                    self.refresh()
+                except Exception:
+                    pass
+            self.app.root.after(0, _rst)
+
+    async def _work(self, jobs, do, hold, pics):
+        a = self.app
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch_persistent_context(**launch_kwargs(False))
+            page = browser.pages[0] if browser.pages else await browser.new_page()
+            try:
+                await self._run_rows(page, jobs, do, hold, pics)
+            finally:
+                try:
+                    await finish_chrome(a, browser, 'Check in Booster')
+                except Exception:
+                    pass
+
+    def _done_one(self, key, t, res, do, at):
+        x = next((q for q in self.st.get('rows') or [] if q.get('key') == key), None)
+        if do and (res.get('created') or res.get('unsure') or res.get('user_made')):
+            m = {'id': res.get('id') or '', 'at': at, 'unsure': bool(res.get('unsure'))}
+            if x is not None:
+                x['made'] = m
+                x['use'] = False
+            self.st.setdefault('made', []).append({'key': key, 'slug': t.get('slug', ''), 'tag': t.get('tag', ''),
+                                                   'id': m['id'], 'at': at, 'unsure': m['unsure']})
+            self.st['made'] = self.st['made'][-CIB_KEEP:]
+        if x is not None:
+            x['last'] = {'ok': bool(res.get('ok')), 'do': bool(do), 'at': at, 'why': res.get('why') or ''}
+        self._save()
+        self.refresh()
+
+    def _ask(self, slug, unknown, tries=3):
+        """ถามคนตอนสร้างไม่สำเร็จ (เรียกจากเธรดงาน) — คืน retry / made / skip / stop"""
+        ev = threading.Event()
+        box = {'v': 'stop'}
+
+        def _show():
+            try:
+                if unknown:
+                    r = messagebox.askyesnocancel(
+                        'เช็กบนเว็บก่อนนะ',
+                        'กดสร้าง “%s” แล้ว แต่ไม่รู้ผลจากเว็บ\nไปดูในหน้า Premium Check In บนเว็บก่อน\n\n'
+                        'Yes  = ยังไม่มีบนเว็บ → สร้างใหม่\nNo   = มีบนเว็บแล้ว → ไปตัวถัดไป\nCancel = หยุดทั้งหมด' % slug,
+                        icon='warning')
+                    box['v'] = 'retry' if r else ('made' if r is False else 'stop')
+                else:
+                    r = messagebox.askyesnocancel(
+                        'สร้างไม่สำเร็จ',
+                        'ลองกรอก “%s” %d รอบแล้วยังไม่ผ่าน (ยังไม่ได้กดสร้าง — ดู Log)\n\n'
+                        'Yes  = ลองใหม่อีกรอบ\nNo   = ข้ามตัวนี้ไปก่อน\nCancel = หยุดทั้งหมด' % (slug, tries),
+                        icon='warning')
+                    box['v'] = 'retry' if r else ('skip' if r is False else 'stop')
+            except Exception:
+                box['v'] = 'stop'
+            finally:
+                ev.set()
+        self.app.root.after(0, _show)
+        ev.wait()
+        return box['v']
+
+    async def _one_sure(self, run, page, t, pics, hold, max_tries=3):
+        """สร้างจริงแบบเน้นถูก: ยังไม่ได้สร้าง ห้ามข้าม — ไม่ผ่านก่อนกดสร้าง ลองใหม่เอง แล้วถาม · ไม่รู้ผล = ถามก่อน ห้ามกดซ้ำเอง"""
+        a = self.app
+        tries = 0
+        res = {}
+        while not self.cancel:
+            tries += 1
+            try:
+                res = await run.make_cib(page, t, pics, cib_now(), True, hold)
+            except Exception as ex:
+                res = {'ok': False, 'created': False, 'unsure': False, 'id': '', 'why': str(ex)[:160], 'state': 'pre'}
+                a.log('   ✗ ' + str(ex)[:200], 'ERR')
+            if res.get('created') or self.cancel:
+                return res
+            if res.get('state') == 'unknown' or res.get('unsure'):
+                ans = await asyncio.to_thread(self._ask, t.get('slug'), True)
+            elif tries < max_tries:
+                a.log('   ↻ ยังไม่ได้สร้าง — โหลดหน้าใหม่แล้วลองอีกรอบ (%d/%d)' % (tries + 1, max_tries), 'WARN')
+                await page.wait_for_timeout(2000)
+                continue
+            else:
+                ans = await asyncio.to_thread(self._ask, t.get('slug'), False, max_tries)
+            if ans == 'retry':
+                tries = 0
+                a.log('   ↻ ผู้ใช้ให้ลองใหม่', 'WARN')
+                continue
+            if ans == 'made':
+                a.log('   ✓ ผู้ใช้เช็กแล้วว่ามีบนเว็บแล้ว — ไปตัวถัดไป', 'OK')
+                return dict(res, ok=True, unsure=False, user_made=True)
+            if ans == 'skip':
+                a.log('   ⚠ ผู้ใช้สั่งข้ามตัวนี้ (ยังไม่ได้สร้าง)', 'WARN')
+                return dict(res, unsure=False)
+            self.cancel = True
+            a.log('   ■ ผู้ใช้สั่งหยุด', 'WARN')
+            return dict(res, unsure=False)
+        return res
+
+    async def _run_rows(self, page, jobs, do, hold, pics):
+        """สร้างทีละตัว (แยกออกมาให้เทสกับหน้าเว็บจำลองได้)"""
+        a = self.app
+        run = CibRunner(a)
+        object.__setattr__(run, '_tab', self)
+        okc = errc = 0
+        for i, (key, t) in enumerate(jobs, 1):
+            if self.cancel:
+                a.log('ยกเลิกแล้ว', 'WARN')
+                break
+            a.set_progress(i - 1, len(jobs), t.get('slug', '')[:30])
+            a.log('[%d/%d] %s  (%s · Free %d · Premium %d · Instant #%s)'
+                  % (i, len(jobs), t.get('slug'), t.get('tag'), len(t['free']), len(t['prem']), t.get('instant')), 'STEP')
+            if do:
+                res = await self._one_sure(run, page, t, pics, hold)
+            else:
+                try:
+                    res = await run.make_cib(page, t, pics, cib_now(), False, hold)
+                except Exception as ex:
+                    res = {'ok': False, 'why': str(ex)[:160]}
+                    a.log('   ✗ ' + str(ex)[:200], 'ERR')
+            at = datetime.now().strftime('%d/%m %H:%M')
+            a.root.after(0, lambda k=key, tt=t, r=res, s=at: self._done_one(k, tt, r, do, s))
+            okc, errc = (okc + 1, errc) if res.get('ok') else (okc, errc + 1)
+        a.set_progress(len(jobs), len(jobs), 'เสร็จ')
+        a.log('Check in Booster: จบ — %s %d · ไม่ผ่าน %d' % ('สร้างแล้ว' if do else 'ทดสอบผ่าน', okc, errc),
+              'OK' if not errc else 'WARN')
+        log_event('cib_done', ok=okc, fail=errc, commit=bool(do))
+        return okc, errc
+
+    def help(self):
+        messagebox.showinfo('วิธีใช้ — 🗓 Check in Booster', (
+            '1) 📂 นำเข้าไฟล์ชีท → เลือกชีท (ชีทที่ขึ้น ★ · 1 ชีท = 1 Premium Check In · ไฟล์ไหนก็ได้ที่หน้าตาแบบนี้)\n'
+            '2) ตรวจตาราง: แถวแดง ⛔ = น่าจะผิด · เหลือง ⚠ = ควรเช็ก · ดับเบิลคลิก = แก้ Slug / ชื่อ / ราคา / Tag / '
+            'วันสิ้นสุด / เลข Bundle\n'
+            '   ชีทยังไม่มีเลข Bundle → กด 🔗 (เอาจาก “Bundle ที่สร้างแล้ว” ในแท็บสร้าง Bundle)\n'
+            '3) 🖼 รูปไอเทม: เลือกไอเทม แล้วกด 📁 เลือกรูป (1 รูปต่อไอเทม ใส่ให้ทุก Day ที่ใช้ไอเทมนั้น)\n'
+            '4) ▶ เริ่มทำงาน — ไม่ติ๊ก “สร้างจริง” = กรอกให้ดูแล้วไม่กดสร้าง\n'
+            '   ติ๊ก “กดปุ่ม สร้าง จริง” = กดสร้าง + ยืนยัน (ยังไม่ได้สร้างจะไม่ข้าม — ลองใหม่เอง / ถามก่อน)\n\n'
+            'หน้าเว็บที่กรอก: Slug · Activity Tag (early/mid) · ชื่อ (Internal Note) · ราคา · หัวข้อ/คำอธิบาย (แท็บไทย) · '
+            'วันที่เริ่ม (ตอนนี้) / วันที่สิ้นสุด (ชีท) · รายการ Bundle Free / Premium (Position = Day · Bundle Name = DAY N · รูป) '
+            '· Instant (Position 0 · FP)\nไม่แตะ: สถานะ (เปิดใช้งาน / โหมดทดสอบ) · Info URL · Banner / Background'))
+
 
 if __name__ == '__main__':
     App().run()
