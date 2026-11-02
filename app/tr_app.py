@@ -10,6 +10,7 @@ V1.5.9 : สร้าง Bundle (ทุกโหมด) — ค้นไอเ�
 V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) — ไฟล์ชื่อ Check in Booster ตั้งชื่อ “Check in Booster : Mid - PAID Day 13 (Nov)” · ไฟล์อื่นตามชีท
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
+V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
 V1.5.5 : Item Code — กด ↺ รีเซ็ตเวลาเริ่ม แล้วกด Actions > ล็อก ให้ด้วย เหมือน WR Master
 V1.5.4 : หลักฐานเทส — ปุ่ม 🧹 ล้างคิว ลบทุกเซ็ตในรายการทีเดียว (ไม่แตะไฟล์ชีท/ภาพที่เซฟ)
 V1.5.3 : หลักฐานเทส — กดบันทึกภาพตอนยังติ๊กตรวจไม่ครบ = เด้งเตือนแยกชัดๆ (บอกรายการที่ยังไม่ติ๊ก · ปุ่มหลัก = กลับไปติ๊กก่อน) · แถวที่ยังไม่ติ๊กเป็นสีเหลือง
@@ -125,6 +126,13 @@ IMG_EXTS = ('.png', '.jpg', '.jpeg', '.webp')
 IMG_MAX_MB = 5
 DEFAULT_TYPE = 'GENERAL'
 DEFAULT_SUFFIX = '(Gift)'
+CREATE_REPAIR_WORD = 'ซ่อมแซม'
+CREATE_REPAIR_LABEL = 'ซ่อมแซมได้'
+
+
+def item_is_repair(name):
+    """v1.6.1 ชื่อไอเทมมีคำว่า “ซ่อมแซม” -> ติ๊ก “ซ่อมแซมได้” (พารามิเตอร์สำหรับแสดงบนเว็บ) ให้ด้วย (ผู้ใช้สั่ง)"""
+    return CREATE_REPAIR_WORD in str(name or '')
 
 # ---- หน้าสร้างบันเดิล ----
 BUNDLE_CREATE_URL = BASE + '/hof/talesrunner/shop/bundles/create'
@@ -3167,6 +3175,7 @@ def row_to_item(r, type_name=DEFAULT_TYPE, suffix=DEFAULT_SUFFIX, price='', mail
         'trade': r.get('trade', 'any') == 'yes',
         'web': True,
         'img': '',            # รูปไอเทม — ไฟล์ต้นฉบับไม่มีรูป ต้องเลือกเองในหน้าแก้ไข
+        'repair': item_is_repair(name or cname),   # v1.6.1 ชื่อมี “ซ่อมแซม” = ติ๊ก ซ่อมแซมได้
     }
     if r.get('chk'):          # v1.4.0 ผลตรวจติดไปกับคิวด้วย — ผูกกับค่าของไอเทม (แก้ช่องนั้นแล้วหายเอง)
         d['chk'] = [dict(c, v=(d.get(c['f']) if c.get('f') in d else c.get('v'))) for c in chk_active(r)]
@@ -3239,6 +3248,8 @@ def c_dyn_checks(d):
     q = str(d.get('qty') or '').strip()
     if d.get('web', True) and q and not re.fullmatch(r'[1-9]\d*', q):
         out.append(chk_new('stop', 'จำนวน (แสดงบนเว็บ) “%s” ไม่ใช่เลข 1 ขึ้นไป' % q[:12]))
+    if d.get('repair') and not d.get('web', True):
+        out.append(chk_new('warn', 'ติ๊ก ซ่อมแซมได้ ไว้ แต่ปิดการแสดงผลบนเว็บ — ช่องนี้อยู่ในส่วนแสดงบนเว็บ จะไม่ได้ติ๊ก'))
     return out
 
 
@@ -6824,7 +6835,7 @@ class App:
              'type': self.cv_type.get().strip() or DEFAULT_TYPE,
              'price': self.cv_price.get().strip(), 'dur': '',
              'mail': self.cv_mail.get().strip(), 'qty': '1',
-             'trade': False, 'web': True, 'img': ''}
+             'trade': False, 'web': True, 'img': '', 'repair': False}
         if self._c_form(d, 'เพิ่มไอเทมเข้าคิว'):
             self.cq.append(d)
             self._c_refresh()
@@ -6895,6 +6906,7 @@ class App:
 
         vt = tk.BooleanVar(value=bool(d.get('trade')))
         vw = tk.BooleanVar(value=bool(d.get('web', True)))
+        vr = tk.BooleanVar(value=bool(d.get('repair', item_is_repair(d.get('name')))))
         for r, (txt, var) in enumerate(((' แลกเปลี่ยนได้', vt),
                                         (' เปิดใช้งานการแสดงผลบนเว็บ', vw)),
                                        start=len(fields)):
@@ -6903,6 +6915,11 @@ class App:
                            activeforeground=C['fg'], font=FM, bd=0,
                            highlightthickness=0).grid(row=r, column=1, sticky='w',
                                                       padx=(12, 0), pady=2)
+        # v1.6.1 ซ่อมแซมได้ (ส่วนแสดงบนเว็บ) — วางข้าง “เปิดใช้งานการแสดงผลบนเว็บ”
+        tk.Checkbutton(body, text=' ' + CREATE_REPAIR_LABEL, variable=vr, bg=C['bg'], fg=C['fg'],
+                       selectcolor=C['input'], activebackground=C['bg'], activeforeground=C['fg'],
+                       font=FM, bd=0, highlightthickness=0).grid(row=len(fields) + 1, column=1, sticky='e',
+                                                                 padx=(12, 0), pady=2)
 
         # ---- รูปภาพไอเทม (เว็บมีช่องอัปโหลด — เลือกไฟล์จากเครื่องได้เลย) ----
         pic = {'v': str(d.get('img') or '')}
@@ -6973,6 +6990,7 @@ class App:
                 d[key] = v.get().strip()
             d['trade'] = vt.get()
             d['web'] = vw.get()
+            d['repair'] = vr.get()
             d['img'] = pic['v']
             if not d['kind'] or not d['name']:
                 return messagebox.showwarning('กรอกไม่ครบ', 'ต้องมี ItemKind และชื่อไอเทม')
@@ -8239,6 +8257,15 @@ class App:
         await self._c_switch(page, SEL_CREATE['web_label'], bool(d.get('web', True)))
         await page.wait_for_timeout(300)
         await self._c_fill(page, 'qty', d.get('qty', ''), 'จำนวน')
+        repair = bool(d.get('repair', item_is_repair(d.get('name'))))
+        rep_bad = ''
+        if d.get('web', True):                # v1.6.1 ซ่อมแซมได้ (อยู่ในส่วนแสดงบนเว็บ)
+            await self._c_switch(page, CREATE_REPAIR_LABEL, repair)
+            got_r = await self._switch_read(page, CREATE_REPAIR_LABEL)
+            if (got_r is None and repair) or (got_r is not None and got_r != repair):
+                rep_bad = '%s: อยากได้ “%s” แต่ในฟอร์มเป็น “%s”' % (
+                    CREATE_REPAIR_LABEL, 'ติ๊ก' if repair else 'ไม่ติ๊ก',
+                    'ไม่เจอช่อง' if got_r is None else ('ติ๊ก' if got_r else 'ไม่ติ๊ก'))
 
         # [3.5] รูปภาพไอเทม — ไม่มีรูปก็สร้างต่อ แต่ต้องเตือนไว้ใน Log
         pic_ok = await self._c_image(page, d)
@@ -8252,6 +8279,8 @@ class App:
         for k, want in chk:
             if (got.get(k) or '').strip() != str(want).strip():
                 bad.append(f'{k}: อยากได้ “{want}” แต่ในฟอร์มเป็น “{got.get(k)}”')
+        if rep_bad:
+            bad.append(rep_bad)
         if bad:
             for b in bad:
                 self.log('   ! ' + b, 'WARN')
@@ -8265,6 +8294,9 @@ class App:
             return not bad
 
         # [4] กดสร้างจริง — ดักคำตอบของเว็บไว้ เอา Aztek Item Id ออกมาให้ได้
+        if rep_bad:                           # v1.6.1 ติ๊ก ซ่อมแซมได้ ไม่ตรง = ไม่กดสร้าง (ได้ไอเทมผิด)
+            self.log('   ✗ ไม่กดสร้าง — %s' % rep_bad, 'ERR')
+            return False
         btn = page.locator(f'button:has-text("{SEL_CREATE["submit"]}")').last
         if await btn.count() == 0:
             self.log(f'   ✗ ไม่เจอปุ่ม “{SEL_CREATE["submit"]}”', 'ERR')
