@@ -11,6 +11,8 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.8.0 : แท็บใหม่ 🎉 สร้าง Event (ถัดจาก Item Code) — 1 ชีท = 1 Event · ของรางวัล = ทุกตาราง fdItemNum · ช่วงรับรางวัลจากป้าย · ปีย่อ 69 = 2026 · เมนู ส่งไป… มีสร้าง Event
+V1.7.2 : ปุ่ม “ส่งไป…” ในแท็บสร้าง Bundle เพิ่ม 📸 หลักฐานเทส (ไฟล์เดิม ชีทเดิม + เติมเลข Bundle ที่ว่างตามตารางเดียวกัน)
 V1.7.1 : เชื่อมแท็บ — ปุ่ม “ส่งไป…” ค้นหา / สร้าง Item → สร้าง Bundle · สร้าง Bundle → Product / WR Master / Item Code / Check in Booster (เปิดหน้านำเข้าไฟล์เดิม ชีทเดิม ให้เลย)
 V1.7.0 : เชื่อมแท็บ — ค้นหา/สร้าง Item → สร้าง Bundle (Aztek Item Id) · สร้าง Bundle → Product / WR Master / Item Code / Check in Booster (Bundle ID) ไม่ต้องกรอกเลขลงเอกสารแล้วโหลดใหม่
 V1.5.5 : Item Code — กด ↺ รีเซ็ตเวลาเริ่ม แล้วกด Actions > ล็อก ให้ด้วย เหมือน WR Master
@@ -6094,6 +6096,8 @@ class App:
         self.nb.add(self.tab_shop, '🛍  สร้าง Product')
         self.nb.add(self.tab_wr, '🎟  WR Master')
         self.nb.add(self.tab_gen, '🎲  Item Code')
+        self.tab_evt = tk.Frame(self.nb.body, bg=C['bg'])       # v1.8.0 ถัดจาก Item Code (ผู้ใช้สั่ง)
+        self.nb.add(self.tab_evt, '🎉  สร้าง Event')
         self.nb.add(self.tab_oung, '🎰  Oung Machine')
         self.tab_cib = tk.Frame(self.nb.body, bg=C['bg'])       # v1.6.0 อยู่หน้าหลักฐานเทส (ผู้ใช้สั่ง)
         self.nb.add(self.tab_cib, '🗓  Check in Booster')
@@ -6160,6 +6164,14 @@ class App:
             tk.Label(self.tab_cib, text='แท็บนี้เปิดไม่ขึ้น: %s' % str(ex)[:200], bg=C['bg'],
                      fg=C['err'], font=FM, wraplength=900, justify='left').pack(padx=20, pady=20)
             self.log('แท็บ Check in Booster เปิดไม่ขึ้น: %s' % str(ex)[:200], 'ERR')
+        # แท็บ 🎉 สร้าง Event (v1.8.0) — ของใหม่แยกทั้งก้อน พังเองก็พังแค่แท็บนี้
+        try:
+            self.evt = EvtTab(self, self.tab_evt)
+        except Exception as ex:
+            self.evt = None
+            tk.Label(self.tab_evt, text='แท็บนี้เปิดไม่ขึ้น: %s' % str(ex)[:200], bg=C['bg'],
+                     fg=C['err'], font=FM, wraplength=900, justify='left').pack(padx=20, pady=20)
+            self.log('แท็บสร้าง Event เปิดไม่ขึ้น: %s' % str(ex)[:200], 'ERR')
         # v1.7.0 เชื่อมแท็บ (ส่งเลขถึงกัน) — ของเสริม พังเองก็ไม่พาแท็บเดิมพัง
         try:
             link_install(self)
@@ -21747,7 +21759,7 @@ def link_install(app):
 #   ไม่แก้ตัวนำเข้าเดิม: กดปุ่ม = เหมือนกดปุ่มนำเข้าของแท็บนั้นเอง แค่ข้ามช่องเลือกไฟล์ (ใช้ไฟล์เดิม)
 #   แล้วติ๊กชีทเดิมให้ในหน้าต่าง (เฉพาะชีทที่แท็บนั้นอ่านได้ ★) · ผู้ใช้ดูแล้วกด “ใช้ข้อมูลนี้” เอง
 LINK_DEST = {'bundle': '📦 สร้าง Bundle', 'shop': '🛍 สร้าง Product', 'wr': '🎟 WR Master',
-             'gen': '🎲 Item Code', 'cib': '🗓 Check in Booster'}
+             'gen': '🎲 Item Code', 'cib': '🗓 Check in Booster', 'ev': '📸 หลักฐานเทส', 'evt': '🎉 สร้าง Event'}
 _LINK_LB_HEAD = re.compile(r'^(★ \(\d+\)  |     )')
 
 
@@ -21789,7 +21801,63 @@ def link_dest(app, dest):
     if dest == 'cib':
         t = getattr(app, 'cib', None)
         return (app.tab_cib, t.open_file) if t is not None else (None, None)
+    if dest == 'ev':
+        t = getattr(app, 'ev', None)
+        return (app.tab_ev, t.open_file) if t is not None else (None, None)
+    if dest == 'evt':
+        t = getattr(app, 'evt', None)
+        return (app.tab_evt, t.open_file) if t is not None else (None, None)
     return None, None
+
+
+def link_fill_ev(sets, file, book):
+    """v1.7.2 หลักฐานเทส: เซ็ตที่ยังไม่มีเลข Bundle <- แท็บสร้าง Bundle (ไฟล์ · ชีท · แถวหัวตาราง fdItemNum เดียวกันเป๊ะ)
+    มีเลขอยู่แล้ว = ไม่ทับ (ไม่ตรง = คืนไปเตือน) · คืน (filled, mism)"""
+    fb = os.path.basename(file or '')
+    filled, mism = [], []
+    for s in sets or []:
+        if s.get('manual'):
+            continue
+        sh = clean_text(s.get('sheet')) or str(s.get('sheet') or '')
+        try:
+            hr = int(s.get('row') or 0) - 1
+        except Exception:
+            continue
+        ids = {v['id'] for L, v in book.items() if L[1] == sh and L[2] == hr and (not fb or L[0] == fb)}
+        if len(ids) != 1:
+            continue
+        bid = ids.pop()
+        cur = str(s.get('bundle') or '').strip()
+        if not cur:
+            s['bundle'], s['bundle_src'] = bid, 'แท็บ Bundle'
+            s['warn'] = [w for w in s.get('warn') or [] if w != 'ไม่เจอเลข Bundle']
+            filled.append(s)
+        elif cur != bid:
+            mism.append((s, cur, bid))
+    return filled, mism
+
+
+def link_after_ev(app, before):
+    """หลังกดส่งไปหลักฐานเทส แล้วผู้ใช้กด ใช้ข้อมูลนี้: เติมเลข Bundle ที่ว่าง (กดยกเลิก = ไม่ทำอะไร)"""
+    ev = getattr(app, 'ev', None)
+    if ev is None or getattr(ev, 'sets', None) is before:
+        return [], []
+    filled, mism = link_fill_ev(ev.sets, getattr(ev, 'file', '') or '', link_bundle_book(app))
+    for s in filled:
+        app.log('🔗 หลักฐานเทส %s: เลข Bundle = %s (จากแท็บสร้าง Bundle)' % (ev_set_name(s), s['bundle']), 'OK')
+    for s, cur, bid in mism:
+        app.log('🔗 หลักฐานเทส %s: ชีทเขียน Bundle %s แต่แท็บสร้าง Bundle ได้ %s — ใช้ของชีท เช็กอีกที'
+                % (ev_set_name(s), cur, bid), 'WARN')
+    if filled:
+        try:
+            ev._save()
+        except Exception:
+            pass
+        try:
+            ev.refresh()
+        except Exception:
+            pass
+    return filled, mism
 
 
 def link_lb_name(text):
@@ -21896,7 +21964,14 @@ def link_send(app, dest, src_kind):
         pass
     app.log('🔗 ส่งไป %s: เปิดหน้านำเข้า %s (%s)' % (nm, os.path.basename(path),
                                                 ', '.join(src.get('sheets') or []) or 'เลือกชีทเอง'), 'INFO')
-    return link_open(app, fn, path, src.get('sheets') or [], dest != 'bundle')
+    before = getattr(getattr(app, 'ev', None), 'sets', None)
+    n = link_open(app, fn, path, src.get('sheets') or [], dest != 'bundle')
+    if dest == 'ev':
+        try:
+            link_after_ev(app, before)
+        except Exception as ex:
+            app.log('🔗 หลักฐานเทส: เติมเลข Bundle ไม่สำเร็จ: %s' % str(ex)[:80], 'WARN')
+    return n
 
 
 def link_find_btn(root, text):
@@ -21917,7 +21992,7 @@ def link_menu_show(app, btn):
     if m is None:
         m = tk.Menu(app.root, tearoff=0, bg=C['card'], fg=C['fg'], activebackground=C['accent'],
                     activeforeground='white', font=('Segoe UI', 10))
-        for d in ('shop', 'wr', 'gen', 'cib'):
+        for d in ('shop', 'wr', 'gen', 'evt', 'cib', 'ev'):
             m.add_command(label='ส่งไป ' + LINK_DEST[d], command=lambda d=d: link_send(app, d, 'bundle'))
         LINK['menu'] = m
     try:
@@ -21951,6 +22026,1583 @@ def link_send_buttons(app):
         if k not in out:
             app.log('วางปุ่มส่งไป… (%s) ไม่ได้ — หาปุ่มเดิมไม่เจอ' % k, 'WARN')
     return out
+
+
+# ============================================================================
+#  [15] แท็บ "🎉 สร้าง Event" (หน้า Events ของเว็บ) — ของใหม่ทั้งก้อน (v1.8.0) ไม่แตะของเดิม
+#
+#      1 ชีท = 1 Event (ไฟล์ไหน ชีทไหนก็ได้ — อ่านจากป้าย/โครงตาราง ไม่ยึดตำแหน่ง ไม่ยึดชีทตัวอย่าง)
+#         ชื่อ Event   = หัวเรื่องบนสุดของชีท (ไม่มี = ชื่อชีท) · ไทย = อังกฤษ (แบบในคลิป)
+#         ของรางวัล    = ทุกตาราง fdItemNum ในชีท (ตัวอ่านเดียวกับแท็บหลักฐานเทส ev_sets_from_rows —
+#                        รองรับชีทหลายแบบอยู่แล้ว) · ชื่อรางวัล = “ชื่อ Event - หัวตาราง” · Bundle = เลขในแถวหัวตาราง
+#         ช่วงรับรางวัล = ป้าย “ระยะเวลากดรับของรางวัล” (เริ่ม / สิ้นสุด + เวลา) · ช่วงกิจกรรม = ช่วงเดียวกัน (ผู้ใช้เลือก)
+#         ปีย่อ พ.ศ. (69 -> Excel เก็บเป็น 1969) แปลงเป็น 2026 ให้เอง + บอกใน Log (ผู้ใช้เลือก)
+#      หน้าเว็บ (ตามคลิป สร้างอีเว้น.mp4): Events › สร้าง Event
+#         ชื่อ Event (ไทย/อังกฤษ) · สถานะ 4 สวิตช์ · วันเริ่ม/สิ้นสุดกิจกรรม · วันเริ่ม/สิ้นสุดการรับรางวัล
+#         ของรางวัล: + เพิ่มของรางวัล -> ชื่อรางวัล (ไทย/อังกฤษ) · จำกัดต่อผู้เล่น · เลือก bundle ตามเลข
+#         การรับรางวัล: ผู้มีสิทธิ์รับรางวัล (WINNER/ALL) · จำกัดต่อผู้เล่น · (จำกัดจำนวน -> จำนวนรางวัลทั้งหมด)
+#         ไม่แตะ: Slug (เว็บตั้งให้) · รูปภาพ · รายละเอียด · คำอธิบายรางวัล · เงื่อนไขการรับรางวัล
+#      ค่าที่ชีทไม่มี = ค่าแบบในคลิป แก้ได้ทีละ Event ก่อนสร้าง (ผู้ใช้เลือก)
+#      ตัวกรอกหน้าเว็บยืมตัวช่วยเดิมของ WR Master (พิมพ์+อ่านกลับ · สวิตช์ · ดรอปดาวน์ · ปฏิทิน · เลือก bundle) มาใช้อย่างเดียว
+# ============================================================================
+EVT_STATE = 'events.json'
+EVT_CREATE_URL = BASE + '/hof/talesrunner/events/create'
+EVT_LIST_URL = BASE + '/hof/talesrunner/events'
+EVT_KEEP = 200
+EVT_WHO = ('WINNER', 'ALL')
+EVT_DEF = {'on': True, 'test': True, 'cap': False, 'win_only': True, 'who': 'WINNER', 'plim': '1', 'total': '0',
+           'rlim': '1'}
+SEL_EVT = {
+    'name_th': 'ชื่อ Event (ไทย)',
+    'name_en': 'ชื่อ Event (อังกฤษ)',
+    'on':      'เปิดใช้งาน',
+    'test':    'โหมดทดสอบ',
+    'cap':     'จำกัดจำนวน',
+    'win_only': 'แสดงเฉพาะผู้ชนะ',
+    'act_start': 'วันเริ่มกิจกรรม',
+    'act_end':   'วันสิ้นสุดกิจกรรม',
+    'start':     'วันเริ่มรับรางวัล',
+    'end':       'วันสิ้นสุดการรับรางวัล',
+    'r_th':    'ชื่อรางวัล (ไทย)',
+    'r_en':    'ชื่อรางวัล (อังกฤษ)',
+    'r_lim':   'จำกัดต่อผู้เล่น',
+    'r_cap':   'จำกัดจำนวน',
+    'who':     'ผู้มีสิทธิ์รับรางวัล',
+    'plim':    'จำกัดต่อผู้เล่น',
+    'total':   'จำนวนรางวัลทั้งหมด',
+    'add':     'เพิ่มของรางวัล',
+    'submit':  'สร้าง Event',
+}
+EVT_SW = (('on', 'เปิดใช้งาน'), ('test', 'โหมดทดสอบ'), ('cap', 'จำกัดจำนวน'), ('win_only', 'แสดงเฉพาะผู้ชนะ'))
+_EVT_ANCHOR = ('รับของรางวัล', 'รับรางวัล', 'ระยะเวลา', 'claim', 'reward period')
+_EVT_START = ('เริ่ม', 'start', 'startdate', 'วันเริ่ม', 'วันที่เริ่ม', 'เริ่มต้น', 'เริ่มรับ', 'เริ่มรับรางวัล',
+              'วันเริ่มรับรางวัล', 'from')
+_EVT_END = ('สิ้นสุด', 'end', 'enddate', 'วันสิ้นสุด', 'วันที่สิ้นสุด', 'หมดเขต', 'สิ้นสุดรับ', 'สิ้นสุดรับรางวัล',
+            'วันสิ้นสุดการรับรางวัล', 'ถึง', 'to', 'จบ')
+_EVT_NOT_TITLE = ('วันที่จัดส่ง', 'สถานะการจัดส่ง', 'รายละเอียดกิจกรรม', 'ผู้รับผิดชอบ', 'no', 'reward')
+_EVT_MON = dict([(x.lower(), i + 1) for i, x in enumerate(_WR_MONTH)] + [(x, i + 1) for i, x in enumerate(_WR_MONTH_TH)]
+                + [(x, i + 1) for i, x in enumerate(_WR_MONTH_TH_S)]
+                + [(x.replace('.', ''), i + 1) for i, x in enumerate(_WR_MONTH_TH_S)])
+
+
+def evt_year(y):
+    """ปีในชีท -> (ปี ค.ศ., ข้อความแจ้ง|'')
+    พ.ศ. เต็ม (2569) -> 2026 เงียบๆ (ทุกแท็บทำแบบนี้) · ปีย่อ พ.ศ. ที่ Excel เก็บเป็น 19xx (69 -> 1969) -> 2026 + แจ้ง
+    ปี 2 หลัก (ข้อความ): 50 ขึ้นไป = พ.ศ. ย่อ (69 -> 2026) · ต่ำกว่า = ค.ศ. ย่อ (26 -> 2026)"""
+    y = int(y)
+    if y > 2400:
+        return y - 543, ''
+    if 1900 <= y < 2000:
+        return y % 100 + 1957, 'ปี %d ในชีท (พิมพ์ปีย่อ %02d = พ.ศ. 25%02d) → ใช้ %d' % (y, y % 100, y % 100, y % 100 + 1957)
+    if y < 100:
+        return (y + 1957, 'ปีย่อ %02d = พ.ศ. 25%02d → ใช้ %d' % (y, y, y + 1957)) if y >= 50 else (2000 + y, '')
+    return y, ''
+
+
+def evt_time(v):
+    """เวลาในชีท -> (ชม., นาที, วินาที|None) · อ่านไม่ออก/ว่าง -> None
+    รับ: 12.00 น. · 23:59 · 23.59 (ตัวเลข) · 12 · เวลาของ Excel"""
+    if v is None or v == '':
+        return None
+    if hasattr(v, 'hour') and hasattr(v, 'minute') and not hasattr(v, 'year'):
+        return v.hour, v.minute, v.second
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        if 0 < v < 1:                                   # เวลาแบบเศษของวันใน Excel
+            s = int(round(v * 86400))
+            return s // 3600 % 24, s // 60 % 60, s % 60
+        h = int(v)
+        mi = int(round((v - h) * 100))
+        if 0 <= h <= 23 and 0 <= mi <= 59:
+            return h, mi, None
+        return None
+    t = clean_text(v).replace('น.', ' ').replace('น', ' ')
+    m = re.search(r'(\d{1,2})\s*[:.]\s*(\d{2})(?:\s*[:.]\s*(\d{2}))?', t)
+    if m:
+        h, mi = int(m.group(1)), int(m.group(2))
+        se = int(m.group(3)) if m.group(3) else None
+        if h <= 23 and mi <= 59 and (se is None or se <= 59):
+            return h, mi, se
+        return None
+    m = re.fullmatch(r'\s*(\d{1,2})\s*', t)
+    if m and int(m.group(1)) <= 23:
+        return int(m.group(1)), 0, None
+    return None
+
+
+def evt_date(v):
+    """วันที่ในชีท -> ((ปี, เดือน, วัน), เวลาในช่องเดียวกัน|None, ข้อความแจ้ง) · อ่านไม่ออก -> None"""
+    if v is None or v == '':
+        return None
+    if isinstance(v, datetime):
+        y, note = evt_year(v.year)
+        tm = (v.hour, v.minute, v.second) if (v.hour, v.minute, v.second) != (0, 0, 0) else None
+        return (y, v.month, v.day), tm, note
+    if hasattr(v, 'year') and hasattr(v, 'month') and hasattr(v, 'day'):
+        y, note = evt_year(v.year)
+        return (y, v.month, v.day), None, note
+    if isinstance(v, (int, float)):
+        return None
+    t = re.sub(r'\([^)]*\)', ' ', clean_text(v))
+    m = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', t)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    else:
+        m = re.search(r'(\d{1,2})\s*[/.\-]\s*(\d{1,2})\s*[/.\-]\s*(\d{2,4})(?!\d)', t)
+        if m:
+            d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        else:
+            m = re.search(r'(\d{1,2})\s*([A-Za-zก-๙.]+)\s*(\d{2,4})(?!\d)', t)
+            if not m:
+                return None
+            key = m.group(2).strip().lower()
+            mo = _EVT_MON.get(key) or _EVT_MON.get(key[:3]) or _EVT_MON.get(key.replace('.', ''))
+            if not mo:
+                return None
+            d, y = int(m.group(1)), int(m.group(3))
+    y, note = evt_year(y)
+    try:
+        datetime(y, mo, d)
+    except ValueError:
+        return None
+    return (y, mo, d), evt_time(t[m.end():]), note
+
+
+def evt_dt(dv, tv=None, end=False):
+    """วันที่ + เวลา (คนละช่องก็ได้) -> ('YYYY-MM-DD HH:MM:SS', ข้อความแจ้ง) · อ่านไม่ออก -> ('', '')
+    ไม่มีเวลา: เริ่ม = 00:00:00 · สิ้นสุด = 23:59:59 · ไม่มีวินาที: สิ้นสุด = :59 (กติกาเดียวกับทุกแท็บ)"""
+    g = evt_date(dv)
+    if not g:
+        return '', ''
+    (y, mo, d), tm, note = g
+    tm2 = evt_time(tv)
+    tm = tm2 or tm
+    if tm is None:
+        s = '%04d-%02d-%02d' % (y, mo, d)
+        return (wr_end_fix(s) if end else s + ' 00:00:00'), note
+    h, mi, se = tm
+    if end and se is None:
+        return wr_end_fix('%04d-%02d-%02d %02d:%02d' % (y, mo, d, h, mi)), note
+    return '%04d-%02d-%02d %02d:%02d:%02d' % (y, mo, d, h, mi, int(se or 0)), note
+
+
+def _evt_lbl(v, words):
+    k = _hkey(clean_text(v))
+    return bool(k) and k in words
+
+
+def _evt_right(rows, r, c, end):
+    """ค่าทางขวาของป้าย: วันที่ (ช่องแรกที่อ่านเป็นวันได้) + เวลา (ช่องถัดไป) -> (ค่า, แจ้ง, ช่องวันที่)"""
+    vals = []
+    for k in range(c + 1, c + 7):
+        v = _ou_cell(rows, r, k)
+        if v is None or (isinstance(v, str) and not v.strip()):
+            continue
+        vals.append((k, v))
+    for i, (k, v) in enumerate(vals):
+        if evt_date(v):
+            tv = vals[i + 1][1] if i + 1 < len(vals) and not evt_date(vals[i + 1][1]) else None
+            s, note = evt_dt(v, tv, end)
+            if s:
+                return s, note, k
+    return '', '', None
+
+
+def evt_find_period(rows):
+    """ช่วงรับรางวัลจากป้าย -> {'start','end','notes':[], 'how'} · how: label / first / '' (ไม่เจอ)"""
+    S = {_hkey(x) for x in _EVT_START}
+    E = {_hkey(x) for x in _EVT_END}
+
+    def pair_near(r0, c0, rmax, cmax):
+        st = en = None
+        for r in range(r0, min(len(rows), r0 + rmax)):
+            for c in range(max(0, c0), min(len(rows[r] or []), c0 + cmax)):
+                v = rows[r][c]
+                if st is None and _evt_lbl(v, S):
+                    s, n, _ = _evt_right(rows, r, c, False)
+                    if s:
+                        st = (s, n, r)
+                elif en is None and _evt_lbl(v, E):
+                    s, n, _ = _evt_right(rows, r, c, True)
+                    if s:
+                        en = (s, n, r)
+            if st and en:
+                return st, en
+        return None
+    for r, row in enumerate(rows[:200]):
+        for c, v in enumerate(row or []):
+            t = clean_text(v).lower() if isinstance(v, str) else ''
+            if not t or not any(a in t for a in _EVT_ANCHOR) or len(t) > 60:
+                continue
+            got = pair_near(r, c, 5, 6)
+            if got:
+                (s, n1, _), (e, n2, _) = got
+                return {'start': s, 'end': e, 'notes': [x for x in (n1, n2) if x], 'how': 'label'}
+    got = pair_near(0, 0, min(len(rows), 200), 60)
+    if got:
+        (s, n1, _), (e, n2, _) = got
+        return {'start': s, 'end': e, 'notes': [x for x in (n1, n2) if x], 'how': 'first'}
+    return {'start': '', 'end': '', 'notes': [], 'how': ''}
+
+
+def evt_title(rows, sheet):
+    """ชื่อ Event = หัวเรื่องบนสุดของชีท (3 แถวแรก ข้อความแรกที่ไม่ใช่ป้าย) · ไม่มี = ชื่อชีท"""
+    for r in range(min(3, len(rows))):
+        for c in range(min(4, len(rows[r] or []))):
+            v = rows[r][c]
+            if not isinstance(v, str):
+                continue
+            t = clean_text(v).replace('\n', ' ').strip()
+            if not t or len(t) > 90 or any(_hkey(t).startswith(_hkey(x)) for x in _EVT_NOT_TITLE):
+                continue
+            if _hkey(t) in ('template',):
+                continue
+            return t, 'sheet-title'
+    return (clean_text(sheet) or str(sheet)).strip(), 'sheet-name'
+
+
+def evt_parse_rows(rows, sheet):
+    """1 ชีท -> 1 Event (dict) · ไม่มีตาราง fdItemNum เลย -> None"""
+    sets = ev_sets_from_rows(rows, sheet)
+    if not sets:
+        return None
+    name, how = evt_title(rows, sheet)
+    per = evt_find_period(rows)
+    rw = []
+    for s in sets:
+        title = ev_set_name(s)
+        rw.append({'title': title, 'name': '%s - %s' % (name, title), 'bundle': str(s.get('bundle') or ''),
+                   'bundle_src': 'ชีท' if s.get('bundle') else '', 'row': s.get('row'), 'items': len(s.get('items') or []),
+                   'notitle': any('หาชื่อเซ็ต' in w for w in s.get('warn') or []), 'use': True})
+    t = {'key': str(sheet), 'sheet': str(sheet), 'event': name, 'event_how': how, 'name_th': name, 'name_en': name,
+         'start': per['start'], 'end': per['end'], 'act_start': per['start'], 'act_end': per['end'],
+         'period_how': per['how'], 'year_notes': per['notes'], 'rewards': rw, 'use': True}
+    t.update({k: v for k, v in EVT_DEF.items()})
+    return t
+
+
+def evt_dyn(t, now=None):
+    """ตรวจสด — ⛔ ห้ามสร้าง · ⚠ ควรเช็ก"""
+    now = now or datetime.now()
+    out = []
+    S = lambda m: out.append(chk_new('stop', m))
+    W = lambda m: out.append(chk_new('warn', m))
+    if not str(t.get('name_th') or '').strip() or not str(t.get('name_en') or '').strip():
+        S('ยังไม่มีชื่อ Event (ไทย / อังกฤษ)')
+    rws = [r for r in t.get('rewards') or [] if r.get('use', True)]
+    if not rws:
+        S('ไม่มีของรางวัลที่เลือกไว้เลย')
+    seen = {}
+    for i, r in enumerate(rws, 1):
+        b = str(r.get('bundle') or '').strip()
+        if not str(r.get('name') or '').strip():
+            S('ของรางวัล %d ยังไม่มีชื่อ' % i)
+        if not re.fullmatch(r'\d+', b):
+            S('ของรางวัล “%s” ยังไม่มีเลข Bundle' % (r.get('title') or i))
+            continue
+        seen.setdefault(b, []).append(r.get('title') or str(i))
+        if int(b) < 100:
+            W('ของรางวัล “%s” เลข Bundle %s น้อยผิดปกติ — ชีทอาจเขียนจำนวน/ราคาไว้ตรงนั้น' % (r.get('title'), b))
+        if r.get('notitle'):
+            W('ตาราง “%s” หาหัวตารางไม่เจอ — ชื่อรางวัลแก้ได้ในหน้าแก้ไข' % r.get('title'))
+    for b, ts in seen.items():
+        if len(ts) > 1:
+            S('เลข Bundle %s ซ้ำกัน %d รางวัล (%s) — ชีทน่าจะก๊อปเลขมาผิด' % (b, len(ts), ', '.join(ts)[:60]))
+    pairs = (('start', 'end', 'ช่วงรับรางวัล'), ('act_start', 'act_end', 'ช่วงกิจกรรม'))
+    for a, b, what in pairs:
+        va, vb = pd_dt_ok(t.get(a)), pd_dt_ok(t.get(b))
+        if not va or not vb:
+            S('%s ยังไม่ครบ (เริ่ม / สิ้นสุด)' % what)
+            continue
+        if not 2020 <= int(va[:4]) <= now.year + 3 or not 2020 <= int(vb[:4]) <= now.year + 3:
+            S('%s ปีดูแปลก (%s → %s)' % (what, va[:10], vb[:10]))
+        if va >= vb:
+            S('%s เริ่ม %s ไม่ได้อยู่ก่อนสิ้นสุด %s' % (what, va, vb))
+        if vb < now.strftime('%Y-%m-%d %H:%M:%S'):
+            S('%s สิ้นสุด %s ผ่านไปแล้ว' % (what, vb))
+    if t.get('who') not in EVT_WHO:
+        S('ผู้มีสิทธิ์รับรางวัลต้องเป็น WINNER หรือ ALL')
+    for k, what in (('plim', 'จำกัดต่อผู้เล่น (การรับรางวัล)'), ('rlim', 'จำกัดต่อผู้เล่น (ของรางวัล)')):
+        if not re.fullmatch(r'[1-9]\d*', str(t.get(k) or '')):
+            S('%s ต้องเป็นตัวเลขตั้งแต่ 1' % what)
+    if t.get('cap') and not re.fullmatch(r'[1-9]\d*', str(t.get('total') or '')):
+        S('เปิด “จำกัดจำนวน” แล้ว ต้องใส่จำนวนรางวัลทั้งหมด')
+    for n in t.get('year_notes') or []:
+        if not t.get('start_user'):
+            W(n)
+            break
+    if t.get('period_how') == 'first' and not t.get('start_user'):
+        W('ไม่เจอป้าย “ระยะเวลากดรับของรางวัล” — ใช้ป้าย เริ่ม / สิ้นสุด ตัวแรกในชีท เช็กวันที่อีกที')
+    if t.get('event_how') == 'sheet-name' and not t.get('name_user'):
+        W('ไม่เจอหัวเรื่องในชีท — ใช้ชื่อชีทเป็นชื่อ Event')
+    return out
+
+
+def evt_issues(t, now=None):
+    return chk_active(t) + evt_dyn(t, now)
+
+
+def evt_read_sheet_wb(wb, sheet):
+    t = evt_parse_rows(ou_read_rows(wb, sheet), sheet)
+    if t is None:
+        return [], []
+    warns = ['%s: %s' % (t['sheet'], c['msg']) for c in evt_issues(t) if c['lv'] == 'stop']
+    return [t], warns
+
+
+def evt_scan_sheets_wb(wb, progress=None):
+    out = []
+    names = wb.sheetnames
+    for k, s in enumerate(names, 1):
+        if progress:
+            progress(k, len(names), s)
+        try:
+            n = len(ev_sets_from_rows(ou_read_rows(wb, s), s))
+        except Exception:
+            n = 0
+        out.append((s, n))
+    return out
+
+
+def evt_new_state():
+    return {'file': '', 'sheets': [], 'read_at': '', 'rows': [], 'made': []}
+
+
+def evt_carry(old_rows, new_rows):
+    """อ่านชีทซ้ำ: ของที่สร้างแล้ว / ค่าที่แก้เอง / เลข Bundle ที่เติมเอง ยังอยู่ (จับคู่ด้วยชีท + หัวตาราง)"""
+    idx = {o.get('sheet'): o for o in old_rows or []}
+    for t in new_rows:
+        o = idx.get(t.get('sheet'))
+        if not o:
+            continue
+        for k in ('made', 'last'):
+            if o.get(k):
+                t[k] = o[k]
+        for k in ('name_th', 'name_en', 'start', 'end', 'act_start', 'act_end'):
+            if o.get(k + '_user'):
+                t[k], t[k + '_user'] = o[k], True
+        if o.get('name_user'):
+            t['name_user'] = True
+        if o.get('opt_user'):
+            for k in EVT_DEF:
+                t[k] = o.get(k, t[k])
+            t['opt_user'] = True
+        od = {(r.get('row'), r.get('title')): r for r in o.get('rewards') or []}
+        for r in t.get('rewards') or []:
+            y = od.get((r.get('row'), r.get('title')))
+            if not y:
+                continue
+            if y.get('name_user'):
+                r['name'], r['name_user'] = y['name'], True
+            if not y.get('use', True):
+                r['use'] = False
+            if y.get('bundle_src') == 'พิมพ์เอง' and y.get('bundle'):       # คนแก้เอง (เช่น ชีทเขียนเลขผิด) = ใช้ของคน
+                r['bundle'], r['bundle_src'] = y['bundle'], 'พิมพ์เอง'
+            elif not r.get('bundle') and y.get('bundle') and y.get('bundle_src') == 'แท็บ Bundle':
+                r['bundle'], r['bundle_src'] = y['bundle'], y['bundle_src']
+        if t.get('made'):
+            t['use'] = False
+    return new_rows
+
+
+def evt_fill_bundles(rows, file, book, made):
+    """เลข Bundle ที่ว่าง <- แท็บสร้าง Bundle: ตารางเดียวกันในชีท (ไฟล์ · ชีท · แถวหัวตาราง) ก่อน
+    แล้วค่อยชื่อบันเดิลตรงกับชื่อรางวัลเป๊ะ · ได้เลขเดียวเท่านั้น · มีเลขแล้วไม่ทับ (ไม่ตรง = คืนไปเตือน)
+    คืน (filled [(event, reward, เลข, ที่มา)], mism [(event, reward, เลขเดิม, เลขแท็บ Bundle)])"""
+    fb = os.path.basename(file or '')
+    by = {}
+    for m in made or []:
+        bid = str(m.get('id') or '').strip()
+        if re.fullmatch(r'\d+', bid):
+            by.setdefault(shop_norm(m.get('name')), set()).add(bid)
+    filled, mism = [], []
+    for t in rows or []:
+        if t.get('made'):
+            continue
+        sh = clean_text(t.get('sheet')) or str(t.get('sheet') or '')
+        for r in t.get('rewards') or []:
+            try:
+                hr = int(r.get('row') or 0) - 1
+            except Exception:
+                hr = -1
+            ids = {v['id'] for L, v in (book or {}).items() if L[1] == sh and L[2] == hr and (not fb or L[0] == fb)}
+            src = 'แท็บ Bundle'
+            if len(ids) != 1:
+                ids = set(by.get(shop_norm(r.get('name')), set()))
+            cur = str(r.get('bundle') or '').strip()
+            if len(ids) != 1:
+                continue
+            bid = ids.pop()
+            if not re.fullmatch(r'\d+', cur):
+                r['bundle'], r['bundle_src'] = bid, src
+                filled.append((t, r, bid, src))
+            elif cur != bid:
+                mism.append((t, r, cur, bid))
+    return filled, mism
+
+
+# ---- JS ของแท็บสร้าง Event (หาจากข้อความ/โครงสร้าง ไม่ยึดตำแหน่ง) ----
+JS_EVT = r"""
+([act, a, b]) => {
+  const vis = el => { if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const txt = e => (e.textContent || '').replace(/\s+/g, ' ').trim();
+  const mark = (el, key) => {
+    document.querySelectorAll('[' + key + ']').forEach(e => e.removeAttribute(key));
+    if (el) { el.setAttribute(key, '1'); try { el.scrollIntoView({block: 'center'}); } catch (e) {} }
+    return el; };
+  const POP = '[role=dialog],[role=listbox],[data-radix-popper-content-wrapper]';
+  const ADD = (act === 'ready' || act === 'add') && a ? a : 'เพิ่มของรางวัล';
+  const addBtn = () => [...document.querySelectorAll('button,[role=button]')].filter(x => vis(x) &&
+      !x.closest(POP) && txt(x).indexOf(ADD) >= 0 && txt(x).length < 40)[0] || null;
+  // กล่องของรางวัล = ไต่จากปุ่ม “เพิ่มของรางวัล” ขึ้นไปจนเจอฟอร์มรางวัล / ข้อความ “ยังไม่มีของรางวัล”
+  function card() {
+    const ab = addBtn();
+    if (!ab) return null;
+    let c = ab.parentElement;
+    for (let i = 0; i < 8 && c && c !== document.body; i++) {
+      const t = c.textContent || '';
+      if (/ของรางวัลชุดที่|ยังไม่มีของรางวัล/.test(t)) return c;
+      c = c.parentElement;
+    }
+    return null;
+  }
+  function headCur(cd) {
+    const w = document.createTreeWalker(cd, NodeFilter.SHOW_TEXT, null, false);
+    let n;
+    while ((n = w.nextNode())) {
+      const m = (n.textContent || '').match(/ของรางวัลชุดที่\s*(\d+)/);
+      if (m && vis(n.parentElement)) return +m[1];
+    }
+    return 0;
+  }
+  function chips(cd) {
+    const ab = addBtn();
+    return [...cd.querySelectorAll('button,[role=tab]')].filter(x => vis(x) && x !== ab && !x.closest(POP) &&
+        /^\d+(\s|$|[^\d])/.test(txt(x)) && !/^#/.test(txt(x)));
+  }
+  if (act === 'ready') {
+    const has = [...document.querySelectorAll('label,div,span,p')].some(e => vis(e) &&
+        /^ชื่อ Event/.test(txt(e)) && txt(e).length < 30);
+    return (has && addBtn()) ? 'ok' : 'wait';
+  }
+  if (act === 'rw') {                                  // จำนวนของรางวัล | ชุดที่เปิดอยู่
+    const cd = card();
+    if (!cd) return 'none';
+    const cur = headCur(cd);
+    const cs = chips(cd);
+    let n = 0;
+    for (const x of cs) { const m = txt(x).match(/^(\d+)/); if (m) n = Math.max(n, +m[1]); }
+    if (!n) n = cur ? 1 : 0;
+    return n + '|' + cur;
+  }
+  if (act === 'add') {
+    const ab = addBtn();
+    if (!ab) return 'ไม่เจอปุ่ม “เพิ่มของรางวัล”';
+    mark(ab, 'data-trw-evadd');
+    return 'ok';
+  }
+  if (act === 'tab') {                                 // ป้ายชุดรางวัลที่ a (1, 2, 3 …)
+    const cd = card();
+    if (!cd) return 'ไม่เจอกล่องของรางวัล';
+    const hit = chips(cd).find(x => new RegExp('^' + a + '(?!\\d)').test(txt(x)));
+    if (!hit) return 'ไม่เจอป้ายชุดที่ ' + a;
+    mark(hit, 'data-trw-evtab');
+    return 'ok';
+  }
+  if (act === 'submit') {                              // ปุ่ม “สร้าง Event” (ข้อความตรงเป๊ะ ไม่ใช่ บันทึกและสร้างต่อ)
+    const bs = [...document.querySelectorAll('button')].filter(x => vis(x) && !x.closest(POP) && txt(x) === a);
+    if (!bs.length) return 'ไม่เจอปุ่ม ' + a;
+    mark(bs[bs.length - 1], 'data-trw-evgo');
+    return 'ok';
+  }
+  return 'ไม่รู้จักคำสั่ง ' + act;
+}"""
+
+
+class EvtRunner(PdRunner):
+    """กรอกหน้า สร้าง Event ทีละตัว — ยืมตัวช่วยเดิมของ WR Master มาใช้อย่างเดียว:
+       _w_text (พิมพ์+อ่านกลับ) · _w_switch · _w_select · _w_date / _w_date_ok · _w_bundle · _click_confirm
+       ฝั่ง left = นอกกล่องของรางวัล · right = ในกล่องของรางวัล (ชุดที่เปิดอยู่)
+       ของใหม่: เพิ่มของรางวัลทีละชุด · สลับชุดตอนตรวจรอบสุดท้าย"""
+
+    # ตัวช่วยเดิมที่ยืมมาใช้ (เรียกใช้อย่างเดียว ไม่ได้แก้)
+    _w_switch = App._w_switch
+    _w_bundle = App._w_bundle
+    _w_bundle_now = App._w_bundle_now
+
+    async def _ej(self, page, act, a='', b=''):
+        try:
+            return str(await page.evaluate(JS_EVT, [act, a, b]))
+        except Exception as ex:
+            return 'error: %s' % str(ex)[:80]
+
+    async def _rw(self, page):
+        r = await self._ej(page, 'rw')
+        m = re.fullmatch(r'(\d+)\|(\d+)', r)
+        return (int(m.group(1)), int(m.group(2))) if m else (-1, -1)
+
+    def _cancel(self):
+        try:
+            return bool(object.__getattribute__(self, '_tab').cancel)
+        except Exception:
+            return False
+
+    async def _goto_reward(self, page, i):
+        """เปิดชุดรางวัลที่ i (1, 2, …) — เปิดอยู่แล้วไม่กด"""
+        n, cur = await self._rw(page)
+        if cur == i:
+            return True
+        if (await self._ej(page, 'tab', str(i))) != 'ok':
+            return False
+        try:
+            await page.locator('[data-trw-evtab="1"]').first.click(timeout=4000)
+        except Exception:
+            return False
+        for _ in range(12):
+            await page.wait_for_timeout(150)
+            if (await self._rw(page))[1] == i:
+                await page.wait_for_timeout(150)
+                return True
+        return False
+
+    async def _add_reward(self, page, i):
+        """กด + เพิ่มของรางวัล จนมีชุดที่ i และเปิดชุดนั้นอยู่"""
+        n, cur = await self._rw(page)
+        if n >= i:
+            return await self._goto_reward(page, i)
+        if (await self._ej(page, 'add', SEL_EVT['add'])) != 'ok':
+            self.log('   ! ไม่เจอปุ่ม “+ %s”' % SEL_EVT['add'], 'WARN')
+            return False
+        try:
+            await page.locator('[data-trw-evadd="1"]').first.click(timeout=4000)
+        except Exception:
+            return False
+        for _ in range(16):
+            await page.wait_for_timeout(150)
+            n, cur = await self._rw(page)
+            if n >= i:
+                break
+        if n < i:
+            return False
+        return cur == i or await self._goto_reward(page, i)
+
+    async def _bundle_name(self, page, bid):
+        r = str(await page.evaluate(JS_CODE_BUNDLE_NAME, [bid]))
+        return r.split('|', 1)[1] if r.startswith('ok|') else ''
+
+    async def make_evt(self, page, t, do, hold):
+        """กรอก Event 1 ตัวให้ครบ อ่านกลับทั้งใบ (ทุกชุดรางวัล) — ช่องไหนไม่ตรง ไม่กดสร้างเด็ดขาด
+        คืน {'ok', 'created', 'unsure', 'id', 'slug', 'why', 'state'}  state: pre / unknown / ok"""
+        res = {'ok': False, 'created': False, 'unsure': False, 'id': '', 'slug': '', 'why': '', 'state': 'pre'}
+        await page.goto(EVT_CREATE_URL, wait_until='domcontentloaded', timeout=45000)
+        await page.wait_for_timeout(1500)
+        if any(k in page.url.lower() for k in ('login', 'signin', 'auth')):
+            self.log('   ✗ ยังไม่ได้ล็อกอิน — กด “เปิดหน้า Login” ด้านบนก่อน', 'ERR')
+            res['why'] = 'ยังไม่ได้ล็อกอิน'
+            return res
+        for _ in range(40):                             # รอฟอร์มโหลด
+            if (await self._ej(page, 'ready', SEL_EVT['add'])) == 'ok':
+                break
+            await page.wait_for_timeout(500)
+        bad, texts = [], []
+        plan = [r for r in t.get('rewards') or [] if r.get('use', True)]
+        n0, _ = await self._rw(page)
+        if n0 > 0:
+            self.log('   ! หน้าเว็บมีของรางวัลค้างอยู่แล้ว %d ชุด — ไม่ลบเอง' % n0, 'WARN')
+            bad.append('ของรางวัลค้างบนหน้าเว็บ')
+        # ---------- ของรางวัล (ทำก่อน — มีกล่องของรางวัลแล้ว ฝั่งซ้าย/ขวาถึงแยกถูก) ----------
+        for i, r in enumerate(plan, 1):
+            if self._cancel() or bad:
+                break
+            who = 'ของรางวัล %d “%s”' % (i, (r.get('title') or '')[:30])
+            if not await self._add_reward(page, i):
+                self.log('   ! %s: เพิ่ม/เปิดชุดที่ %d ไม่ได้' % (who, i), 'WARN')
+                bad.append('%s (เพิ่มชุด)' % who)
+                break
+            for lbl, val, what in ((SEL_EVT['r_th'], r['name'], 'ชื่อรางวัล (ไทย)'),
+                                   (SEL_EVT['r_en'], r['name'], 'ชื่อรางวัล (อังกฤษ)'),
+                                   (SEL_EVT['r_lim'], t.get('rlim') or '1', 'จำกัดต่อผู้เล่น (รางวัล)')):
+                if not await self._w_text(page, lbl, 'right', val, '%s · %s' % (what, i)):
+                    bad.append('%s %s' % (who, what))
+            if not await self._w_switch(page, SEL_EVT['r_cap'], 'right', False, 'จำกัดจำนวน (รางวัล %d)' % i):
+                bad.append('%s จำกัดจำนวน' % who)
+            if not await self._w_bundle(page, r['bundle']):
+                bad.append('%s Bundle' % who)
+            else:
+                nm = await self._bundle_name(page, r['bundle'])
+                ttl = shop_norm(r.get('title'))
+                if nm and ttl and ttl not in shop_norm(nm):
+                    self.log('   · หมายเหตุ: ชื่อ Bundle บนเว็บ “%s” ไม่มีคำว่า “%s” — เช็กว่าเลขถูกตารางไหม'
+                             % (nm[:60], (r.get('title') or '')[:30]), 'WARN')
+        # ---------- ข้อมูล Event (นอกกล่องของรางวัล) ----------
+        if not bad:
+            for key, what in (('name_th', 'ชื่อ Event (ไทย)'), ('name_en', 'ชื่อ Event (อังกฤษ)')):
+                texts.append((SEL_EVT[key], str(t[key]), what))
+                if not await self._w_text(page, SEL_EVT[key], 'left', t[key], what):
+                    bad.append(what)
+            for key, lbl in EVT_SW:
+                if not await self._w_switch(page, SEL_EVT[key], 'left', bool(t.get(key)), lbl):
+                    bad.append(lbl)
+            for key in ('act_start', 'act_end', 'start', 'end'):
+                if not await self._w_date(page, SEL_EVT[key], t[key], SEL_EVT[key]):
+                    bad.append(SEL_EVT[key])
+            if not await self._w_select(page, SEL_EVT['who'], 'left', t.get('who') or 'WINNER', SEL_EVT['who']):
+                bad.append(SEL_EVT['who'])
+            texts.append((SEL_EVT['plim'], str(t.get('plim') or '1'), 'จำกัดต่อผู้เล่น (การรับรางวัล)'))
+            if not await self._w_text(page, SEL_EVT['plim'], 'left', t.get('plim') or '1', 'จำกัดต่อผู้เล่น (การรับรางวัล)'):
+                bad.append('จำกัดต่อผู้เล่น (การรับรางวัล)')
+            if t.get('cap'):
+                texts.append((SEL_EVT['total'], str(t.get('total')), 'จำนวนรางวัลทั้งหมด'))
+                if not await self._w_text(page, SEL_EVT['total'], 'left', t.get('total'), 'จำนวนรางวัลทั้งหมด'):
+                    bad.append('จำนวนรางวัลทั้งหมด')
+
+        # ---------- ตรวจรอบสุดท้ายทั้งใบ ----------
+        if not bad:
+            for lbl, want, what in texts:
+                got = await self._w_read(page, lbl, 'left')
+                if not wr_same(got, want):
+                    self.log('   ! ตรวจรอบสุดท้าย: %s อยากได้ “%s” แต่ในฟอร์มเป็น “%s”' % (what, want[:40], (got or '')[:40]),
+                             'WARN')
+                    bad.append(what)
+            for key, lbl in EVT_SW:
+                r_ = str(await page.evaluate(JS_CODE_SWITCH, [SEL_EVT[key], 'left', 'read']))
+                if r_ != 'ok|%d' % bool(t.get(key)):
+                    self.log('   ! ตรวจรอบสุดท้าย: สวิตช์ %s ไม่ได้เป็น %s' % (lbl, 'เปิด' if t.get(key) else 'ปิด'), 'WARN')
+                    bad.append(lbl)
+            for key in ('act_start', 'act_end', 'start', 'end'):
+                ok, shown = await self._w_date_ok(page, SEL_EVT[key], t[key])
+                if not ok:
+                    self.log('   ! ตรวจรอบสุดท้าย: %s ช่องบนเว็บขึ้น “%s”' % (SEL_EVT[key], shown[:40]), 'WARN')
+                    bad.append(SEL_EVT[key])
+            r_ = str(await page.evaluate(JS_CODE_SELECT, [SEL_EVT['who'], 'left', 'read', '']))
+            if not r_.startswith('ok|') or not r_[3:].upper().startswith(str(t.get('who')).upper()):
+                self.log('   ! ตรวจรอบสุดท้าย: ผู้มีสิทธิ์รับรางวัลเป็น “%s”' % r_[3:40], 'WARN')
+                bad.append(SEL_EVT['who'])
+            n, _ = await self._rw(page)
+            if n != len(plan):
+                self.log('   ! ตรวจรอบสุดท้าย: บนเว็บมีของรางวัล %d ชุด (ต้องเป็น %d)' % (n, len(plan)), 'WARN')
+                bad.append('จำนวนชุดรางวัล')
+            for i, r in enumerate(plan, 1):
+                if bad:
+                    break
+                if not await self._goto_reward(page, i):
+                    self.log('   ! ตรวจรอบสุดท้าย: เปิดชุดรางวัลที่ %d ไม่ได้' % i, 'WARN')
+                    bad.append('ของรางวัล %d (ตรวจ)' % i)
+                    break
+                got = [await self._w_read(page, SEL_EVT[k], 'right') for k in ('r_th', 'r_en', 'r_lim')]
+                bn = await self._w_bundle_now(page)
+                exp = [r['name'], r['name'], str(t.get('rlim') or '1')]
+                okb = bool(re.match(r'#\s*%s(\D|$)' % re.escape(str(r['bundle'])), bn or ''))
+                if not all(wr_same(g, e) for g, e in zip(got, exp)) or not okb:
+                    self.log('   ! ตรวจรอบสุดท้าย: ของรางวัล %d เป็น %s · Bundle “%s” (ต้องเป็น %s · #%s)'
+                             % (i, got, (bn or '')[:40], exp, r['bundle']), 'WARN')
+                    bad.append('ของรางวัล %d (ตรวจรอบสุดท้าย)' % i)
+            res['slug'] = await self._w_read(page, 'Slug', 'left') or ''
+
+        if bad:
+            miss = ', '.join(dict.fromkeys(bad))
+            res['why'] = 'กรอกไม่ครบ: ' + miss[:200]
+            if not do:
+                self.log('   ⚠ กรอกไม่ครบ %d จุด: %s  (โหมดทดสอบ — ไม่กดสร้าง)' % (len(dict.fromkeys(bad)), miss[:300]),
+                         'WARN')
+                if hold:
+                    await page.wait_for_timeout(hold * 1000)
+            else:
+                self.log('   ✗ ไม่กดสร้าง เพราะกรอกไม่ครบ: %s' % miss[:300], 'ERR')
+            return res
+        if not do:
+            self.log('   ✓ กรอกครบ ตรวจแล้วทุกช่อง ทุกชุดรางวัล (โหมดทดสอบ — ไม่กดสร้าง)', 'OK')
+            if hold:
+                await page.wait_for_timeout(hold * 1000)
+            res['ok'] = True
+            return res
+
+        # ---------- กด “สร้าง Event” (+ ป๊อปอัปยืนยันถ้ามี) ----------
+        if (await self._ej(page, 'submit', SEL_EVT['submit'])) != 'ok':
+            self.log('   ✗ ไม่เจอปุ่ม “%s”' % SEL_EVT['submit'], 'ERR')
+            res['why'] = 'ไม่เจอปุ่ม “%s”' % SEL_EVT['submit']
+            return res
+        hits = []
+
+        def _grab(resp):
+            try:
+                u = resp.url.lower()
+                if resp.request.method in ('POST', 'PUT', 'PATCH') and 'event' in u:
+                    hits.append(resp)
+            except Exception:
+                pass
+        page.on('response', _grab)
+        try:
+            res['state'] = 'unknown'
+            await page.locator('[data-trw-evgo="1"]').first.click(timeout=10000)
+            await page.wait_for_timeout(600)
+            await self._click_confirm(page, hits)
+            waited = 0
+            while waited < 25000 and not hits:
+                await page.wait_for_timeout(300)
+                waited += 300
+            await page.wait_for_timeout(1500)
+        finally:
+            try:
+                page.remove_listener('response', _grab)
+            except Exception:
+                pass
+        code, cid, good = 0, '', False
+        for resp in hits:
+            try:
+                st_ = resp.status
+            except Exception:
+                st_ = 0
+            try:
+                body = await resp.json()
+            except Exception:
+                body = None
+            if 200 <= st_ < 300:
+                good, code = True, st_
+                cid = cid or cib_uuid(body)
+            elif not good:
+                code = st_
+        if hits and good:
+            res.update(ok=True, created=True, id=cid, state='ok')
+            self.log('   ✓ สร้าง Event แล้ว%s  (HTTP %d)' % ('  ·  id = %s' % cid if cid else '', code), 'OK')
+        elif hits and code < 500:
+            res.update(state='pre', why='เว็บตอบ HTTP %d — ยังไม่ได้สร้าง' % code)
+            self.log('   ✗ ' + res['why'], 'ERR')
+        else:
+            res.update(unsure=True, why=('เว็บตอบ HTTP %d' % code if hits else 'กดสร้างแล้วไม่เห็นคำตอบจากเว็บ')
+                       + ' — อาจสร้างไปแล้วก็ได้ ตรวจในหน้า Events ก่อนสั่งใหม่')
+            self.log('   ? ' + res['why'], 'WARN')
+        log_event('create_event', name=t.get('name_th'), rewards=len(plan), ok=bool(res['created']), http=code,
+                  unsure=res['unsure'], commit=True)
+        return res
+
+
+class EvtImportDialog(BundleImportDialog):
+    """หน้าต่างเลือกชีทของแท็บ 🎉 สร้าง Event — หน้าต่างเดียวกับนำเข้าบันเดิล (สืบทอดอย่างเดียว ไม่แก้ของเดิม)"""
+    TITLE = 'นำเข้าชีท — 🎉 สร้าง Event'
+    PICK_ALL = 'เลือกชีทที่มีตารางรางวัลทั้งหมด'
+    HINT = ('เลือกชีทที่จะสร้าง (เลือกได้หลายชีท) — 1 ชีท = 1 Event · ชื่อ Event = หัวเรื่องบนสุดของชีท · '
+            'ของรางวัล = ทุกตาราง fdItemNum (ชื่อ = ชื่อ Event - หัวตาราง · Bundle = เลขในแถวหัวตาราง) · '
+            'ช่วงรับรางวัล = ป้าย “ระยะเวลากดรับของรางวัล” (ช่วงกิจกรรม = ช่วงเดียวกัน)')
+    TREE_TITLE = 'Event ที่เจอ'
+    TREE_HEAD = 'Event / ของรางวัล'
+    scan_fn = staticmethod(lambda wb, progress=None: evt_scan_sheets_wb(wb, progress))
+    read_fn = staticmethod(lambda wb, nm: evt_read_sheet_wb(wb, nm))
+    ALLOW_COL = False
+
+    def _show(self, bs, ws, note):
+        self.bundles = bs
+        self.warns = ws
+        for c, t, w in (('qty', 'Bundle', 70), ('tier', 'ตาราง', 70), ('info', 'ช่วงรับรางวัล · หมายเหตุ', 360)):
+            self.tree.heading(c, text=t)
+            self.tree.column(c, width=w)
+        self.tree.tag_configure('stop', background=C['row_bad_bg'], foreground=C['row_bad_fg'])
+        self.tree.delete(*self.tree.get_children())
+        for t in bs:
+            stop = [c for c in evt_issues(t) if c['lv'] == 'stop']
+            info = '%s → %s' % ((t.get('start') or '?')[:16], (t.get('end') or '?')[:16])
+            if stop:
+                info += ' · ⛔ ' + stop[0]['msg']
+            pid = self.tree.insert('', 'end', text='🎉  %s  (ชีท %s)' % (t.get('name_th'), t.get('sheet')), open=True,
+                                   values=('', '%d รางวัล' % len(t['rewards']), info), tags=('stop',) if stop else ())
+            for r in t['rewards']:
+                self.tree.insert(pid, 'end', text='      ' + r['name'],
+                                 values=(r.get('bundle') or '⚠ ไม่มี', '%d ไอเทม' % r.get('items', 0), ''))
+        self.info.config(text='%s · พบ %d Event' % (note, len(bs)))
+        self.warn_lbl.config(text=('⛔  %d จุดที่ต้องดู เช่น %s' % (len(ws), ws[0][:110])) if ws else '')
+        self.count_lbl.config(text='จะนำเข้า %d Event' % len(bs) if bs else '')
+        self.ok_btn.config(state='normal' if bs else 'disabled',
+                           bg=C['btn1_bg'] if bs else C['input'], fg='white' if bs else C['dim'])
+
+    def _ok(self):
+        self.picked = self._selected()
+        BundleImportDialog._ok(self)
+
+
+class EvtTab:
+    """แท็บ 🎉 สร้าง Event — สร้าง Event จากชีท (1 ชีท = 1 Event) · ของใหม่ทั้งก้อน
+    ใช้ Chrome ตัวเดียวกับแท็บอื่น (ตอนทำงานตั้ง b_running กันแท็บอื่นเปิดชน เหมือนแท็บ Check in Booster)"""
+    COLS = (('use', 'ใช้', 40), ('sheet', 'ชีท', 120), ('name', 'ชื่อ Event', 220), ('rw', 'รางวัล', 54),
+            ('bun', 'Bundle', 60), ('start', 'เริ่มรับรางวัล', 132), ('end', 'สิ้นสุดรับรางวัล', 132), ('who', 'ผู้มีสิทธิ์', 72),
+            ('st', 'สถานะ', 260))
+    RCOLS = (('n', '#', 30), ('name', 'ชื่อรางวัล', 300), ('bundle', 'Bundle', 70), ('src', 'ที่มาเลข', 80),
+             ('items', 'ไอเทม', 50))
+    MCOLS = (('n', '#', 30), ('name', 'Event', 220), ('id', 'id / Slug', 170), ('at', 'สร้างเมื่อ', 84))
+
+    def __init__(self, app, tab):
+        self.app = app
+        self.tab = tab
+        self.st = evt_new_state()
+        self.running = False
+        self.cancel = False
+        self._rowmap = {}
+        self._build()
+        self._load()
+        self.refresh()
+
+    # ---------- หน้าจอ ----------
+    def _build(self):
+        a, p = self.app, self.tab
+        _, left, right = a._split_lr(p, 0.70)
+        s1 = a._card(left, '1) นำเข้าจากไฟล์ต้นฉบับ — เลือกชีทกิจกรรม (1 ชีท = 1 Event)')
+        bar = tk.Frame(s1, bg=C['bg'])
+        bar.pack(fill='x')
+        a._btn(bar, '📂  นำเข้าไฟล์ชีท (.xlsx)', self.open_file, primary=True).pack(side='left', ipadx=10, ipady=4)
+        a._btn(bar, '↻  อ่านใหม่', self.reread).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
+        a._btn(bar, '🗑  ล้าง', self.clear).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
+        a._btn(bar, '❓  วิธีใช้', self.help).pack(side='right', ipadx=10, ipady=4)
+        self.lbl_file = tk.Label(s1, text='', bg=C['bg'], fg=C['dim'], font=FM, anchor='w', justify='left')
+        self.lbl_file.pack(fill='x', pady=(8, 0))
+        a._wrap_to(s1, self.lbl_file)
+
+        s2 = a._card(left, '2) ตรวจ / แก้ — ติ๊ก ☑ Event ที่จะสร้าง · ดับเบิลคลิกแถว = แก้ไข (ชื่อ · วันที่ · สถานะ · '
+                           'ผู้มีสิทธิ์ · ของรางวัล)', grow=True)
+        tb = tk.Frame(s2, bg=C['bg'])
+        tb.pack(fill='x', pady=(0, 6))
+        a._btn(tb, '✏️  แก้ไข', self.edit_selected).pack(side='left', ipadx=6, ipady=2)
+        a._btn(tb, '🔗  เลข Bundle จากแท็บ Bundle', self.bundle_from_tab).pack(side='left', padx=(6, 0), ipadx=6, ipady=2)
+        a._btn(tb, '🗑  ลบแถวที่เลือก', self.remove_selected).pack(side='right', ipadx=6, ipady=2)
+        tw = tk.Frame(s2, bg=C['bg'])
+        tw.pack(fill='both', expand=True)
+        self.tree = ttk.Treeview(tw, columns=[c[0] for c in self.COLS], show='headings', style='TR.Treeview',
+                                 height=5, selectmode='extended')
+        for c, t, w in self.COLS:
+            self.tree.heading(c, text=t)
+            self.tree.column(c, width=w, minwidth=30, stretch=(c == 'st'),
+                             anchor='center' if c in ('use', 'rw', 'bun', 'who') else 'w')
+        xs = ttk.Scrollbar(tw, orient='horizontal', command=self.tree.xview)
+        self.tree.configure(xscrollcommand=xs.set)
+        self.tree.grid(row=0, column=0, sticky='nsew')
+        xs.grid(row=1, column=0, sticky='ew')
+        tw.rowconfigure(0, weight=1)
+        tw.columnconfigure(0, weight=1)
+        self.tree.bind('<Button-1>', self._click)
+        self.tree.bind('<Double-1>', self._dbl)
+        self.tree.bind('<Return>', lambda e: self.edit_selected())
+        self.tree.bind('<Delete>', lambda e: self.remove_selected())
+        self.tree.bind('<<TreeviewSelect>>', lambda e: self._info(), add='+')
+        self.lbl_info = tk.Label(s2, text='', bg=C['bg'], fg=C['fg'], font=('Segoe UI', 9), anchor='w', justify='left')
+        self.lbl_info.pack(fill='x', pady=(4, 0))
+        a._wrap_to(s2, self.lbl_info)
+        tk.Label(s2, text='🎁  ของรางวัลของ Event ที่เลือก', bg=C['bg'], fg=C['fg'], font=FB, anchor='w').pack(
+            fill='x', pady=(8, 2))
+        rw = tk.Frame(s2, bg=C['bg'])
+        rw.pack(fill='both', expand=True)
+        self.tree_r = ttk.Treeview(rw, columns=[c[0] for c in self.RCOLS], show='headings', style='TR.Treeview',
+                                   height=5, selectmode='browse')
+        for c, t, w in self.RCOLS:
+            self.tree_r.heading(c, text=t)
+            self.tree_r.column(c, width=w, minwidth=30, stretch=(c == 'name'), anchor='w')
+        self.tree_r.tag_configure('off', foreground=C['dim'])
+        self.tree_r.tag_configure('nob', foreground=C['warn'])
+        rys = ttk.Scrollbar(rw, orient='vertical', command=self.tree_r.yview)
+        self.tree_r.configure(yscrollcommand=rys.set)
+        self.tree_r.grid(row=0, column=0, sticky='nsew')
+        rys.grid(row=0, column=1, sticky='ns')
+        rw.rowconfigure(0, weight=1)
+        rw.columnconfigure(0, weight=1)
+        self.tree_r.bind('<Double-1>', lambda e: self.edit_selected())
+        self.lbl_sum = tk.Label(s2, text='', bg=C['bg'], fg=C['fg'], font=FB, anchor='w', justify='left')
+        self.lbl_sum.pack(fill='x', pady=(4, 0))
+
+        s3 = a._card(left, '3) ลงมือสร้าง Event')
+        tk.Label(s3, text='ไม่แตะ: Slug (เว็บตั้งให้) · รูปภาพ · รายละเอียด · คำอธิบายรางวัล · เงื่อนไขการรับรางวัล  ·  '
+                          'สถานะ / ผู้มีสิทธิ์ / จำกัดต่อผู้เล่น = ตามที่ตั้งในหน้าแก้ไข (เริ่มต้นแบบในคลิป)',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w', justify='left').pack(fill='x')
+        hd = tk.Frame(s3, bg=C['bg'])
+        hd.pack(fill='x', pady=(8, 0))
+        tk.Label(hd, text='โหมดทดสอบ: กรอกเสร็จแล้วค้างหน้าไว้ให้ดู (วินาที)', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9)).pack(side='left')
+        self.v_hold = tk.StringVar(value=str(a.prefs.get('evt_hold', '8')))
+        eh = a._entry(hd, width=6)
+        eh.config(textvariable=self.v_hold)
+        eh.pack(side='left', padx=(10, 0), ipady=3)
+        b3 = tk.Frame(s3, bg=C['bg'])
+        b3.pack(fill='x', pady=(10, 0))
+        self.btn_run = a._btn(b3, '▶  เริ่มทำงาน', self.create, primary=True)
+        self.btn_run.pack(side='left', ipadx=18, ipady=5)
+        self.btn_stop = a._btn(b3, '■  ยกเลิก', self.stop)
+        self.btn_stop.config(state='disabled')
+        self.btn_stop.pack(side='left', padx=(8, 0), ipadx=12, ipady=5)
+        self.v_do = tk.BooleanVar(value=False)
+        tk.Checkbutton(b3, variable=self.v_do, command=self._do_changed, text='กดปุ่ม “สร้าง Event” จริง',
+                       bg=C['bg'], fg=C['fg'], selectcolor=C['input'], activebackground=C['bg'],
+                       activeforeground=C['fg'], font=FB, bd=0, highlightthickness=0).pack(side='left', padx=(16, 0))
+        self.lbl_mode = tk.Label(s3, text='', bg=C['bg'], font=('Segoe UI', 9), anchor='w', justify='left')
+        self.lbl_mode.pack(fill='x', pady=(6, 0))
+        a._wrap_to(s3, self.lbl_mode)
+        self._do_changed()
+        try:
+            s3.master.pack_configure(side='bottom', pady=(8, 8), before=s2.master)
+        except Exception:
+            pass
+
+        h1 = tk.Frame(right, bg=C['bg'])
+        h1.pack(fill='x', padx=(8, 14), pady=(10, 2))
+        tk.Label(h1, text='Event ที่สร้างแล้ว', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9, 'bold')).pack(side='left')
+        self.lbl_made = tk.Label(h1, text='', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w')
+        self.lbl_made.pack(side='left', padx=10)
+        mw = tk.Frame(right, bg=C['bg'])
+        mw.pack(fill='both', expand=True, padx=(8, 14), pady=(0, 12))
+        self.tree_made = ttk.Treeview(mw, columns=[c[0] for c in self.MCOLS], show='headings',
+                                      style='TR.Treeview', height=4, selectmode='extended')
+        for c, t, w in self.MCOLS:
+            self.tree_made.heading(c, text=t)
+            self.tree_made.column(c, width=w, anchor='w', stretch=(c == 'at'))
+        msb = ttk.Scrollbar(mw, orient='vertical', command=self.tree_made.yview)
+        self.tree_made.configure(yscrollcommand=msb.set)
+        self.tree_made.grid(row=0, column=0, sticky='nsew')
+        msb.grid(row=0, column=1, sticky='ns')
+        mw.rowconfigure(0, weight=1)
+        mw.columnconfigure(0, weight=1)
+
+    def _do_changed(self):
+        if self.v_do.get():
+            self.lbl_mode.config(text='⚠  จะสร้างจริงบนเว็บ (กด “สร้าง Event”) — ช่องไหนกรอกไม่เข้า / อ่านกลับไม่ตรง '
+                                      '= ไม่กดสร้าง · ยังไม่ได้สร้างห้ามข้าม (ลองใหม่เอง / ถามก่อน)', fg=C['err'])
+        else:
+            self.lbl_mode.config(text='โหมดทดสอบ — กรอกให้ดูครบทุกช่อง ทุกชุดรางวัล ตรวจแล้วไม่กดสร้าง '
+                                      '(ติ๊ก “กดปุ่ม สร้าง Event จริง” ถึงจะสร้าง)', fg=C['ok'])
+
+    def _issues(self, t):
+        return evt_issues(t)
+
+    # ---------- เก็บ/โหลด ----------
+    def _path(self):
+        return os.path.join(DATA_DIR, EVT_STATE)
+
+    def _save(self):
+        try:
+            os.makedirs(DATA_DIR, exist_ok=True)
+            tmp = self._path() + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(self.st, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, self._path())
+        except Exception as ex:
+            self.app.log('เก็บข้อมูลแท็บสร้าง Event ไม่ได้: %s' % str(ex)[:80], 'WARN')
+
+    def _load(self):
+        try:
+            if not os.path.exists(self._path()):
+                return
+            with open(self._path(), 'r', encoding='utf-8') as f:
+                d = json.load(f)
+            if not isinstance(d, dict) or not isinstance(d.get('rows'), list):
+                raise ValueError('รูปแบบไฟล์ไม่ถูก')
+            st = evt_new_state()
+            st.update(d)
+            self.st = st
+        except Exception as ex:
+            try:
+                os.replace(self._path(), self._path() + '.bad')
+            except Exception:
+                pass
+            why = str(ex)[:60]
+            self.app.root.after(0, lambda: self.app.log('ไฟล์ข้อมูลแท็บสร้าง Event อ่านไม่ได้ (%s) — เริ่มใหม่' % why,
+                                                        'WARN'))
+
+    # ---------- นำเข้า ----------
+    def open_file(self):
+        if self.running:
+            return messagebox.showinfo('กำลังทำงาน', 'รอให้งานเสร็จก่อนนะ')
+        f0 = self.st.get('file') or ''
+        path = filedialog.askopenfilename(
+            title='เลือกไฟล์ต้นฉบับ (.xlsx)',
+            initialdir=os.path.dirname(f0) if f0 and os.path.isdir(os.path.dirname(f0)) else None,
+            filetypes=[('Excel', '*.xlsx *.xlsm'), ('ทุกไฟล์', '*.*')])
+        if not path:
+            return
+        dlg = EvtImportDialog(self.app.root, path)
+        if dlg.result is None:
+            return
+        self._apply(path, getattr(dlg, 'picked', []), dlg.result)
+
+    def reread(self):
+        f, sheets = self.st.get('file') or '', self.st.get('sheets') or []
+        if not f or not sheets:
+            return messagebox.showinfo('ยังไม่มีไฟล์', 'กด “นำเข้าไฟล์ชีท” ก่อนนะ')
+        if not os.path.exists(f):
+            return messagebox.showwarning('หาไฟล์ไม่เจอ', 'ไม่เจอไฟล์เดิมแล้ว:\n%s\n\nนำเข้าไฟล์ใหม่แทนนะ' % f)
+        if self.running:
+            return messagebox.showinfo('กำลังทำงาน', 'รอให้งานเสร็จก่อนนะ')
+        try:
+            wb = open_workbook(f)
+            try:
+                ts, miss = [], []
+                for s in sheets:
+                    if s in wb.sheetnames:
+                        ts += evt_read_sheet_wb(wb, s)[0]
+                    else:
+                        miss.append(s)
+            finally:
+                wb.close()
+        except Exception as ex:
+            self.app.log('สร้าง Event: อ่านไฟล์ไม่ได้ — %s' % ex, 'ERR')
+            return messagebox.showerror('อ่านไฟล์ไม่ได้', str(ex)[:300])
+        if miss:
+            self.app.log('สร้าง Event: ไม่เจอชีท %s ในไฟล์แล้ว' % ', '.join(miss), 'WARN')
+        self._apply(f, [s for s in sheets if s not in miss], ts)
+
+    def _link(self, rows, path, quiet=True):
+        """🔗 เลข Bundle ที่ว่าง <- แท็บสร้าง Bundle (ตารางเดียวกัน / ชื่อตรงเป๊ะ) — มีเลขแล้วไม่ทับ"""
+        a = self.app
+        try:
+            book = link_bundle_book(a) if LINK.get('app') is a else {}
+        except Exception:
+            book = {}
+        filled, mism = evt_fill_bundles(rows, path, book, getattr(a, 'made', []))
+        for t, r, bid, src in filled:
+            a.log('🔗 สร้าง Event “%s”: %s → Bundle %s (จาก%s)' % (t.get('name_th'), r.get('title'), bid, src), 'OK')
+        for t, r, cur, bid in mism:
+            a.log('🔗 สร้าง Event “%s”: %s ชีทเขียน Bundle %s แต่แท็บสร้าง Bundle ได้ %s — ใช้ของชีท เช็กอีกที'
+                  % (t.get('name_th'), r.get('title'), cur, bid), 'WARN')
+        return filled, mism
+
+    def _apply(self, path, sheets, ts):
+        a = self.app
+        old = self.st.get('rows') or []
+        same = os.path.abspath(path) == os.path.abspath(self.st.get('file') or path)
+        rows = evt_carry(old if same else [], [json.loads(json.dumps(t)) for t in ts])
+        for t in rows:
+            for n in t.get('year_notes') or []:
+                a.log('สร้าง Event “%s”: %s' % (t.get('name_th'), n), 'WARN')
+        try:
+            self._link(rows, path)
+        except Exception as ex:
+            a.log('🔗 สร้าง Event: ดึงเลข Bundle ไม่สำเร็จ: %s' % str(ex)[:80], 'WARN')
+        self.st.update(file=path, sheets=list(sheets), rows=rows, read_at=datetime.now().isoformat(timespec='seconds'))
+        self._save()
+        self.refresh()
+        a.log('สร้าง Event: อ่าน %s (%d ชีท) — เจอ %d Event' % (os.path.basename(path), len(sheets), len(rows)),
+              'OK' if rows else 'WARN')
+        a._pre_log('สร้าง Event', rows, self._issues, lambda t: t.get('name_th') or t.get('sheet') or '?')
+        log_event('evt_read', file=os.path.basename(path), sheets=len(sheets), items=len(rows))
+
+    def clear(self):
+        if self.running or not self.st.get('rows'):
+            return
+        if not messagebox.askyesno('ล้าง', 'ล้างรายการในคิวทั้งหมด?\n(ประวัติที่สร้างแล้ว ยังอยู่)'):
+            return
+        self.st.update(rows=[], file='', sheets=[])
+        self._save()
+        self.refresh()
+
+    # ---------- ตาราง ----------
+    def _t(self, iid):
+        k = self._rowmap.get(iid)
+        return next((t for t in self.st.get('rows') or [] if t.get('key') == k), None)
+
+    def _sel(self):
+        return [t for t in (self._t(i) for i in self.tree.selection()) if t]
+
+    def _status(self, t, stop, warn):
+        m = t.get('made')
+        if m:
+            return '? กดสร้างแล้วไม่เห็นคำตอบ — ตรวจบนเว็บ' if m.get('unsure') else '✓ สร้างแล้ว'
+        if not t.get('use'):
+            return '— ไม่เลือก' + (' · ⛔ %s' % stop[0]['msg'] if stop else '')
+        if stop:
+            return '⛔ ' + stop[0]['msg']
+        la = t.get('last') or {}
+        if la and not la.get('ok'):
+            return '✗ ' + (la.get('why') or 'ไม่ผ่าน')
+        if warn:
+            return '⚠ ' + warn[0]['msg']
+        if la.get('ok') and not la.get('do'):
+            return '✓ ทดสอบผ่าน (%s)' % la.get('at', '')
+        return '✓ พร้อม'
+
+    def refresh(self):
+        tr = self.tree
+        keys = [self._rowmap.get(i) for i in tr.selection()]
+        tr.delete(*tr.get_children())
+        self._rowmap = {}
+        tr.tag_configure('stop', background=C['row_bad_bg'], foreground=C['row_bad_fg'])
+        tr.tag_configure('warn', background=C['row_warn_bg'], foreground=C['row_warn_fg'])
+        tr.tag_configure('made', foreground=C['ok'])
+        tr.tag_configure('off', foreground=C['dim'])
+        rows = self.st.get('rows') or []
+        n = {'use': 0, 'stop': 0, 'warn': 0}
+        back = []
+        for t in rows:
+            cs = self._issues(t)
+            stop = [c for c in cs if c['lv'] == 'stop']
+            warn = [c for c in cs if c['lv'] != 'stop']
+            use = bool(t.get('use'))
+            tag = 'made' if t.get('made') else ('off' if not use else ('stop' if stop else ('warn' if warn else '')))
+            if use:
+                n['use'] += 1
+                n['stop'] += bool(stop)
+                n['warn'] += bool(warn and not stop)
+            rws = [r for r in t.get('rewards') or [] if r.get('use', True)]
+            nb = sum(1 for r in rws if re.fullmatch(r'\d+', str(r.get('bundle') or '')))
+            cb = PD_CB_ON if use else (PD_CB_DONE if t.get('made') else PD_CB_OFF)
+            vals = (cb, t.get('sheet'), t.get('name_th') or '—', len(rws), '%d/%d' % (nb, len(rws)),
+                    (t.get('start') or '—')[:19], (t.get('end') or '—')[:19], t.get('who') or '?',
+                    self._status(t, stop, warn))
+            iid = tr.insert('', 'end', values=vals, tags=(tag,) if tag else ())
+            self._rowmap[iid] = t.get('key')
+            if t.get('key') in keys:
+                back.append(iid)
+        if back:
+            tr.selection_set(back)
+        f = self.st.get('file') or ''
+        self.lbl_file.config(
+            text=('📄 %s  ·  ชีท: %s' % (os.path.basename(f), ', '.join(self.st.get('sheets') or []) or '—')) if f else
+            'ยังไม่ได้นำเข้าไฟล์ — กด “📂 นำเข้าไฟล์ชีท” แล้วเลือกชีทกิจกรรม (ไฟล์ไหนก็ได้ ชีทแบบไหนก็ได้ที่มีตาราง fdItemNum)',
+            fg=C['fg'] if f else C['dim'])
+        txt = ''
+        if rows:
+            txt = 'ทั้งหมด %d · ติ๊กไว้ %d' % (len(rows), n['use'])
+            if n['stop']:
+                txt += '  ·  ⛔ น่าจะผิด %d' % n['stop']
+            if n['warn']:
+                txt += '  ·  ⚠ ควรเช็ก %d' % n['warn']
+        self.lbl_sum.config(text=txt, fg=C['err'] if n['stop'] else (C['warn'] if n['warn'] else C['fg']))
+        self._info()
+        self._refresh_made()
+
+    def _info(self):
+        ts = self._sel()
+        tr = self.tree_r
+        tr.delete(*tr.get_children())
+        if len(ts) != 1:
+            self.lbl_info.config(text='')
+            return
+        t = ts[0]
+        for i, r in enumerate(t.get('rewards') or [], 1):
+            ok = re.fullmatch(r'\d+', str(r.get('bundle') or ''))
+            tr.insert('', 'end', values=(i if r.get('use', True) else '—', r.get('name'), r.get('bundle') or '—',
+                                         r.get('bundle_src') or '—', r.get('items', 0)),
+                      tags=('off',) if not r.get('use', True) else (() if ok else ('nob',)))
+        sw = ' · '.join('%s %s' % (lbl, '✓' if t.get(k) else '✗') for k, lbl in EVT_SW)
+        bits = ['ชีท %s' % t.get('sheet'), 'กิจกรรม %s → %s' % ((t.get('act_start') or '—')[:16], (t.get('act_end') or '—')[:16]),
+                sw, '%s · จำกัดต่อผู้เล่น %s' % (t.get('who'), t.get('plim'))]
+        lines = ['  ·  '.join(bits)] + [chk_text(c) for c in self._issues(t)]
+        self.lbl_info.config(text='\n'.join(lines))
+
+    def _refresh_made(self):
+        tr = self.tree_made
+        tr.delete(*tr.get_children())
+        made = self.st.get('made') or []
+        for i, m in enumerate(made, 1):
+            tr.insert('', 'end', values=(i, m.get('name', ''), ('? ตรวจบนเว็บ' if m.get('unsure') else
+                                                                (m.get('id') or m.get('slug') or '-')), m.get('at', '')))
+        self.lbl_made.config(text=('สร้างแล้ว %d Event' % len(made)) if made else 'ยังไม่ได้สร้าง',
+                             fg=C['ok'] if made else C['dim'])
+
+    def _click(self, ev):
+        if self.tree.identify_region(ev.x, ev.y) != 'cell' or self.tree.identify_column(ev.x) != '#1':
+            return None
+        t = self._t(self.tree.identify_row(ev.y))
+        if not t or self.running:
+            return 'break'
+        t['use'] = not t.get('use')
+        self._save()
+        self.refresh()
+        return 'break'
+
+    def _dbl(self, ev):
+        if self.tree.identify_column(ev.x) == '#1':
+            return 'break'
+        t = self._t(self.tree.identify_row(ev.y))
+        if t:
+            self.edit(t)
+        return 'break'
+
+    def remove_selected(self):
+        if self.running:
+            return
+        ts = self._sel()
+        if not ts:
+            return messagebox.showinfo('ยังไม่ได้เลือก', 'คลิกเลือกแถวที่จะลบออกจากคิวก่อนนะ')
+        if not messagebox.askyesno('ลบออกจากคิว', 'ลบ %d แถวออกจากคิว? (ไม่ได้ลบในชีท · กด ↻ อ่านใหม่ = กลับมา)' % len(ts)):
+            return
+        ids = {id(t) for t in ts}
+        self.st['rows'] = [t for t in self.st['rows'] if id(t) not in ids]
+        self._save()
+        self.refresh()
+
+    def edit_selected(self):
+        ts = self._sel()
+        if len(ts) != 1:
+            return messagebox.showinfo('เลือกแถว', 'คลิกเลือก 1 แถวที่จะแก้ก่อนนะ (หรือดับเบิลคลิกที่แถวเลย)')
+        self.edit(ts[0])
+
+    def bundle_from_tab(self):
+        if self.running:
+            return
+        rows = self.st.get('rows') or []
+        filled, mism = self._link(rows, self.st.get('file') or '')
+        if filled:
+            self._save()
+            self.refresh()
+        empty = sum(1 for t in rows if not t.get('made') for r in t.get('rewards') or []
+                    if r.get('use', True) and not re.fullmatch(r'\d+', str(r.get('bundle') or '')))
+        messagebox.showinfo('เลข Bundle', 'เติมเลข Bundle ให้ %d รางวัล%s%s' % (
+            len(filled), ('\nไม่ตรงกับที่ชีทเขียน %d รางวัล (ไม่ทับ — ดูใน Log)' % len(mism)) if mism else '',
+            ('\nยังไม่มีเลข %d รางวัล — สร้างบันเดิลในแท็บสร้าง Bundle ก่อน หรือดับเบิลคลิกแถวเพื่อพิมพ์เอง' % empty)
+            if empty else ''))
+
+    # ---------- หน้าต่างแก้ไข ----------
+    def edit(self, t):
+        if self.running:
+            return messagebox.showinfo('กำลังทำงาน', 'รอให้งานเสร็จก่อนค่อยแก้นะ')
+        a = self.app
+        top = tk.Toplevel(a.root)
+        top.title('แก้ไข Event — ชีท %s' % t.get('sheet'))
+        top.configure(bg=C['bg'])
+        top.transient(a.root)
+        body = tk.Frame(top, bg=C['bg'])
+        body.pack(fill='both', expand=True, padx=16, pady=12)
+        fields = (('ชื่อ Event (ไทย)', 'name_th', 44), ('ชื่อ Event (อังกฤษ)', 'name_en', 44),
+                  ('วันเริ่มกิจกรรม (YYYY-MM-DD HH:MM:SS)', 'act_start', 22), ('วันสิ้นสุดกิจกรรม', 'act_end', 22),
+                  ('วันเริ่มรับรางวัล', 'start', 22), ('วันสิ้นสุดการรับรางวัล', 'end', 22),
+                  ('จำกัดต่อผู้เล่น (การรับรางวัล)', 'plim', 8), ('จำนวนรางวัลทั้งหมด (ใช้เมื่อเปิด จำกัดจำนวน)', 'total', 8),
+                  ('จำกัดต่อผู้เล่น (ของรางวัลแต่ละชุด)', 'rlim', 8))
+        ents = {}
+        for r, (lbl, k, w) in enumerate(fields):
+            tk.Label(body, text=lbl, bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w').grid(
+                row=r, column=0, sticky='w', pady=2)
+            e = a._entry(body, width=w)
+            e.insert(0, str(t.get(k) or ''))
+            e.grid(row=r, column=1, sticky='w', padx=(12, 0), pady=2, ipady=2)
+            ents[k] = e
+        r = len(fields)
+        tk.Label(body, text='ผู้มีสิทธิ์รับรางวัล', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9)).grid(
+            row=r, column=0, sticky='w')
+        cb = ttk.Combobox(body, values=list(EVT_WHO), state='readonly', width=10, font=FM)
+        cb.set(t.get('who') if t.get('who') in EVT_WHO else 'WINNER')
+        cb.grid(row=r, column=1, sticky='w', padx=(12, 0), pady=3)
+        swf = tk.Frame(body, bg=C['bg'])
+        swf.grid(row=r + 1, column=0, columnspan=2, sticky='w', pady=(6, 0))
+        tk.Label(swf, text='สถานะ:', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9)).pack(side='left')
+        svs = {}
+        for k, lbl in EVT_SW:
+            v = tk.BooleanVar(value=bool(t.get(k)))
+            svs[k] = v
+            tk.Checkbutton(swf, variable=v, text=lbl, bg=C['bg'], fg=C['fg'], selectcolor=C['input'],
+                           activebackground=C['bg'], activeforeground=C['fg'], font=FM, bd=0,
+                           highlightthickness=0).pack(side='left', padx=(10, 0))
+        tk.Label(body, text='ของรางวัล — คลิกช่อง “ใช้” = เอา/ไม่เอา · ดับเบิลคลิกช่องชื่อ / Bundle เพื่อแก้', bg=C['bg'],
+                 fg=C['dim'], font=('Segoe UI', 9)).grid(row=r + 2, column=0, columnspan=2, sticky='w', pady=(10, 2))
+        cols = (('use', 'ใช้', 40), ('name', 'ชื่อรางวัล (ไทย = อังกฤษ)', 340), ('bundle', 'Bundle', 70),
+                ('items', 'ไอเทม', 50))
+        tv = ttk.Treeview(body, columns=[c[0] for c in cols], show='headings', style='TR.Treeview', height=6)
+        for c, h, w in cols:
+            tv.heading(c, text=h)
+            tv.column(c, width=w, anchor='w')
+        tv.grid(row=r + 3, column=0, columnspan=2, sticky='nsew')
+        work = {}
+        for x in t.get('rewards') or []:
+            iid = tv.insert('', 'end', values=(PD_CB_ON if x.get('use', True) else PD_CB_OFF, x.get('name') or '',
+                                               x.get('bundle') or '—', x.get('items', 0)))
+            work[iid] = {'x': x, 'use': x.get('use', True), 'name': str(x.get('name') or ''),
+                         'bundle': str(x.get('bundle') or '')}
+
+        def _redraw(iid):
+            w = work[iid]
+            tv.item(iid, values=(PD_CB_ON if w['use'] else PD_CB_OFF, w['name'], w['bundle'] or '—', w['x'].get('items', 0)))
+
+        def _cell(ev):
+            iid, col = tv.identify_row(ev.y), tv.identify_column(ev.x)
+            if not iid:
+                return None
+            if col == '#1':
+                work[iid]['use'] = not work[iid]['use']
+                _redraw(iid)
+                return 'break'
+            return None
+
+        def _edit_cell(ev):
+            iid, col = tv.identify_row(ev.y), tv.identify_column(ev.x)
+            if not iid or col not in ('#2', '#3'):
+                return
+            key = 'name' if col == '#2' else 'bundle'
+            x0, y0, w0, h0 = tv.bbox(iid, col)
+            e = tk.Entry(tv, font=FM)
+            e.insert(0, work[iid][key])
+            e.place(x=x0, y=y0, width=w0, height=h0)
+            e.focus_set()
+
+            def _ok(*_):
+                work[iid][key] = e.get().strip()
+                _redraw(iid)
+                e.destroy()
+            e.bind('<Return>', _ok)
+            e.bind('<FocusOut>', _ok)
+            e.bind('<Escape>', lambda *_: e.destroy())
+        tv.bind('<Button-1>', _cell)
+        tv.bind('<Double-1>', _edit_cell)
+        err = tk.Label(body, text='', bg=C['bg'], fg=C['err'], font=('Segoe UI', 9), anchor='w', justify='left')
+        err.grid(row=r + 4, column=0, columnspan=2, sticky='w', pady=(8, 0))
+
+        def _save():
+            v = {k: e.get().strip() for k, e in ents.items()}
+            for k in ('act_start', 'act_end', 'start', 'end'):
+                if v[k] and not pd_dt_ok(v[k]):
+                    err.config(text='วันที่ต้องเป็นแบบ 2026-11-11 12:00:00')
+                    return
+                v[k] = pd_dt_ok(v[k]) or ''
+            for k in ('plim', 'rlim', 'total'):
+                if v[k] and not re.fullmatch(r'\d+', v[k]):
+                    err.config(text='จำกัดต่อผู้เล่น / จำนวนรางวัลทั้งหมด ต้องเป็นตัวเลข')
+                    return
+            if any(w['bundle'] and not re.fullmatch(r'\d+', w['bundle']) for w in work.values()):
+                err.config(text='เลข Bundle ต้องเป็นตัวเลข')
+                return
+            for k in ('name_th', 'name_en', 'act_start', 'act_end', 'start', 'end'):
+                if v[k] != str(t.get(k) or ''):
+                    t[k + '_user'] = True
+                    if k in ('name_th', 'name_en'):
+                        t['name_user'] = True
+                    t[k] = v[k]
+            if t.get('start_user') or t.get('end_user'):
+                t['start_user'] = True
+            opts = {'plim': v['plim'], 'rlim': v['rlim'], 'total': v['total'] or '0', 'who': cb.get()}
+            opts.update({k: bool(sv.get()) for k, sv in svs.items()})
+            if any(str(opts[k]) != str(t.get(k)) for k in opts):
+                t.update(opts)
+                t['opt_user'] = True
+            for w in work.values():
+                x = w['x']
+                x['use'] = w['use']
+                if w['name'] != str(x.get('name') or ''):
+                    x['name'], x['name_user'] = w['name'], True
+                if w['bundle'] != str(x.get('bundle') or ''):
+                    x['bundle'], x['bundle_src'] = w['bundle'], ('พิมพ์เอง' if w['bundle'] else '')
+            self._save()
+            self.refresh()
+            top.destroy()
+        foot = tk.Frame(top, bg=C['card'])
+        foot.pack(fill='x', side='bottom')
+        a._btn(foot, 'บันทึก', _save, primary=True).pack(side='right', padx=14, pady=10, ipadx=18, ipady=3)
+        a._btn(foot, 'ยกเลิก', top.destroy).pack(side='right', pady=10, ipadx=12, ipady=3)
+        top.bind('<Escape>', lambda e: top.destroy())
+        try:
+            top.update_idletasks()
+            x = a.root.winfo_rootx() + max(0, (a.root.winfo_width() - top.winfo_reqwidth()) // 2)
+            y = a.root.winfo_rooty() + max(0, (a.root.winfo_height() - top.winfo_reqheight()) // 4)
+            top.geometry('+%d+%d' % (x, y))
+            top.grab_set()
+        except Exception:
+            pass
+
+    # ---------- ลงมือ ----------
+    def _busy(self):
+        a = self.app
+        return bool(self.running or a.running or getattr(a, 'c_running', False) or a.b_running
+                    or getattr(a, 'w_running', False) or getattr(getattr(a, 'gen', None), 'w_running', False))
+
+    def _hold(self):
+        try:
+            h = max(0, int(float(self.v_hold.get() or 0)))
+        except Exception:
+            h = 8
+        try:
+            self.app.prefs['evt_hold'] = str(h)
+            save_prefs(self.app.prefs)
+        except Exception:
+            pass
+        return h
+
+    def create(self):
+        a = self.app
+        if chrome_held_ask(a, self.create):
+            return
+        if self._busy():
+            return messagebox.showinfo('กำลังทำงาน', 'รองานที่ทำอยู่ให้เสร็จก่อนนะ (ใช้ Chrome ตัวเดียวกัน)')
+        use = [t for t in self.st.get('rows') or [] if t.get('use')]
+        if not use:
+            return messagebox.showwarning('ยังไม่ได้เลือก', 'ติ๊ก ☑ Event ที่จะสร้างก่อนนะ')
+        run = a._precheck('สร้าง Event', 'Event', use, self._issues, lambda t: t.get('name_th') or t.get('sheet') or '?')
+        if run is None:
+            return
+        do = bool(self.v_do.get())
+        if do:
+            msg = 'จะสร้าง Event จริงบนเว็บ %d ตัว\n\n' % len(run)
+            msg += '\n'.join('• %s  (รางวัล %d · รับรางวัล %s → %s · %s)' % (
+                t['name_th'], len([r for r in t['rewards'] if r.get('use', True)]), t['start'][:16], t['end'][:16],
+                t.get('who')) for t in run)
+            msg += '\n\nตรวจเลข Bundle / วันที่ / สถานะ เรียบร้อยแล้วใช่ไหม?'
+            if not messagebox.askyesno('ยืนยัน', msg):
+                return
+        hold = self._hold()
+        jobs = [(t.get('key'), json.loads(json.dumps(t))) for t in run]
+        self.running = True
+        self.cancel = False
+        a.b_running = True
+        self.btn_run.config(state='disabled')
+        self.btn_stop.config(state='normal')
+        a.nb.select(a.tab_log)
+        a.log('=' * 46, 'STEP')
+        a.log('สร้าง Event: %s %d ตัว' % ('เริ่มสร้างจริง' if do else 'เริ่มทดสอบกรอก', len(jobs)), 'STEP')
+        log_event('evt_start', count=len(jobs), commit=do)
+        threading.Thread(target=self._thread, args=(jobs, do, hold), daemon=True).start()
+
+    def stop(self):
+        self.cancel = True
+        self.app.log('สร้าง Event: กำลังยกเลิก (จบขั้นที่ทำอยู่ก่อน)...', 'WARN')
+
+    def _thread(self, jobs, do, hold):
+        try:
+            asyncio.run(self._work(jobs, do, hold))
+        except Exception as ex:
+            log_event('error', where='evt', message=str(ex)[:300])
+            self.app.log('ผิดพลาด: ' + str(ex), 'ERR')
+            self.app.log(traceback.format_exc(), 'ERR')
+        finally:
+            def _rst():
+                self.running = False
+                self.app.b_running = False
+                try:
+                    self.btn_run.config(state='normal')
+                    self.btn_stop.config(state='disabled')
+                    self._save()
+                    self.refresh()
+                except Exception:
+                    pass
+            self.app.root.after(0, _rst)
+
+    async def _work(self, jobs, do, hold):
+        a = self.app
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch_persistent_context(**launch_kwargs(False))
+            page = browser.pages[0] if browser.pages else await browser.new_page()
+            try:
+                await self._run_rows(page, jobs, do, hold)
+            finally:
+                try:
+                    await finish_chrome(a, browser, 'สร้าง Event')
+                except Exception:
+                    pass
+
+    def _done_one(self, key, t, res, do, at):
+        x = next((q for q in self.st.get('rows') or [] if q.get('key') == key), None)
+        if do and (res.get('created') or res.get('unsure') or res.get('user_made')):
+            m = {'id': res.get('id') or '', 'slug': res.get('slug') or '', 'at': at, 'unsure': bool(res.get('unsure'))}
+            if x is not None:
+                x['made'] = m
+                x['use'] = False
+            self.st.setdefault('made', []).append({'key': key, 'name': t.get('name_th', ''), 'id': m['id'],
+                                                   'slug': m['slug'], 'at': at, 'unsure': m['unsure']})
+            self.st['made'] = self.st['made'][-EVT_KEEP:]
+        if x is not None:
+            x['last'] = {'ok': bool(res.get('ok')), 'do': bool(do), 'at': at, 'why': res.get('why') or ''}
+        self._save()
+        self.refresh()
+
+    def _ask(self, name, unknown, tries=3):
+        """ถามคนตอนสร้างไม่สำเร็จ (เรียกจากเธรดงาน) — คืน retry / made / skip / stop"""
+        ev = threading.Event()
+        box = {'v': 'stop'}
+
+        def _show():
+            try:
+                if unknown:
+                    r = messagebox.askyesnocancel(
+                        'เช็กบนเว็บก่อนนะ',
+                        'กดสร้าง “%s” แล้ว แต่ไม่รู้ผลจากเว็บ\nไปดูในหน้า Events บนเว็บก่อน\n\n'
+                        'Yes  = ยังไม่มีบนเว็บ → สร้างใหม่\nNo   = มีบนเว็บแล้ว → ไปตัวถัดไป\nCancel = หยุดทั้งหมด' % name,
+                        icon='warning')
+                    box['v'] = 'retry' if r else ('made' if r is False else 'stop')
+                else:
+                    r = messagebox.askyesnocancel(
+                        'สร้างไม่สำเร็จ',
+                        'ลองกรอก “%s” %d รอบแล้วยังไม่ผ่าน (ยังไม่ได้กดสร้าง — ดู Log)\n\n'
+                        'Yes  = ลองใหม่อีกรอบ\nNo   = ข้ามตัวนี้ไปก่อน\nCancel = หยุดทั้งหมด' % (name, tries),
+                        icon='warning')
+                    box['v'] = 'retry' if r else ('skip' if r is False else 'stop')
+            except Exception:
+                box['v'] = 'stop'
+            finally:
+                ev.set()
+        self.app.root.after(0, _show)
+        ev.wait()
+        return box['v']
+
+    async def _one_sure(self, run, page, t, hold, max_tries=3):
+        """สร้างจริงแบบเน้นถูก: ยังไม่ได้สร้าง ห้ามข้าม — ไม่ผ่านก่อนกดสร้าง ลองใหม่เอง แล้วถาม · ไม่รู้ผล = ถามก่อน ห้ามกดซ้ำเอง"""
+        a = self.app
+        tries = 0
+        res = {}
+        while not self.cancel:
+            tries += 1
+            try:
+                res = await run.make_evt(page, t, True, hold)
+            except Exception as ex:
+                res = {'ok': False, 'created': False, 'unsure': False, 'id': '', 'why': str(ex)[:160], 'state': 'pre'}
+                a.log('   ✗ ' + str(ex)[:200], 'ERR')
+            if res.get('created') or self.cancel:
+                return res
+            if res.get('state') == 'unknown' or res.get('unsure'):
+                ans = await asyncio.to_thread(self._ask, t.get('name_th'), True)
+            elif tries < max_tries:
+                a.log('   ↻ ยังไม่ได้สร้าง — โหลดหน้าใหม่แล้วลองอีกรอบ (%d/%d)' % (tries + 1, max_tries), 'WARN')
+                await page.wait_for_timeout(2000)
+                continue
+            else:
+                ans = await asyncio.to_thread(self._ask, t.get('name_th'), False, max_tries)
+            if ans == 'retry':
+                tries = 0
+                a.log('   ↻ ผู้ใช้ให้ลองใหม่', 'WARN')
+                continue
+            if ans == 'made':
+                a.log('   ✓ ผู้ใช้เช็กแล้วว่ามีบนเว็บแล้ว — ไปตัวถัดไป', 'OK')
+                return dict(res, ok=True, unsure=False, user_made=True)
+            if ans == 'skip':
+                a.log('   ⚠ ผู้ใช้สั่งข้ามตัวนี้ (ยังไม่ได้สร้าง)', 'WARN')
+                return dict(res, unsure=False)
+            self.cancel = True
+            a.log('   ■ ผู้ใช้สั่งหยุด', 'WARN')
+            return dict(res, unsure=False)
+        return res
+
+    async def _run_rows(self, page, jobs, do, hold):
+        """สร้างทีละตัว (แยกออกมาให้เทสกับหน้าเว็บจำลองได้)"""
+        a = self.app
+        run = EvtRunner(a)
+        object.__setattr__(run, '_tab', self)
+        okc = errc = 0
+        for i, (key, t) in enumerate(jobs, 1):
+            if self.cancel:
+                a.log('ยกเลิกแล้ว', 'WARN')
+                break
+            rws = [r for r in t.get('rewards') or [] if r.get('use', True)]
+            a.set_progress(i - 1, len(jobs), (t.get('name_th') or '')[:30])
+            a.log('[%d/%d] %s  (รางวัล %d · รับรางวัล %s → %s · %s)'
+                  % (i, len(jobs), t.get('name_th'), len(rws), t.get('start'), t.get('end'), t.get('who')), 'STEP')
+            if do:
+                res = await self._one_sure(run, page, t, hold)
+            else:
+                try:
+                    res = await run.make_evt(page, t, False, hold)
+                except Exception as ex:
+                    res = {'ok': False, 'why': str(ex)[:160]}
+                    a.log('   ✗ ' + str(ex)[:200], 'ERR')
+            at = datetime.now().strftime('%d/%m %H:%M')
+            a.root.after(0, lambda k=key, tt=t, r=res, s=at: self._done_one(k, tt, r, do, s))
+            okc, errc = (okc + 1, errc) if res.get('ok') else (okc, errc + 1)
+        a.set_progress(len(jobs), len(jobs), 'เสร็จ')
+        a.log('สร้าง Event: จบ — %s %d · ไม่ผ่าน %d' % ('สร้างแล้ว' if do else 'ทดสอบผ่าน', okc, errc),
+              'OK' if not errc else 'WARN')
+        log_event('evt_done', ok=okc, fail=errc, commit=bool(do))
+        return okc, errc
+
+    def help(self):
+        messagebox.showinfo('วิธีใช้ — 🎉 สร้าง Event', (
+            '1) 📂 นำเข้าไฟล์ชีท → เลือกชีท (ชีทที่ขึ้น ★ = มีตารางรางวัล · 1 ชีท = 1 Event · ไฟล์ไหน ชีทแบบไหนก็ได้)\n'
+            '   ชื่อ Event = หัวเรื่องบนสุดของชีท · ของรางวัล = ทุกตาราง fdItemNum (ชื่อ = ชื่อ Event - หัวตาราง)\n'
+            '   ช่วงรับรางวัล = ป้าย “ระยะเวลากดรับของรางวัล” · ช่วงกิจกรรม = ช่วงเดียวกัน · ปีย่อ 69 = 2026 (แปลงให้ + บอกใน Log)\n'
+            '2) ตรวจตาราง: แถวแดง ⛔ = น่าจะผิด · เหลือง ⚠ = ควรเช็ก · ดับเบิลคลิก = แก้ชื่อ / วันที่ / สถานะ / '
+            'ผู้มีสิทธิ์ / จำกัดต่อผู้เล่น / ชื่อรางวัล / เลข Bundle / เอา-ไม่เอาของรางวัล\n'
+            '   ชีทยังไม่มีเลข Bundle → กด 🔗 (เอาจากแท็บสร้าง Bundle: ตารางเดียวกัน / ชื่อตรงเป๊ะ)\n'
+            '3) ▶ เริ่มทำงาน — ไม่ติ๊ก “สร้างจริง” = กรอกให้ดูแล้วไม่กดสร้าง\n'
+            '   ติ๊ก “กดปุ่ม สร้าง Event จริง” = กดสร้าง (ยังไม่ได้สร้างจะไม่ข้าม — ลองใหม่เอง / ถามก่อน)\n\n'
+            'ค่าเริ่มต้น (แบบในคลิป): เปิดใช้งาน ✓ · โหมดทดสอบ ✓ · จำกัดจำนวน ✗ · แสดงเฉพาะผู้ชนะ ✓ · WINNER · '
+            'จำกัดต่อผู้เล่น 1\nไม่แตะ: Slug · รูปภาพ · รายละเอียด · คำอธิบายรางวัล · เงื่อนไขการรับรางวัล'))
 
 
 if __name__ == '__main__':
