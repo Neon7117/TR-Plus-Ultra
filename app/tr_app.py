@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.7.1 : เชื่อมแท็บ — ปุ่ม “ส่งไป…” ค้นหา / สร้าง Item → สร้าง Bundle · สร้าง Bundle → Product / WR Master / Item Code / Check in Booster (เปิดหน้านำเข้าไฟล์เดิม ชีทเดิม ให้เลย)
 V1.7.0 : เชื่อมแท็บ — ค้นหา/สร้าง Item → สร้าง Bundle (Aztek Item Id) · สร้าง Bundle → Product / WR Master / Item Code / Check in Booster (Bundle ID) ไม่ต้องกรอกเลขลงเอกสารแล้วโหลดใหม่
 V1.5.5 : Item Code — กด ↺ รีเซ็ตเวลาเริ่ม แล้วกด Actions > ล็อก ให้ด้วย เหมือน WR Master
 V1.5.4 : หลักฐานเทส — ปุ่ม 🧹 ล้างคิว ลบทุกเซ็ตในรายการทีเดียว (ไม่แตะไฟล์ชีท/ภาพที่เซฟ)
@@ -6827,6 +6828,7 @@ class App:
         ml = self.cv_mail.get().strip()
         got = [row_to_item(r, t, sfx, pr, ml) for r in dlg.result]
         self.cq.extend(got)
+        link_note('create', path, dlg)                         # v1.7.1 ปุ่มส่งไปสร้าง Bundle
         self._c_refresh()
         self.log(f'นำเข้าเข้าคิวสร้างไอเทม {len(got)} รายการ (รวม {len(self.cq)})', 'OK')
         self._pre_log('สร้าง Item', got, lambda d: chk_active(d) + c_dyn_checks(d),
@@ -11584,6 +11586,7 @@ class App:
                 return
             self.imported = rows
             self.imp_src = src
+            link_note('search', path, dlg if not path.lower().endswith('.csv') else None)   # v1.7.1 ปุ่มส่งไปสร้าง Bundle
             self.lbl_file.config(text=f'{src} — {len(rows)} รายการ')
             self.refresh_imp()
             self._pre_log('ค้นหา', rows, chk_active,
@@ -21312,7 +21315,7 @@ class CibTab:
 #      ของเดิมไม่แตะ: ตัวอ่านชีททุกตัวเหมือนเดิม — ตรงนี้แค่ “เติมเลขลงช่องว่าง” ให้เหมือนคนกรอกในเอกสาร
 #      แล้วส่งให้ตัวอ่านเดิมอ่านตามปกติ จากนั้นตรวจซ้ำว่าเลขที่เติมเข้าไปถูกหยิบจริง
 # ============================================================================
-LINK = {'app': None, 'bt': []}          # app ที่เปิดอยู่ · บันเดิล ↔ ตารางในชีท (จดตอนนำเข้า)
+LINK = {'app': None, 'bt': [], 'src': {}, 'n': 0}          # app ที่เปิดอยู่ · บันเดิล ↔ ตารางในชีท (จดตอนนำเข้า)
 _LINK_ID_LBL = ('aztekitemid', 'aztekid', 'aztek', 'itemid', 'id')
 
 
@@ -21643,6 +21646,7 @@ class LinkBundleImportDialog(BundleSplitImportDialog):
         self._link_reps = reps
 
     def _ok(self):
+        link_note('bundle', getattr(self, 'path', '') or '', sheets=self._selected())   # v1.7.1 ปุ่มส่งไป…
         BundleSplitImportDialog._ok(self)
         app = LINK.get('app')
         for b in self.result or []:
@@ -21733,6 +21737,220 @@ def link_install(app):
                      lambda c=ctx, m=mode: link_wr_button(c, m)).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
         except Exception as ex:
             app.log('เชื่อมแท็บ %s ไม่สำเร็จ: %s' % (mode, str(ex)[:80]), 'WARN')
+    try:
+        link_send_buttons(app)                       # v1.7.1 ปุ่ม “ส่งไป…”
+    except Exception as ex:
+        app.log('วางปุ่มส่งไป… ไม่สำเร็จ: %s' % str(ex)[:80], 'WARN')
+
+
+# ---- v1.7.1 ปุ่ม “ส่งไป…” — เปิดหน้านำเข้าของแท็บปลายทาง ด้วยไฟล์เดิม + ชีทเดิมที่เลือกไว้ให้ ----
+#   ไม่แก้ตัวนำเข้าเดิม: กดปุ่ม = เหมือนกดปุ่มนำเข้าของแท็บนั้นเอง แค่ข้ามช่องเลือกไฟล์ (ใช้ไฟล์เดิม)
+#   แล้วติ๊กชีทเดิมให้ในหน้าต่าง (เฉพาะชีทที่แท็บนั้นอ่านได้ ★) · ผู้ใช้ดูแล้วกด “ใช้ข้อมูลนี้” เอง
+LINK_DEST = {'bundle': '📦 สร้าง Bundle', 'shop': '🛍 สร้าง Product', 'wr': '🎟 WR Master',
+             'gen': '🎲 Item Code', 'cib': '🗓 Check in Booster'}
+_LINK_LB_HEAD = re.compile(r'^(★ \(\d+\)  |     )')
+
+
+def link_note(kind, path, dlg=None, sheets=None):
+    """จดว่าแท็บไหนนำเข้าไฟล์ไหน ชีทไหน (ล่าสุด) — พังก็เงียบ ไม่พาการนำเข้าพัง"""
+    try:
+        if not path:
+            return
+        if sheets is None:
+            sheets = (getattr(dlg, 'sheet_names', None) or
+                      ([dlg.sheet_name] if getattr(dlg, 'sheet_name', None) else [])) if dlg is not None else []
+        LINK['n'] = LINK.get('n', 0) + 1
+        LINK.setdefault('src', {})[kind] = {'path': path, 'sheets': list(sheets or []), 'n': LINK['n']}
+    except Exception:
+        pass
+
+
+def link_src_for(kind):
+    """ไฟล์ต้นทางของปุ่ม · สร้าง Item = ไฟล์ล่าสุดระหว่าง สร้าง Item กับ ค้นหา (ตัวที่ไม่เจอส่งมาจากค้นหา)"""
+    s = LINK.get('src') or {}
+    if kind == 'create':
+        c = [s[k] for k in ('create', 'search') if s.get(k)]
+        return max(c, key=lambda x: x.get('n', 0)) if c else None
+    return s.get(kind)
+
+
+def link_dest(app, dest):
+    """(แท็บ, ฟังก์ชันนำเข้าเดิมของแท็บนั้น)"""
+    if dest == 'bundle':
+        return app.tab_bundle, app.b_import
+    if dest == 'wr':
+        return app.tab_wr, app.w_import
+    if dest == 'gen':
+        g = getattr(app, 'gen', None)
+        return (app.tab_gen, g.w_import) if g is not None else (None, None)
+    if dest == 'shop':
+        t = getattr(app, 'shop', None)
+        return (app.tab_shop, t.open_file) if t is not None else (None, None)
+    if dest == 'cib':
+        t = getattr(app, 'cib', None)
+        return (app.tab_cib, t.open_file) if t is not None else (None, None)
+    return None, None
+
+
+def link_lb_name(text):
+    return _LINK_LB_HEAD.sub('', text or '', count=1)
+
+
+def link_preselect(app, before, sheets, live, tries=0, star_only=True):
+    """รอหน้าต่างนำเข้าใหม่สแกนไฟล์เสร็จ แล้วติ๊กชีทเดิมให้ — ผลจดไว้ที่ LINK['pre']
+    star_only: ติ๊กเฉพาะชีทที่แท็บนั้นอ่านเจอ (★) · แท็บสร้าง Bundle ติ๊กทุกชีทเดิม เพราะชีทที่ยังไม่กรอก Aztek Item Id
+    ตัวสแกนจะไม่ขึ้น ★ (เลขเติมให้ตอนอ่าน)"""
+    if not live.get('on') or tries > 1600:
+        return
+    root = app.root
+    lb = None
+    try:
+        for w in root.winfo_children():
+            if isinstance(w, tk.Toplevel) and str(w) not in before and w.winfo_exists():
+                stack = [w]
+                while stack and lb is None:
+                    x = stack.pop()
+                    if isinstance(x, tk.Listbox) and str(x.cget('selectmode')) == 'multiple':
+                        lb = x
+                    stack.extend(x.winfo_children())
+    except Exception:
+        lb = None
+    if lb is None or lb.size() == 0:
+        root.after(150, lambda: link_preselect(app, before, sheets, live, tries + 1, star_only))
+        return
+    want = {}
+    for s in sheets:
+        want.setdefault(clean_text(s) or s, s)
+        want.setdefault(s, s)
+    got, skip = [], []
+    for i in range(lb.size()):
+        t = lb.get(i)
+        nm = link_lb_name(t)
+        if nm in want:
+            if t.startswith('★') or not star_only:
+                lb.selection_set(i)
+                got.append(want[nm])
+            else:
+                skip.append(want[nm])
+    lost = [s for s in sheets if s not in got and s not in skip]
+    LINK['pre'] = {'got': got, 'skip': skip, 'lost': lost}
+    live['on'] = False
+    if got:
+        try:
+            lb.see(lb.curselection()[0])
+        except Exception:
+            pass
+        lb.event_generate('<<ListboxSelect>>')
+        app.log('🔗 เลือกชีทให้แล้ว %d ชีท: %s' % (len(got), ', '.join(got[:6]) + (' …' if len(got) > 6 else '')), 'INFO')
+    if skip:
+        app.log('🔗 ชีทที่แท็บนี้อ่านไม่เจอ (ไม่ติ๊กให้): %s' % ', '.join(skip[:6]), 'WARN')
+    if lost:
+        app.log('🔗 ไม่เจอชีทในไฟล์แล้ว: %s' % ', '.join(lost[:6]), 'WARN')
+    if not got:
+        app.log('🔗 ไม่มีชีทเดิมที่แท็บนี้อ่านได้ — เลือกชีทเองในหน้าต่างนะ', 'WARN')
+
+
+def link_open(app, fn, path, sheets, star_only=True):
+    """เรียกปุ่มนำเข้าเดิมของแท็บ โดยช่องเลือกไฟล์ตอบ path ให้ครั้งเดียว (ไม่โชว์หน้าเลือกไฟล์)"""
+    orig = filedialog.askopenfilename
+    used = {'n': 0}
+
+    def once(*a, **k):
+        filedialog.askopenfilename = orig
+        used['n'] += 1
+        return path
+    live = {'on': True}
+    before = set()
+    try:
+        before = {str(w) for w in app.root.winfo_children()}
+    except Exception:
+        pass
+    LINK['pre'] = None
+    filedialog.askopenfilename = once
+    try:
+        app.root.after(150, lambda: link_preselect(app, before, list(sheets or []), live, 0, star_only))
+        fn()
+    finally:
+        filedialog.askopenfilename = orig
+        live['on'] = False
+    return used['n']
+
+
+def link_send(app, dest, src_kind):
+    """ปุ่ม “ส่งไป…”: กระโดดไปแท็บปลายทาง + เปิดหน้านำเข้าด้วยไฟล์เดิม ชีทเดิม (เลขเติมให้ตอนนำเข้าเหมือน v1.7.0)"""
+    nm = LINK_DEST.get(dest, dest)
+    src = link_src_for(src_kind)
+    if not src or not src.get('path'):
+        return messagebox.showinfo('ส่งไป ' + nm, 'ยังไม่มีไฟล์ให้ส่ง — นำเข้าไฟล์ชีทในแท็บนี้ก่อนนะ')
+    path = src['path']
+    if path.lower().endswith('.csv'):
+        return messagebox.showinfo('ส่งไป ' + nm, 'ไฟล์นี้เป็น .csv — แท็บ %s นำเข้าได้แค่ Excel (.xlsx) นะ' % nm)
+    if not os.path.exists(path):
+        return messagebox.showwarning('ส่งไป ' + nm, 'ไม่เจอไฟล์เดิมแล้ว:\n%s\n\nนำเข้าไฟล์ใหม่แทนนะ' % path)
+    tab, fn = link_dest(app, dest)
+    if fn is None:
+        return messagebox.showwarning('ส่งไป ' + nm, 'แท็บ %s ยังไม่พร้อม (ดูใน Log)' % nm)
+    try:
+        app.nb.select(tab)
+    except Exception:
+        pass
+    app.log('🔗 ส่งไป %s: เปิดหน้านำเข้า %s (%s)' % (nm, os.path.basename(path),
+                                                ', '.join(src.get('sheets') or []) or 'เลือกชีทเอง'), 'INFO')
+    return link_open(app, fn, path, src.get('sheets') or [], dest != 'bundle')
+
+
+def link_find_btn(root, text):
+    stack = [root]
+    while stack:
+        w = stack.pop()
+        try:
+            if isinstance(w, tk.Button) and text in str(w.cget('text')):
+                return w
+            stack.extend(w.winfo_children())
+        except Exception:
+            pass
+    return None
+
+
+def link_menu_show(app, btn):
+    m = LINK.get('menu')
+    if m is None:
+        m = tk.Menu(app.root, tearoff=0, bg=C['card'], fg=C['fg'], activebackground=C['accent'],
+                    activeforeground='white', font=('Segoe UI', 10))
+        for d in ('shop', 'wr', 'gen', 'cib'):
+            m.add_command(label='ส่งไป ' + LINK_DEST[d], command=lambda d=d: link_send(app, d, 'bundle'))
+        LINK['menu'] = m
+    try:
+        m.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height())
+    finally:
+        try:
+            m.grab_release()
+        except Exception:
+            pass
+
+
+def link_send_buttons(app):
+    """วางปุ่ม “ส่งไป…” ข้างปุ่มเดิม (หาจากข้อความบนปุ่ม ไม่ยึดตำแหน่ง) — ไม่เจอปุ่มเดิม = ไม่วาง"""
+    out = {}
+    b = link_find_btn(app.tab_search, 'ตัวที่ไม่เจอ → คิวสร้าง Item')
+    if b is not None:
+        out['search'] = app._btn(b.master, '📦  ส่งไปสร้าง Bundle ›', lambda: link_send(app, 'bundle', 'search'))
+        out['search'].pack(side='right', padx=6, ipadx=8, ipady=2)
+    b = link_find_btn(app.tab_create, 'คัดลอก Aztek Item Id')
+    if b is not None:
+        out['create'] = app._btn(b.master, '📦  ส่งไปสร้าง Bundle ›', lambda: link_send(app, 'bundle', 'create'))
+        out['create'].pack(side='left', padx=(6, 0), ipadx=8, ipady=2)
+    b = link_find_btn(app.tab_bundle, 'คัดลอกเลข Bundle')
+    if b is not None:
+        bb = app._btn(b.master, '📤  ส่งไป… ▾', lambda: None)
+        bb.config(command=lambda w=bb: link_menu_show(app, w))
+        bb.pack(side='left', padx=(6, 0), ipadx=8, ipady=2)
+        out['bundle'] = bb
+    LINK['btns'] = out
+    for k in ('search', 'create', 'bundle'):
+        if k not in out:
+            app.log('วางปุ่มส่งไป… (%s) ไม่ได้ — หาปุ่มเดิมไม่เจอ' % k, 'WARN')
+    return out
 
 
 if __name__ == '__main__':
