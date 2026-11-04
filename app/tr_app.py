@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.7.0 : เชื่อมแท็บ — ค้นหา/สร้าง Item → สร้าง Bundle (Aztek Item Id) · สร้าง Bundle → Product / WR Master / Item Code / Check in Booster (Bundle ID) ไม่ต้องกรอกเลขลงเอกสารแล้วโหลดใหม่
 V1.5.5 : Item Code — กด ↺ รีเซ็ตเวลาเริ่ม แล้วกด Actions > ล็อก ให้ด้วย เหมือน WR Master
 V1.5.4 : หลักฐานเทส — ปุ่ม 🧹 ล้างคิว ลบทุกเซ็ตในรายการทีเดียว (ไม่แตะไฟล์ชีท/ภาพที่เซฟ)
 V1.5.3 : หลักฐานเทส — กดบันทึกภาพตอนยังติ๊กตรวจไม่ครบ = เด้งเตือนแยกชัดๆ (บอกรายการที่ยังไม่ติ๊ก · ปุ่มหลัก = กลับไปติ๊กก่อน) · แถวที่ยังไม่ติ๊กเป็นสีเหลือง
@@ -6158,6 +6159,11 @@ class App:
             tk.Label(self.tab_cib, text='แท็บนี้เปิดไม่ขึ้น: %s' % str(ex)[:200], bg=C['bg'],
                      fg=C['err'], font=FM, wraplength=900, justify='left').pack(padx=20, pady=20)
             self.log('แท็บ Check in Booster เปิดไม่ขึ้น: %s' % str(ex)[:200], 'ERR')
+        # v1.7.0 เชื่อมแท็บ (ส่งเลขถึงกัน) — ของเสริม พังเองก็ไม่พาแท็บเดิมพัง
+        try:
+            link_install(self)
+        except Exception as ex:
+            self.log('เชื่อมแท็บไม่สำเร็จ: %s' % str(ex)[:200], 'WARN')
         # เพิ่มแท็บแล้วแถบแท็บยาวขึ้น — ถ้าหน้าต่างแคบกว่าแถบ ขยายให้พอดี (แท็บ Log จะได้ไม่ถูกตัด)
         try:
             self.root.update_idletasks()
@@ -9082,7 +9088,7 @@ class App:
                                           filetypes=[('Excel', '*.xlsx *.xlsm'), ('ทุกไฟล์', '*.*')])
         if not path:
             return
-        dlg = BundleSplitImportDialog(self.root, path)       # v1.5.6 + ตัวเลือก 1 ไอเทม 1 บันเดิ้ล
+        dlg = LinkBundleImportDialog(self.root, path)        # v1.5.6 + 1 ไอเทม 1 บันเดิ้ล · v1.7.0 + 🔗 เติม Aztek Item Id
         if not dlg.result:
             return
         for b in dlg.result:
@@ -18771,6 +18777,7 @@ class ShopTab:
                           [dict(p) for p in ps])
         self.st.update(file=path, sheets=list(sheets), rows=rows,
                        read_at=datetime.now().isoformat(timespec='seconds'))
+        self._link_auto(rows, path)                  # v1.7.0 🔗 เลข Bundle จากแท็บสร้าง Bundle (ที่ว่าง)
         self._save()
         self.refresh()
         a.log('สร้าง Product: อ่าน %s (%d ชีท) — เจอ %d Product'
@@ -19023,12 +19030,31 @@ class ShopTab:
         self._save()
         self.refresh()
 
+    def _link_auto(self, rows, path):
+        """v1.7.0 เลข Bundle ที่ว่าง <- แท็บสร้าง Bundle: ตารางเดียวกันในชีท ก่อน แล้วค่อยชื่อเดียวกัน (เลขเดียวเท่านั้น)"""
+        a = self.app
+        got = []
+        try:
+            for p in link_fill_products(rows, path, link_bundle_book(a)):
+                got.append(p)
+                a.log('🔗 สร้าง Product: %s ← Bundle %s (ตารางเดียวกันในแท็บสร้าง Bundle)' % (p.get('name'), p['bundle']), 'OK')
+            fill, _ = shop_bundle_match(rows, getattr(a, 'made', []))
+            for p, bid in fill:
+                p['bundle'], p['bundle_src'] = bid, 'แท็บ Bundle'
+                got.append(p)
+                a.log('🔗 สร้าง Product: %s ← Bundle %s (ชื่อเดียวกันในแท็บสร้าง Bundle)' % (p.get('name'), bid), 'OK')
+        except Exception as ex:
+            a.log('🔗 สร้าง Product: ดึงเลข Bundle ไม่สำเร็จ: %s' % str(ex)[:80], 'WARN')
+        return got
+
     def bundle_from_tab(self):
         """เลข Bundle จากตาราง “Bundle ที่สร้างแล้ว” ของแท็บสร้าง Bundle (ชื่อ Bundle = ชื่อสินค้า เลขเดียวเท่านั้น)"""
         if self.running:
             return
         rows = self.st.get('rows') or []
+        tab = link_fill_products(rows, self.st.get('file') or '', link_bundle_book(self.app))   # v1.7.0 ตารางเดียวกันก่อน
         fill, many = shop_bundle_match(rows, getattr(self.app, 'made', []))
+        fill = list(fill) + [(p, p['bundle']) for p in tab]
         for p, bid in fill:
             p['bundle'], p['bundle_src'] = bid, 'แท็บ Bundle'
             self.app.log('สร้าง Product: %s ← Bundle %s (จากแท็บสร้าง Bundle)' % (p.get('name'), bid), 'INFO')
@@ -20701,6 +20727,14 @@ class CibTab:
     def _apply(self, path, sheets, ts):
         old = self.st.get('rows') or []
         rows = cib_carry(old, [dict(t) for t in ts])
+        try:                                         # v1.7.0 🔗 เลข Bundle ที่ว่าง <- แท็บสร้าง Bundle (ชื่อตรงเป๊ะ เลขเดียว)
+            fill, _ = cib_bundle_match(rows, getattr(self.app, 'made', []))
+            for x, bid in fill:
+                x['bundle'], x['bundle_src'] = bid, 'แท็บ Bundle'
+            if fill:
+                self.app.log('🔗 Check in Booster: เติมเลข Bundle จากแท็บสร้าง Bundle %d แถว' % len(fill), 'OK')
+        except Exception as ex:
+            self.app.log('🔗 Check in Booster: ดึงเลข Bundle ไม่สำเร็จ: %s' % str(ex)[:80], 'WARN')
         self.st.update(file=path, sheets=list(sheets), rows=rows, read_at=datetime.now().isoformat(timespec='seconds'))
         self._save()
         self.refresh()
@@ -21259,6 +21293,446 @@ class CibTab:
             'หน้าเว็บที่กรอก: Slug · Activity Tag (early/mid) · ชื่อ (Internal Note) · ราคา · หัวข้อ/คำอธิบาย (แท็บไทย) · '
             'วันที่เริ่ม (ตอนนี้) / วันที่สิ้นสุด (ชีท) · รายการ Bundle Free / Premium (Position = Day · Bundle Name = DAY N · รูป) '
             '· Instant (Position 0 · FP)\nไม่แตะ: สถานะ (เปิดใช้งาน / โหมดทดสอบ) · Info URL · Banner / Background'))
+
+
+
+# ============================================================================
+#  [14] เชื่อมแท็บ (v1.7.0) — ส่งเลขถึงกันเอง ไม่ต้องกรอกเลขลงเอกสารแล้วโหลดไฟล์ใหม่
+#
+#      ค้นหา / สร้าง Item  ──(Aztek Item Id)──▶  สร้าง Bundle
+#      สร้าง Bundle        ──(Bundle ID)──────▶  สร้าง Product · WR Master · Item Code · Check in Booster
+#
+#      กติกา (ผู้ใช้เลือก):
+#        · เติมให้อัตโนมัติตอนนำเข้า + ปุ่ม 🔗 ดึงซ้ำทีหลัง · ไม่เขียนไฟล์ Excel (เลขอยู่ในเครื่องมือเท่านั้น)
+#        · Aztek Item Id: ต้องเป็น “แถวเดียวกัน” = เนื้อหาแถวตรงกันทุกอย่าง (ItemKind · จำนวนบนเว็บ · ระยะเวลา ·
+#          แลกเปลี่ยน · ชื่อ) กับแถวที่ค้นหาเจอ / สร้างไป — fdItemNum เดียวกันแต่พารามิเตอร์ต่าง = ไม่เติม
+#        · Bundle → WR / Item Code: ตารางเดียวกันในชีทเดียวกันของไฟล์เดียวกัน
+#        · ชีทมีเลขอยู่แล้ว = ใช้ของชีท (ไม่ทับ) · ไม่ตรงกับที่เครื่องมือรู้ = เตือน
+#        · หาไม่เจอ / เจอหลายเลข = ไม่เติม (ไม่เดา) แล้วบอกใน Log
+#      ของเดิมไม่แตะ: ตัวอ่านชีททุกตัวเหมือนเดิม — ตรงนี้แค่ “เติมเลขลงช่องว่าง” ให้เหมือนคนกรอกในเอกสาร
+#      แล้วส่งให้ตัวอ่านเดิมอ่านตามปกติ จากนั้นตรวจซ้ำว่าเลขที่เติมเข้าไปถูกหยิบจริง
+# ============================================================================
+LINK = {'app': None, 'bt': []}          # app ที่เปิดอยู่ · บันเดิล ↔ ตารางในชีท (จดตอนนำเข้า)
+_LINK_ID_LBL = ('aztekitemid', 'aztekid', 'aztek', 'itemid', 'id')
+
+
+def link_norm(s):
+    return re.sub(r'\s+', '', clean_text(s)).lower()
+
+
+def link_item_key(d):
+    """ตัวตนของไอเทม 1 แถว (ไว้จับคู่ “แถวเดียวกัน”) — ItemKind · จำนวนบนเว็บ · ระยะเวลา · แลกเปลี่ยน · ชื่อฐาน"""
+    return (str(d.get('kind') or '').strip(), str(d.get('qty') or '1').strip() or '1',
+            str(d.get('dur') or '').strip(), bool(d.get('trade')), link_norm(d.get('cname') or d.get('name')))
+
+
+def link_items_book(app):
+    """Aztek Item Id ที่เครื่องมือรู้แล้ว: จากผลค้นหา (เจอตัวเดียวเท่านั้น) + ไอเทมที่สร้างไป
+    คืน (book {key: {'id','src','name'}}, ตัวที่ขัดกัน [key])"""
+    book, bad = {}, set()
+
+    def add(k, iid, src, name):
+        o = book.get(k)
+        if o and o['id'] != iid:
+            bad.add(k)
+        elif not o:
+            book[k] = {'id': iid, 'src': src, 'name': name}
+    crit = list(getattr(app, 'imported', None) or [])
+    hits = {}
+    for r in list(getattr(app, 'results', None) or []):
+        if not r.get('miss'):
+            hits.setdefault(r.get('seq'), []).append(r)
+    for i, c in enumerate(crit, 1):
+        h = hits.get(i) or []
+        if len(h) != 1:
+            continue                                  # ไม่เจอ / เจอหลายตัว = ไม่เดา
+        iid = str(h[0].get('id') or '').strip()
+        hk = str(h[0].get('kind') or '').strip()
+        if not re.fullmatch(r'\d+', iid) or (hk and hk != str(c.get('kind') or '').strip()):
+            continue
+        try:
+            d = row_to_item(c)
+        except Exception:
+            continue
+        add(link_item_key(d), iid, 'ค้นหา', d.get('name') or '')
+    cq = list(getattr(app, 'cq', None) or [])
+    for m in list(getattr(app, 'made_items', None) or []):
+        iid = str(m.get('id') or '').strip()
+        if not re.fullmatch(r'\d+', iid) or not m.get('ok', True):
+            continue
+        keys = {link_item_key(d) for d in cq
+                if str(d.get('kind') or '').strip() == str(m.get('kind') or '').strip() and d.get('name') == m.get('name')}
+        if len(keys) == 1:
+            add(keys.pop(), iid, 'สร้าง Item', m.get('name') or '')
+    for k in bad:
+        book.pop(k, None)
+    return book, sorted(bad)
+
+
+def _link_heads(rows):
+    """แถวหัวตาราง + คอลัมน์ fdItemNum (กติกาเดียวกับตัวอ่านเดิม)"""
+    out = []
+    for r, row in enumerate(rows):
+        low = [num_str(c).lower() for c in (row or [])]
+        anc = [j for j, c in enumerate(low) if 'fditemnum' in c] or \
+              [j for j, c in enumerate(low) if c in ('item kind', 'itemkind')]
+        if anc:
+            out.append((r, anc))
+    return out
+
+
+def link_row_keys(rows):
+    """แต่ละแถวไอเทมในชีท -> ตัวตนไอเทม · {(แถว, คอลัมน์ fdItemNum): key} (ใช้ตัวอ่านเดิมอ่านทีละแถว)"""
+    heads = _link_heads(rows)
+    out = {}
+    for k, (hr, anc) in enumerate(heads):
+        end = heads[k + 1][0] if k + 1 < len(heads) else len(rows)
+        for r in range(hr + 1, end):
+            row = rows[r] or []
+            if not any(a < len(row) and re.fullmatch(r'\d+', num_str(row[a])) for a in anc):
+                continue
+            sub = ([rows[hr - 1] or []] if hr > 0 else []) + [rows[hr] or [], row]
+            try:
+                got = parse_master_rows(sub, set(), [])
+            except Exception:
+                continue
+            used = set()
+            for o in got:
+                for a in anc:
+                    if a in used or a >= len(row) or num_str(row[a]) != o.get('kind'):
+                        continue
+                    used.add(a)
+                    try:
+                        out[(r, a)] = link_item_key(row_to_item(o))
+                    except Exception:
+                        pass
+                    break
+    return out
+
+
+def link_id_col(rows, hr, fc, drows=()):
+    """คอลัมน์ Aztek Item Id ของตาราง (กติกาเดียวกับตัวอ่านบันเดิล: อยู่ทางซ้ายของ fdItemNum ·
+    หัวที่บอกชัดว่าเป็นอย่างอื่น เช่น Bundle No. / Day / Rank ไม่ใช่) — เลือกตามลำดับ:
+    หัวเขียน Bundle / Aztek / Item Id  >  มีเลขอยู่แล้วบางแถว  >  หัวว่าง/เป็นตัวเลข (เลข Bundle)  >  หัวเป็นป้ายหัวข้อ"""
+    head = rows[hr] or []
+    cands = []
+    for c in range(fc - 1, max(-1, fc - 6), -1):
+        h = clean_text(head[c]).lower() if c < len(head) else ''
+        strong = h == 'bundle' or 'aztek' in h or _hkey(h) in ('itemid', 'id', 'bundleid')
+        if h and not strong and (any(k in h for k in _SRC_KNOWN) or _SRC_NOT_ID.match(h)):
+            continue
+        vals = [(rows[r] or [None] * (c + 1))[c] if c < len(rows[r] or []) else None for r in drows]
+        if any(v not in (None, '') and src_int(v) is None and clean_text(v) for v in vals):
+            continue                                   # มีข้อความในแถวไอเทม = ไม่ใช่คอลัมน์ Id
+        nums = sum(1 for v in vals if src_int(v) is not None)
+        pri = 0 if strong else (1 if nums else (2 if (not h or src_int(h) is not None) else 3))
+        cands.append((pri, fc - c, c))
+    return min(cands)[2] if cands else None
+
+
+def link_patch_rows(rows, book):
+    """เติม Aztek Item Id ลง “ช่องว่าง” ในชีท ให้เหมือนคนกรอกในเอกสาร (ไม่แก้ไฟล์ — แค่ในหน่วยความจำ)
+    คืน (rows ใหม่, {'filled': [...], 'mism': [...], 'nocol': [...]})"""
+    rep = {'filled': [], 'mism': [], 'nocol': []}
+    out = [list(r) if r else [] for r in rows]
+    if not book:
+        return out, rep
+    keys = link_row_keys(rows)
+    heads = _link_heads(rows)
+    for (r, fc), key in sorted(keys.items()):
+        hit = book.get(key)
+        if not hit:
+            continue
+        hr = max(h for h, _ in heads if h < r)
+        drows = [x for (x, a), _ in keys.items() if a == fc and hr < x and
+                 x < min([h for h, _ in heads if h > hr] or [len(rows)])]
+        idc = link_id_col(rows, hr, fc, drows)
+        if idc is None:
+            rep['nocol'].append({'r': r, 'kind': key[0], 'id': hit['id'], 'src': hit['src']})
+            continue
+        row = out[r]
+        while len(row) <= idc:
+            row.append(None)
+        cur = row[idc]
+        if cur is None or (isinstance(cur, str) and not cur.strip()):
+            row[idc] = int(hit['id'])
+            rep['filled'].append({'r': r, 'c': idc, 'kind': key[0], 'id': hit['id'], 'src': hit['src'],
+                                  'name': hit.get('name') or ''})
+        elif str(src_int(cur) or '') != hit['id']:
+            rep['mism'].append({'r': r, 'kind': key[0], 'sheet_val': clean_text(cur), 'id': hit['id'],
+                                'src': hit['src']})
+    return out, rep
+
+
+def link_bundle_tables(rows, sheet, bs, file=''):
+    """บอกว่าบันเดิลแต่ละอันมาจากตารางไหนในชีท (แถวหัวตาราง) — จับคู่ลำดับ fdItemNum ของไอเทม"""
+    tabs = []
+    heads = _link_heads(rows)
+    for k, (hr, anc) in enumerate(heads):
+        end = heads[k + 1][0] if k + 1 < len(heads) else len(rows)
+        for a in anc:
+            kinds, gap = [], 0
+            for r in range(hr + 1, end):
+                v = src_int((rows[r] or [None] * (a + 1))[a]) if a < len(rows[r] or []) else None
+                if v is None:
+                    gap += 1
+                    if kinds and gap >= 2:
+                        break
+                    continue
+                gap = 0
+                kinds.append(str(v))
+            if kinds:
+                tabs.append({'hr': hr, 'kinds': kinds, 'used': False})
+
+    def subseq(a, b):
+        it = iter(b)
+        return all(x in it for x in a)
+    sh = clean_text(sheet) or str(sheet)
+    for b in bs:
+        ks = [str(it.get('kind') or '') for it in b.get('items') or []]
+        if not ks or '' in ks:
+            continue
+        t = next((t for t in tabs if not t['used'] and t['kinds'] == ks), None) or \
+            next((t for t in tabs if not t['used'] and subseq(ks, t['kinds'])), None)
+        if t:
+            t['used'] = True
+            b['_link'] = {'file': os.path.basename(file or ''), 'sheet': sh, 'hr': t['hr']}
+    return bs
+
+
+def read_bundles_link_wb(wb, sheet, force_col=None):
+    """แท็บสร้าง Bundle: เติม Aztek Item Id ที่เครื่องมือรู้ลงช่องว่าง -> ตัวอ่านเดิม (parse_bundle_sheet) -> ตรวจซ้ำ
+    ไม่มีอะไรให้เติม = ผลเหมือน read_bundles_split_wb เป๊ะ"""
+    rows = [list(r) if r else [] for r in wb[sheet].iter_rows(min_row=1, max_row=SCAN_ROWS, values_only=True)]
+    app = LINK.get('app')
+    book = link_items_book(app)[0] if app is not None else {}
+    patched, rep = link_patch_rows(rows, book)
+    bs, ws = parse_bundle_sheet(patched, sheet, force_col)
+    info = bundle_split_info(patched, sheet)
+    have = {(str(it.get('id')), str(it.get('kind') or '')) for b in bs for it in b.get('items') or []}
+    sh = clean_text(sheet) or str(sheet)
+    rep['lost'] = [f for f in rep['filled'] if (f['id'], f['kind']) not in have]
+    rep['filled'] = [f for f in rep['filled'] if (f['id'], f['kind']) in have]
+    rep['sheet'] = sh
+    ws = list(ws)
+    for f in rep['lost']:
+        ws.append('%s แถว %d: 🔗 เติม Aztek Item Id %s (จาก%s) แล้ว แต่ตัวอ่านบันเดิลไม่หยิบ — ตรวจชีท'
+                  % (sh, f['r'] + 1, f['id'], f['src']))
+    for f in rep['mism']:
+        ws.append('%s แถว %d: 🔗 ชีทเขียน Aztek Item Id “%s” แต่%sได้ %s (ItemKind %s) — ใช้ของชีท เช็กอีกที'
+                  % (sh, f['r'] + 1, f['sheet_val'], f['src'], f['id'], f['kind']))
+    link_bundle_tables(patched, sheet, bs)
+    for b in bs:
+        b['_split'] = info
+        b['_lk'] = rep
+    return bs, ws
+
+
+def link_bundle_book(app):
+    """Bundle ID ที่สร้างแล้ว ↔ ตารางในชีท: {(ไฟล์, ชีท, แถวหัวตาราง): {'id','name'}}
+    ชื่อบันเดิลที่สร้าง -> ตารางที่จดไว้ตอนนำเข้า (ชื่อซ้ำ/หลายตาราง/หลายเลข = ไม่เดา)"""
+    by = {}
+    for e in list(LINK.get('bt') or []):
+        by.setdefault(e.get('name'), set()).add((e.get('file'), e.get('sheet'), e.get('hr')))
+    for b in list(getattr(app, 'bq', None) or []):
+        L = b.get('_link')
+        if L:
+            by.setdefault(b.get('name'), set()).add((L.get('file'), L.get('sheet'), L.get('hr')))
+    ids_of = {}
+    for m in list(getattr(app, 'made', None) or []):
+        bid = str(m.get('id') or '').strip()
+        if re.fullmatch(r'\d+', bid):
+            ids_of.setdefault(m.get('name'), set()).add(bid)
+    book, many = {}, set()
+    for name, ids in ids_of.items():
+        tabs = by.get(name) or set()
+        if len(ids) != 1 or len(tabs) != 1:
+            continue
+        L, bid = next(iter(tabs)), next(iter(ids))
+        if L in book and book[L]['id'] != bid:
+            many.add(L)
+        book.setdefault(L, {'id': bid, 'name': name})
+    for L in many:
+        book.pop(L, None)                    # ตารางเดียวแตกเป็นหลายบันเดิล (1 ไอเทม 1 บันเดิ้ล) = ไม่ใช้กับโค้ด
+    return book
+
+
+def link_fill_codes(codes, file, mode, book):
+    """WR Master / Item Code: เลข Bundle ที่ว่าง <- บันเดิลที่สร้างจากตารางเดียวกัน
+    Item Code: แถวหัวตารางตรงกันเป๊ะ · WR Master: ตารางที่อยู่ในบล็อก CODE นั้น (ถึงก่อน CODE ถัดไป) ต้องมีตัวเดียว
+    คืน (เติมแล้ว [(code, เลข, ชื่อบันเดิล)], ไม่ตรงกับชีท [(code, ของชีท, เลขที่รู้)])"""
+    fb = os.path.basename(file or '')
+    filled, mism = [], []
+    for d in codes:
+        sh = clean_text(d.get('sheet')) or str(d.get('sheet') or '')
+        try:
+            row = int(d.get('row') or 0)
+        except Exception:
+            continue
+        f = d.get('_file') or fb
+        same = [(L, v) for L, v in book.items() if L[1] == sh and (not f or L[0] == f)]
+        if mode == 'gen':
+            cands = [v for L, v in same if L[2] == row - 1]
+        else:
+            nxt = min([int(x.get('row') or 0) for x in codes
+                       if (clean_text(x.get('sheet')) or str(x.get('sheet') or '')) == sh
+                       and int(x.get('row') or 0) > row] or [10 ** 9])
+            cands = [v for L, v in same if row - 1 <= L[2] < nxt - 1]
+        ids = {v['id'] for v in cands}
+        if len(ids) != 1:
+            continue
+        bid = ids.pop()
+        cur = str(d.get('bundle') or '').strip()
+        if not cur:
+            d['bundle'], d['bundle_src'] = bid, 'แท็บ Bundle'
+            filled.append((d, bid, cands[0]['name']))
+        elif cur != bid:
+            mism.append((d, cur, bid))
+    return filled, mism
+
+
+def link_fill_products(rows_p, file, book):
+    """สร้าง Product: เลข Bundle ที่ว่าง <- บันเดิลที่สร้างจากตารางของกล่อง Product นั้น (ตัวเดียวเท่านั้น)"""
+    fb = os.path.basename(file or '')
+    filled = []
+    for p in rows_p:
+        if p.get('made') or re.fullmatch(r'\d+', str(p.get('bundle') or '')):
+            continue
+        sh = clean_text(p.get('sheet')) or str(p.get('sheet') or '')
+        row = int(p.get('row') or 0)
+        nxt = min([int(q.get('row') or 0) for q in rows_p if q.get('sheet') == p.get('sheet')
+                   and int(q.get('row') or 0) > row] or [10 ** 9])
+        cands = [v for L, v in book.items() if L[1] == sh and (not fb or L[0] == fb) and row - 6 <= L[2] < nxt - 1]
+        ids = {v['id'] for v in cands}
+        if len(ids) == 1:
+            p['bundle'], p['bundle_src'] = ids.pop(), 'แท็บ Bundle'
+            filled.append(p)
+    return filled
+
+
+class LinkBundleImportDialog(BundleSplitImportDialog):
+    """หน้าต่างนำเข้าของแท็บสร้าง Bundle + 🔗 เติม Aztek Item Id จากค้นหา / สร้าง Item (v1.7.0)
+    สืบทอดอย่างเดียว · ไม่มีอะไรให้เติม = เหมือน v1.6 เป๊ะ"""
+    read_fn = staticmethod(lambda wb, nm, col=None: read_bundles_link_wb(wb, nm, col))
+
+    def _show(self, bs, ws, note):
+        reps = []
+        for b in bs:
+            r = b.get('_lk')
+            if r is not None and all(r is not x for x in reps):
+                reps.append(r)
+        fb = os.path.basename(getattr(self, 'path', '') or '')
+        clean = []
+        for b in bs:
+            c = {k: v for k, v in b.items() if k != '_lk'}
+            if c.get('_link'):
+                c['_link'] = dict(c['_link'], file=fb)
+            clean.append(c)
+        BundleSplitImportDialog._show(self, clean, ws, note)
+        n = sum(len(r['filled']) for r in reps)
+        if n:
+            src = {}
+            for r in reps:
+                for f in r['filled']:
+                    src[f['src']] = src.get(f['src'], 0) + 1
+            try:
+                self.info.config(text=self.info.cget('text') + '  ·  🔗 เติม Aztek Item Id ให้ %d แถว (%s)' % (
+                    n, ' · '.join('จาก%s %d' % kv for kv in src.items())))
+            except Exception:
+                pass
+        self._link_reps = reps
+
+    def _ok(self):
+        BundleSplitImportDialog._ok(self)
+        app = LINK.get('app')
+        for b in self.result or []:
+            L = b.get('_link')
+            if L:
+                LINK['bt'].append({'name': b.get('name'), 'file': L.get('file'), 'sheet': L.get('sheet'),
+                                   'hr': L.get('hr')})
+        if app is not None and self.result:
+            for r in getattr(self, '_link_reps', []) or []:
+                for f in r['filled']:
+                    app.log('🔗 %s แถว %d: Aztek Item Id = %s (จาก%s · ItemKind %s)'
+                            % (r['sheet'], f['r'] + 1, f['id'], f['src'], f['kind']), 'INFO')
+
+
+class LinkCodeImportDialog(CodeImportDialog):
+    """WR Master: นำเข้าแล้วเติมเลข Bundle ที่ว่างจากแท็บสร้าง Bundle (ตารางเดียวกัน)"""
+    LINK_MODE = 'wr'
+
+    def _ok(self):
+        CodeImportDialog._ok(self)
+        link_after_code_import(self, self.LINK_MODE)
+
+
+class LinkGenImportDialog(GenImportDialog):
+    """Item Code: นำเข้าแล้วเติมเลข Bundle ที่ว่างจากแท็บสร้าง Bundle (ตารางเดียวกัน)"""
+    LINK_MODE = 'gen'
+
+    def _ok(self):
+        GenImportDialog._ok(self)
+        link_after_code_import(self, self.LINK_MODE)
+
+
+def link_after_code_import(dlg, mode):
+    res = getattr(dlg, 'result', None)
+    if not res:
+        return
+    fb = os.path.basename(getattr(dlg, 'path', '') or '')
+    for d in res:
+        d['_file'] = fb
+    app = LINK.get('app')
+    if app is None:
+        return
+    filled, mism = link_fill_codes(res, fb, mode, link_bundle_book(app))
+    for d, bid, nm in filled:
+        app.log('🔗 %s: เลข Bundle = %s (จากแท็บสร้าง Bundle “%s”)' % (wr_ident(d), bid, nm[:40]), 'OK')
+    for d, cur, bid in mism:
+        app.log('🔗 %s: ชีทเขียน Bundle %s แต่แท็บสร้าง Bundle ได้ %s — ใช้ของชีท เช็กอีกที' % (wr_ident(d), cur, bid),
+                'WARN')
+
+
+def link_wr_button(ctx, mode):
+    """ปุ่ม 🔗 ในแท็บ WR Master / Item Code: เติมเลข Bundle ที่ว่างในคิวจากแท็บสร้าง Bundle"""
+    if getattr(ctx, 'w_running', False):
+        return
+    app = LINK.get('app')
+    q = list(getattr(ctx, 'wq', None) or [])
+    if app is None or not q:
+        return messagebox.showinfo('เลข Bundle', 'คิวว่างอยู่ — นำเข้าไฟล์ก่อนนะ')
+    filled, mism = link_fill_codes(q, '', mode, link_bundle_book(app))
+    for d, bid, nm in filled:
+        app.log('🔗 %s: เลข Bundle = %s (จากแท็บสร้าง Bundle “%s”)' % (wr_ident(d), bid, nm[:40]), 'OK')
+    for d, cur, bid in mism:
+        app.log('🔗 %s: ในคิวเป็น Bundle %s แต่แท็บสร้าง Bundle ได้ %s — ไม่ทับ เช็กอีกที' % (wr_ident(d), cur, bid), 'WARN')
+    if filled:
+        try:
+            ctx._w_refresh()
+        except Exception:
+            pass
+    empty = sum(1 for d in q if not str(d.get('bundle') or '').strip())
+    messagebox.showinfo('เลข Bundle', 'เติมเลข Bundle ให้ %d โค้ด%s%s' % (
+        len(filled), ('\nไม่ตรงกับที่มีอยู่ %d โค้ด (ไม่ทับ — ดูใน Log)' % len(mism)) if mism else '',
+        ('\nยังไม่มีเลข %d โค้ด — สร้างบันเดิลจากตารางนั้นในแท็บสร้าง Bundle ก่อน หรือดับเบิลคลิกใส่เอง' % empty)
+        if empty else ''))
+
+
+def link_install(app):
+    """ต่อสายแท็บต่างๆ เข้าด้วยกัน — เรียกตอนสร้างหน้าจอ (ทุกอย่างเป็นของเสริม พังก็ไม่พาแท็บเดิมพัง)"""
+    LINK['app'] = app
+    for ctx, mode, dlg in ((app, 'wr', LinkCodeImportDialog), (getattr(app, 'gen', None), 'gen', LinkGenImportDialog)):
+        if ctx is None:
+            continue
+        try:
+            if mode == 'wr':
+                ctx.W_DIALOG = dlg
+            elif getattr(ctx, 'W_DIALOG', None) is GenImportDialog:
+                ctx.W_DIALOG = dlg
+            app._btn(ctx.w_count.master, '🔗  เลข Bundle จากแท็บ Bundle',
+                     lambda c=ctx, m=mode: link_wr_button(c, m)).pack(side='left', padx=(8, 0), ipadx=8, ipady=4)
+        except Exception as ex:
+            app.log('เชื่อมแท็บ %s ไม่สำเร็จ: %s' % (mode, str(ex)[:80]), 'WARN')
 
 
 if __name__ == '__main__':
