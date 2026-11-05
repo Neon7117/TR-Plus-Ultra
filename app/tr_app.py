@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.9.0 : หลักฐานเทส — ปุ่ม 🤖 ส่งเทส + แคปอัตโนมัติ: กด “ทดสอบส่ง Bundle” บนเว็บให้ (Chrome ซ่อน) · คีย์ลัด F6/F7/F8 แคปกรอบที่ลากไว้ในเกม · F9 บันทึก + ส่งเซ็ตถัดไป (ยังไม่ตรวจชื่อไอเทมจากภาพ)
 V1.8.2 : เชื่อมแท็บ — ค้นหา/สร้าง Item → สร้าง Bundle เติม Aztek Item Id ได้กับชีทแบบ “ตำแหน่งช่อง” + หัว “ฺBundle” (เดิมเอาเลขช่อง 1, 2, 3 เป็น Id) · ผลค้นหาที่ข้ามบางแถวก็ยังจับคู่ได้
 V1.8.1 : สร้าง Event — แก้ “เพิ่ม/เปิดชุดที่ 1 ไม่ได้” (เว็บจริงแยกเลขชุดคนละ text node) · ชื่อ Event ไม่หยิบป้าย (Event Type) · เลข Bundle ต่ำกว่า 1000 เตือน · พังแล้วเก็บหน้าตากล่องไว้ดู
 V1.8.0 : แท็บใหม่ 🎉 สร้าง Event (ถัดจาก Item Code) — 1 ชีท = 1 Event · ของรางวัล = ทุกตาราง fdItemNum · ช่วงรับรางวัลจากป้าย · ปีย่อ 69 = 2026 · เมนู ส่งไป… มีสร้าง Event
@@ -21824,6 +21825,10 @@ def link_install(app):
         link_send_buttons(app)                       # v1.7.1 ปุ่ม “ส่งไป…”
     except Exception as ex:
         app.log('วางปุ่มส่งไป… ไม่สำเร็จ: %s' % str(ex)[:80], 'WARN')
+    try:
+        eva_install(app)                             # v1.9.0 หลักฐานเทส: ส่งเทส + แคปอัตโนมัติ
+    except Exception as ex:
+        app.log('วางปุ่มส่งเทส + แคปอัตโนมัติไม่สำเร็จ: %s' % str(ex)[:80], 'WARN')
 
 
 # ---- v1.7.1 ปุ่ม “ส่งไป…” — เปิดหน้านำเข้าของแท็บปลายทาง ด้วยไฟล์เดิม + ชีทเดิมที่เลือกไว้ให้ ----
@@ -23758,6 +23763,941 @@ class EvtTab:
             '   ติ๊ก “กดปุ่ม สร้าง Event จริง” = กดสร้าง (ยังไม่ได้สร้างจะไม่ข้าม — ลองใหม่เอง / ถามก่อน)\n\n'
             'ค่าเริ่มต้น (แบบในคลิป): เปิดใช้งาน ✓ · โหมดทดสอบ ✓ · จำกัดจำนวน ✗ · แสดงเฉพาะผู้ชนะ ✓ · WINNER · '
             'จำกัดต่อผู้เล่น 1\nไม่แตะ: Slug · รูปภาพ · รายละเอียด · คำอธิบายรางวัล · เงื่อนไขการรับรางวัล'))
+
+
+# ============================================================================
+#  [16] หลักฐานเทส — 🤖 ส่งเทส + แคปอัตโนมัติ (v1.9.0) — ของใหม่ทั้งก้อน ไม่แตะของเดิม
+#
+#      ผู้ใช้เปิดเกมไว้ · เครื่องมือ: กด “ทดสอบส่ง Bundle” บนเว็บให้ (Chrome ซ่อนหน้าต่าง ไม่แย่งจอเกม)
+#      -> ผู้ใช้สลับคลังในเกมให้ของขึ้น (ของเข้าช้า 1–2 นาที) -> กดคีย์ลัดแคปกรอบที่ตั้งไว้ (กดได้หลายภาพ)
+#      -> คีย์ลัดบันทึก = บันทึกภาพรวม (ตัวบันทึกเดิมของแท็บ) + ไปเซ็ตถัดไป + ส่ง Bundle ถัดไปเอง
+#      ขั้นนี้ยังไม่ตรวจชื่อไอเทมจากภาพ (ผู้ใช้เลือก “ทำทีละขั้น”) — ภาพที่ได้เก็บไว้ทำตัวตรวจขั้นถัดไป
+#      ไม่กด/ไม่พิมพ์อะไรในเกมเลย (กันระบบกันโกงของเกม) · แคปจอด้วย Windows เอง (ctypes) ไม่ต้องลงอะไรเพิ่ม
+#      หน้าแก้ไข Bundle (จากคลิป การแคปทำหลักฐาน.mp4): /hof/talesrunner/shop/bundles/<เลข> · ปุ่ม “ทดสอบส่ง Bundle”
+#        -> ป๊อปอัปยืนยัน -> แจ้งเตือนเขียวว่าส่งแล้ว
+# ============================================================================
+EVA_URLS = ('/hof/talesrunner/shop/bundles/{id}', '/hof/talesrunner/shop/bundles/{id}/edit',
+            '/hof/talesrunner/shop/bundles/edit/{id}')
+EVA_BTN = 'ทดสอบส่ง Bundle'
+EVA_KEYS = ('F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12')
+EVA_VK = {'F6': 0x75, 'F7': 0x76, 'F8': 0x77, 'F9': 0x78, 'F10': 0x79, 'F11': 0x7A, 'F12': 0x7B}
+EVA_REGIONS = (('gift', 'กล่องของขวัญ', 'F6'), ('bag', 'คลังไอเทม', 'F7'), ('win', 'ทั้งหน้าต่างเกม (ไว้แคปรายละเอียดไอเทม)', 'F8'))
+EVA_SAVE_KEY = 'F9'
+EVA_YES = list(CONFIRM_YES) + ['ส่ง', 'ส่งเลย', 'ยืนยันการส่ง', 'ยืนยันส่ง', 'ส่งทดสอบ', 'ทดสอบส่ง', 'Send', 'Submit', EVA_BTN]
+EVA_HOLD = 'ส่งเทส + แคปอัตโนมัติ (หลักฐานเทส)'      # ชื่อที่แท็บอื่นเห็นตอนถามว่าให้ปิด Chrome นี้ไหม
+EVA_OK_RE = re.compile(r'ส่งทดสอบ|ทดสอบส่ง.*(สำเร็จ|แล้ว)|สำเร็จ|เช็คใน|success|sent', re.I)
+EVA_BAD_RE = re.compile(r'ไม่สำเร็จ|ผิดพลาด|error|failed|ไม่พบ|ไม่มีสิทธิ์', re.I)
+
+
+# ---------- แคปจอ (Windows GDI ผ่าน ctypes — มีในตัวโปรแกรมอยู่แล้ว) ----------
+def eva_ctypes():
+    import ctypes
+    return ctypes
+
+
+def eva_dpi_thread():
+    """ให้เธรดนี้ใช้พิกเซลจริงของจอ (ไม่โดน Windows ย่อขยาย) — ไม่แตะหน้าต่างโปรแกรม"""
+    try:
+        ct = eva_ctypes()
+        f = ct.windll.user32.SetThreadDpiAwarenessContext
+        f.argtypes = [ct.c_ssize_t]
+        f.restype = ct.c_void_p
+        f(-4)                                   # PER_MONITOR_AWARE_V2
+    except Exception:
+        pass
+
+
+def eva_screen():
+    """พื้นที่จอทั้งหมด (ทุกจอรวมกัน) เป็นพิกเซลจริง -> (x, y, w, h)"""
+    ct = eva_ctypes()
+    m = ct.windll.user32.GetSystemMetrics
+    return m(76), m(77), m(78), m(79)
+
+
+def eva_grab(x, y, w, h):
+    """แคปพื้นที่บนจอ -> BGRA bytes (บนลงล่าง)"""
+    ct = eva_ctypes()
+    u, g = ct.windll.user32, ct.windll.gdi32
+    vp = ct.c_void_p
+    u.GetDC.restype = vp
+    u.GetDC.argtypes = [vp]
+    u.ReleaseDC.argtypes = [vp, vp]
+    g.CreateCompatibleDC.restype = vp
+    g.CreateCompatibleDC.argtypes = [vp]
+    g.CreateCompatibleBitmap.restype = vp
+    g.CreateCompatibleBitmap.argtypes = [vp, ct.c_int, ct.c_int]
+    g.SelectObject.restype = vp
+    g.SelectObject.argtypes = [vp, vp]
+    g.BitBlt.argtypes = [vp, ct.c_int, ct.c_int, ct.c_int, ct.c_int, vp, ct.c_int, ct.c_int, ct.c_uint32]
+    g.GetDIBits.argtypes = [vp, vp, ct.c_uint, ct.c_uint, vp, vp, ct.c_uint]
+    g.DeleteObject.argtypes = [vp]
+    g.DeleteDC.argtypes = [vp]
+
+    class BIH(ct.Structure):
+        _fields_ = [('biSize', ct.c_uint32), ('biWidth', ct.c_int32), ('biHeight', ct.c_int32),
+                    ('biPlanes', ct.c_uint16), ('biBitCount', ct.c_uint16), ('biCompression', ct.c_uint32),
+                    ('biSizeImage', ct.c_uint32), ('biXPelsPerMeter', ct.c_int32), ('biYPelsPerMeter', ct.c_int32),
+                    ('biClrUsed', ct.c_uint32), ('biClrImportant', ct.c_uint32)]
+    hdc = u.GetDC(None)
+    mem = g.CreateCompatibleDC(hdc)
+    bmp = g.CreateCompatibleBitmap(hdc, w, h)
+    old = g.SelectObject(mem, bmp)
+    try:
+        g.BitBlt(mem, 0, 0, w, h, hdc, x, y, 0x00CC0020 | 0x40000000)     # SRCCOPY | CAPTUREBLT
+        bi = BIH()
+        bi.biSize, bi.biWidth, bi.biHeight, bi.biPlanes, bi.biBitCount = ct.sizeof(BIH), w, -h, 1, 32
+        buf = ct.create_string_buffer(w * h * 4)
+        g.GetDIBits(mem, bmp, 0, h, buf, ct.byref(bi), 0)
+        return buf.raw
+    finally:
+        g.SelectObject(mem, old)
+        g.DeleteObject(bmp)
+        g.DeleteDC(mem)
+        u.ReleaseDC(None, hdc)
+
+
+def eva_png(w, h, bgra):
+    """BGRA -> ไฟล์ PNG (bytes) — เขียนเองด้วย zlib ไม่ต้องลงไลบรารีรูปภาพ"""
+    import struct
+    import zlib
+    rgb = bytearray(w * h * 3)
+    rgb[0::3] = bgra[2::4]
+    rgb[1::3] = bgra[1::4]
+    rgb[2::3] = bgra[0::4]
+    st = w * 3
+    raw = b''.join(b'\x00' + bytes(rgb[i * st:(i + 1) * st]) for i in range(h))
+
+    def chunk(t, d):
+        return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) +
+            chunk(b'IDAT', zlib.compress(raw, 6)) + chunk(b'IEND', b''))
+
+
+def eva_blank(bgra):
+    """ภาพสีเดียวทั้งภาพ (มักเป็นดำ = เกมเต็มจอแบบแคปไม่ได้) -> True"""
+    n = len(bgra) // 4
+    if not n:
+        return True
+    step = max(1, n // 4000)
+    vals = [bgra[i * 4] + bgra[i * 4 + 1] + bgra[i * 4 + 2] for i in range(0, n, step)]
+    return max(vals) - min(vals) < 24
+
+
+def eva_capture(rect):
+    """แคปในเธรดแยก (เธรดที่ใช้พิกเซลจริง) -> (w, h, bgra) · rect = (x, y, w, h)"""
+    box = {}
+
+    def run():
+        try:
+            eva_dpi_thread()
+            x, y, w, h = [int(v) for v in rect]
+            box['v'] = (w, h, eva_grab(x, y, w, h))
+        except Exception as ex:
+            box['err'] = str(ex)
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(15)
+    if 'err' in box or 'v' not in box:
+        raise RuntimeError(box.get('err') or 'แคปจอไม่สำเร็จ')
+    return box['v']
+
+
+def eva_screen_shot():
+    """แคปทุกจอ (ไว้ให้ลากกรอบ) -> (x0, y0, w, h, png bytes)"""
+    box = {}
+
+    def run():
+        try:
+            eva_dpi_thread()
+            x0, y0, w, h = eva_screen()
+            box['v'] = (x0, y0, w, h, eva_png(w, h, eva_grab(x0, y0, w, h)))
+        except Exception as ex:
+            box['err'] = str(ex)
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(30)
+    if 'v' not in box:
+        raise RuntimeError(box.get('err') or 'แคปจอไม่สำเร็จ')
+    return box['v']
+
+
+class EvaHotkeys:
+    """คีย์ลัดทั้งเครื่อง (กดตอนอยู่ในเกมได้) — RegisterHotKey ของ Windows ไม่ได้ดักคีย์บอร์ด ไม่ยุ่งกับเกม"""
+
+    def __init__(self, keys, cb):
+        self.keys = dict(keys)                  # {id: 'F8'}
+        self.cb = cb
+        self.tid = None
+        self.bad = []
+        self.ready = threading.Event()
+        self.th = threading.Thread(target=self._run, daemon=True)
+        self.th.start()
+        self.ready.wait(3)
+
+    def _run(self):
+        try:
+            ct = eva_ctypes()
+            u, k = ct.windll.user32, ct.windll.kernel32
+            self.tid = k.GetCurrentThreadId()
+
+            class MSG(ct.Structure):
+                _fields_ = [('hwnd', ct.c_void_p), ('message', ct.c_uint), ('wParam', ct.c_size_t),
+                            ('lParam', ct.c_ssize_t), ('time', ct.c_uint32), ('x', ct.c_long), ('y', ct.c_long),
+                            ('priv', ct.c_uint32)]
+            for i, key in self.keys.items():
+                if not u.RegisterHotKey(None, i, 0x4000, EVA_VK[key]):       # MOD_NOREPEAT
+                    self.bad.append(key)
+            self.ready.set()
+            msg = MSG()
+            while u.GetMessageW(ct.byref(msg), None, 0, 0) > 0:
+                if msg.message == 0x0312:                                     # WM_HOTKEY
+                    try:
+                        self.cb(int(msg.wParam))
+                    except Exception:
+                        pass
+            for i in self.keys:
+                u.UnregisterHotKey(None, i)
+        except Exception as ex:
+            self.bad.append('ใช้คีย์ลัดไม่ได้ (%s)' % str(ex)[:60])
+            self.ready.set()
+
+    def stop(self):
+        try:
+            if self.tid:
+                eva_ctypes().windll.user32.PostThreadMessageW(self.tid, 0x0012, 0, 0)      # WM_QUIT
+        except Exception:
+            pass
+
+
+# ---------- หน้าเว็บ: เปิดหน้าแก้ไข Bundle -> ทดสอบส่ง Bundle ----------
+JS_EVA = r"""
+([act, a]) => {
+  const vis = el => { if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const txt = e => (e.textContent || '').replace(/\s+/g, ' ').trim();
+  const POP = '[role=dialog],[role=alertdialog],[data-radix-popper-content-wrapper]';
+  if (act === 'state') {
+    const body = txt(document.body);
+    const ids = (body.match(/ID\s*:\s*(\d+)/g) || []).map(x => x.replace(/\D/g, ''));
+    const btn = [...document.querySelectorAll('button')].some(b => vis(b) && !b.closest(POP) && txt(b) === a);
+    return JSON.stringify({edit: /แก้ไข\s*Bundle/.test(body), ids: ids, btn: btn,
+                           nf: /404|ไม่พบ|not found/i.test(body) && !btn,
+                           login: !btn && [...document.querySelectorAll('input[type=password]')].some(vis)});
+  }
+  if (act === 'btn') {
+    const b = [...document.querySelectorAll('button')].filter(x => vis(x) && !x.closest(POP) && txt(x) === a)[0];
+    if (!b) return 'none';
+    document.querySelectorAll('[data-trw-eva]').forEach(e => e.removeAttribute('data-trw-eva'));
+    b.setAttribute('data-trw-eva', '1');
+    try { b.scrollIntoView({block: 'center'}); } catch (e) {}
+    return 'ok';
+  }
+  if (act === 'toast') {
+    const q = '[role=status],[role=alert],[data-sonner-toast],[class*=toast],[class*=Toast],[class*=notif]';
+    return [...document.querySelectorAll(q)].filter(vis).map(txt).filter(Boolean).join(' ¦ ').slice(0, 300);
+  }
+  return 'ไม่รู้จักคำสั่ง';
+}"""
+
+
+class EvaRunner(PdRunner):
+    """เปิดหน้าแก้ไข Bundle ตามเลข แล้วกด “ทดสอบส่ง Bundle” + ยืนยัน (ยืมตัวกดป๊อปอัปยืนยันเดิมมาใช้)"""
+
+    async def _ea(self, page, act, a=''):
+        try:
+            return str(await page.evaluate(JS_EVA, [act, a]))
+        except Exception as ex:
+            return 'error: %s' % str(ex)[:80]
+
+    async def _eva_confirm(self, page, hits, tries=16):
+        """กดยืนยันในป๊อปอัปหลังกดทดสอบส่ง — ใช้ตัวหาป๊อปอัปเดิม (JS_CONFIRM_POPUP) แต่คำปุ่มกว้างกว่า
+        (ป๊อปอัปนี้อาจเขียน “ส่ง” แทน “ยืนยัน”) · กดเฉพาะปุ่มในป๊อปอัป · ยกเลิก/ปิด ห้ามกดเหมือนเดิม"""
+        last = 'ไม่มีป๊อปอัป'
+        for _ in range(tries):
+            if hits:
+                return False
+            try:
+                r = str(await page.evaluate(JS_CONFIRM_POPUP, [EVA_YES, CONFIRM_NO]))
+            except Exception as ex:
+                r = 'error: %s' % str(ex)[:60]
+            if r.startswith('ok'):
+                self.log('   · กดยืนยันในป๊อปอัปแล้ว (%s)' % r.split('|', 1)[1], 'INFO')
+                return True
+            last = r
+            await page.wait_for_timeout(250)
+        if last != 'ไม่มีป๊อปอัป':
+            self.log('   ! ' + last, 'WARN')
+        return False
+
+    async def open_bundle(self, page, bid, urls):
+        tried = []
+        for tpl in urls:
+            u = BASE + tpl.replace('{id}', str(bid))
+            tried.append(tpl)
+            try:
+                await page.goto(u, wait_until='domcontentloaded', timeout=45000)
+            except Exception:
+                continue
+            if any(k in page.url.lower() for k in ('login', 'signin', 'auth')):
+                return None, 'ยังไม่ได้ล็อกอิน — กด “เปิดหน้า Login” ด้านบนก่อน'
+            for _ in range(24):
+                try:
+                    st = json.loads(await self._ea(page, 'state', EVA_BTN))
+                except Exception:
+                    st = {}
+                if st.get('login') or any(k in page.url.lower() for k in ('login', 'signin', 'auth')):
+                    return None, 'ยังไม่ได้ล็อกอิน — กด “เปิดหน้า Login” ด้านบนก่อน'
+                if st.get('btn') and str(bid) in (st.get('ids') or []):
+                    return tpl, ''
+                if st.get('nf'):
+                    break
+                await page.wait_for_timeout(500)
+        return None, 'เปิดหน้าแก้ไข Bundle #%s ไม่เจอ หรือไม่มีปุ่ม “%s” (ลอง: %s)' % (bid, EVA_BTN, ', '.join(tried))
+
+    async def test_send(self, page, bid, urls):
+        """คืน {'ok', 'unsure', 'why', 'url', 'toast'}"""
+        res = {'ok': False, 'unsure': False, 'why': '', 'url': '', 'toast': ''}
+        tpl, why = await self.open_bundle(page, bid, urls)
+        if not tpl:
+            res['why'] = why
+            return res
+        res['url'] = tpl
+        if (await self._ea(page, 'btn', EVA_BTN)) != 'ok':
+            res['why'] = 'ไม่เจอปุ่ม “%s”' % EVA_BTN
+            return res
+        hits = []
+
+        def _grab(resp):
+            try:
+                if resp.request.method in ('POST', 'PUT', 'PATCH') and 'bundle' in resp.url.lower():
+                    hits.append(resp)
+            except Exception:
+                pass
+        t0 = await self._ea(page, 'toast')
+        page.on('response', _grab)
+        try:
+            await page.locator('[data-trw-eva="1"]').first.click(timeout=8000)
+            await page.wait_for_timeout(500)
+            await self._eva_confirm(page, hits)
+            toast = ''
+            for _ in range(60):
+                await page.wait_for_timeout(250)
+                toast = await self._ea(page, 'toast')
+                if hits or (toast and toast != t0):
+                    break
+            await page.wait_for_timeout(600)
+            toast = await self._ea(page, 'toast') or toast
+        finally:
+            try:
+                page.remove_listener('response', _grab)
+            except Exception:
+                pass
+        res['toast'] = toast if toast != t0 else ''
+        codes = []
+        for r in hits:
+            try:
+                codes.append(r.status)
+            except Exception:
+                pass
+        if any(200 <= c < 300 for c in codes) or (res['toast'] and EVA_OK_RE.search(res['toast'])
+                                                  and not EVA_BAD_RE.search(res['toast'])):
+            res['ok'] = True
+        elif any(c >= 400 for c in codes) or (res['toast'] and EVA_BAD_RE.search(res['toast'])):
+            res['why'] = 'เว็บตอบว่าไม่สำเร็จ (%s)' % (res['toast'][:80] or 'HTTP %s' % codes)
+        else:
+            res['unsure'] = True
+            res['why'] = 'กดแล้วไม่เห็นคำตอบจากเว็บ — ดูในเกมว่าของเข้าไหม'
+        log_event('ev_test_send', bundle=str(bid), ok=res['ok'], unsure=res['unsure'], http=codes[:3])
+        return res
+
+
+class EvaSender:
+    """Chrome แบบซ่อนหน้าต่าง 1 ตัว เปิดค้างตลอดรอบเทส (ไม่เด้งมาบังเกม) · สั่งส่งทีละ Bundle จากหน้าจอ"""
+
+    def __init__(self, app, headless=True):
+        self.app = app
+        self.headless = headless
+        self.loop = None
+        self.page = None
+        self.err = ''
+        self._ready = threading.Event()
+        self.th = threading.Thread(target=self._run, daemon=True)
+        self.th.start()
+
+    def _run(self):
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        try:
+            self.loop.run_until_complete(self._open())
+        except Exception as ex:
+            self.err = str(ex)[:200]
+        self._ready.set()
+        if not self.err:
+            self.loop.run_forever()
+
+    async def _open(self):
+        self.pw = await async_playwright().start()
+        kw = launch_kwargs(self.headless)
+        if self.headless:                       # ซ่อนหน้าต่าง = ไม่มีขนาดจอ ให้ขนาดหน้าเว็บแบบจอปกติ (ปุ่มไม่หลบ)
+            kw.pop('no_viewport', None)
+            kw['viewport'] = {'width': 1600, 'height': 1000}
+        self.ctx = await self.pw.chromium.launch_persistent_context(**kw)
+        self.page = self.ctx.pages[0] if self.ctx.pages else await self.ctx.new_page()
+
+    def wait(self, t=60):
+        self._ready.wait(t)
+        return not self.err and self.page is not None
+
+    def send(self, bid, urls, done):
+        """ส่งในเธรดของ Chrome แล้วเรียก done(res) — เรียกจากเธรด Chrome (ผู้เรียกต้องส่งต่อเข้าหน้าจอเอง ห้ามแตะ Tk)"""
+        async def job():
+            run = EvaRunner(self.app)
+            return await run.test_send(self.page, bid, urls)
+
+        def cb(fut):
+            try:
+                r = fut.result()
+            except Exception as ex:
+                r = {'ok': False, 'unsure': False, 'why': str(ex)[:160], 'url': '', 'toast': ''}
+            try:
+                done(r)
+            except Exception:
+                pass
+        asyncio.run_coroutine_threadsafe(job(), self.loop).add_done_callback(cb)
+
+    def close(self):
+        async def shut():
+            try:
+                await self.ctx.close()
+            except Exception:
+                pass
+            try:
+                await self.pw.stop()
+            except Exception:
+                pass
+        try:
+            if self.loop and not self.err:
+                fut = asyncio.run_coroutine_threadsafe(shut(), self.loop)
+                fut.result(15)
+                self.loop.call_soon_threadsafe(self.loop.stop)
+        except Exception:
+            pass
+
+
+class EvaWin:
+    """หน้าต่างเล็กลอยบนสุด คุมรอบ “ส่งเทส + แคปอัตโนมัติ” ของแท็บหลักฐานเทส (ใช้ตัวรับภาพ/ตัวบันทึกเดิมของแท็บ)"""
+    grab_fn = staticmethod(eva_capture)          # เทสแทนได้
+    shot_fn = staticmethod(eva_screen_shot)
+    sender_cls = EvaSender
+    hotkey_cls = EvaHotkeys
+
+    def __init__(self, ev):
+        self.ev = ev
+        self.app = ev.app
+        a = self.app
+        self.prefs = a.prefs
+        self.sender = None
+        self.hot = None
+        self.running = False
+        self.state = 'idle'                       # idle / sending / wait / saving
+        self.sent_at = None
+        self.cur_bid = ''
+        self.nshot = 0
+        self.q = queue.Queue()                    # ของจากเธรดอื่น (คีย์ลัด / ผลส่ง) -> หน้าจอหยิบไปทำเอง ไม่แตะ Tk ข้ามเธรด
+        top = self.top = tk.Toplevel(a.root)
+        top.title('🤖 ส่งเทส + แคปอัตโนมัติ')
+        top.configure(bg=C['bg'])
+        try:
+            top.attributes('-topmost', True)
+        except Exception:
+            pass
+        top.protocol('WM_DELETE_WINDOW', self.close)
+        body = tk.Frame(top, bg=C['bg'])
+        body.pack(fill='both', expand=True, padx=12, pady=10)
+        tk.Label(body, text='เปิดเกมไว้ (โหมดหน้าต่าง) · เครื่องมือกด “ทดสอบส่ง Bundle” ให้ · ในเกมสลับคลังให้ของขึ้น '
+                            'แล้วกดคีย์ลัดแคป · เสร็จเซ็ตกดคีย์ลัดบันทึก (ส่งเซ็ตถัดไปเอง)',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), wraplength=520, justify='left', anchor='w').pack(fill='x')
+        self.rows = {}
+        rg = tk.Frame(body, bg=C['bg'])
+        rg.pack(fill='x', pady=(8, 0))
+        rects = self.prefs.get('eva_rects') or {}
+        keys = self.prefs.get('eva_keys') or {}
+        for r, (k, lbl, dk) in enumerate(EVA_REGIONS):
+            tk.Label(rg, text=lbl, bg=C['bg'], fg=C['fg'], font=FM, anchor='w').grid(row=r, column=0, sticky='w')
+            v = tk.StringVar(value=keys.get(k, dk))
+            cb = ttk.Combobox(rg, values=list(EVA_KEYS), textvariable=v, width=5, state='readonly', font=FM)
+            cb.grid(row=r, column=1, padx=6, pady=2)
+            cb.bind('<<ComboboxSelected>>', lambda e: self._keys_changed())
+            st = tk.Label(rg, text='', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w', width=22)
+            st.grid(row=r, column=2, sticky='w')
+            a._btn(rg, '📐 ตั้งกรอบ', lambda kk=k: self.pick(kk)).grid(row=r, column=3, padx=(4, 0), ipadx=4)
+            a._btn(rg, '👁', lambda kk=k: self.snap(kk, test=True)).grid(row=r, column=4, padx=(4, 0), ipadx=2)
+            self.rows[k] = {'key': v, 'st': st, 'rect': rects.get(k)}
+        r = len(EVA_REGIONS)
+        tk.Label(rg, text='บันทึก + เซ็ตถัดไป', bg=C['bg'], fg=C['fg'], font=FB, anchor='w').grid(row=r, column=0, sticky='w')
+        self.v_save = tk.StringVar(value=keys.get('save', EVA_SAVE_KEY))
+        cb = ttk.Combobox(rg, values=list(EVA_KEYS), textvariable=self.v_save, width=5, state='readonly', font=FM)
+        cb.grid(row=r, column=1, padx=6, pady=2)
+        cb.bind('<<ComboboxSelected>>', lambda e: self._keys_changed())
+        self.v_show = tk.BooleanVar(value=bool(self.prefs.get('eva_show')))
+        tk.Checkbutton(body, text='เห็นหน้าต่าง Chrome (ไว้ดูตอนมีปัญหา — ปกติซ่อนไว้ไม่ให้บังเกม)', variable=self.v_show,
+                       command=self._save_prefs, bg=C['bg'], fg=C['dim'], selectcolor=C['input'],
+                       activebackground=C['bg'], activeforeground=C['fg'], font=('Segoe UI', 9),
+                       anchor='w').pack(fill='x', pady=(6, 0))
+        self.lbl_keys = tk.Label(body, text='', bg=C['bg'], fg=C['warn'], font=('Segoe UI', 8), anchor='w', justify='left')
+        self.lbl_keys.pack(fill='x')
+        self.lbl = tk.Label(body, text='', bg=C['card'], fg=C['fg'], font=('Segoe UI', 11, 'bold'), anchor='w',
+                            justify='left', wraplength=520, padx=10, pady=8)
+        self.lbl.pack(fill='x', pady=(8, 4))
+        self.lbl_t = tk.Label(body, text='', bg=C['bg'], fg=C['dim'], font=FM, anchor='w')
+        self.lbl_t.pack(fill='x')
+        bb = tk.Frame(body, bg=C['bg'])
+        bb.pack(fill='x', pady=(8, 0))
+        self.btn_go = a._btn(bb, '▶  เริ่ม (ส่งเซ็ตนี้)', self.start, primary=True)
+        self.btn_go.pack(side='left', ipadx=8, ipady=3)
+        a._btn(bb, '📤 ส่งซ้ำ', self.resend).pack(side='left', padx=(6, 0), ipadx=4, ipady=3)
+        a._btn(bb, '💾 บันทึก+ถัดไป', self.save_next).pack(side='left', padx=(6, 0), ipadx=4, ipady=3)
+        a._btn(bb, '⏭ ข้ามเซ็ต', self.skip).pack(side='left', padx=(6, 0), ipadx=4, ipady=3)
+        a._btn(bb, '■ ปิด', self.close).pack(side='right', ipadx=6, ipady=3)
+        self._refresh_rects()
+        self._keys_changed()
+        self._say('ตั้งกรอบแคปให้ครบก่อน (อย่างน้อย กล่องของขวัญ) · เลือกเซ็ตในแท็บหลักฐานเทส แล้วกด ▶ เริ่ม', C['dim'])
+        self._tick()
+        self._poll()
+
+    # ---------- ทั่วไป ----------
+    def _poll(self):
+        try:
+            while True:
+                it = self.q.get_nowait()
+                try:
+                    if it[0] == 'key':
+                        self._on_key(it[1])
+                    elif it[0] == 'sent':
+                        self._sent(*it[1:])
+                except Exception as ex:
+                    self.app.log('หลักฐานเทส (อัตโนมัติ): %s' % str(ex)[:120], 'ERR')
+        except queue.Empty:
+            pass
+        try:
+            self.top.after(80, self._poll)
+        except Exception:
+            pass
+    def _say(self, text, fg=None):
+        try:
+            self.lbl.config(text=text, fg=fg or C['fg'])
+        except Exception:
+            pass
+
+    def _save_prefs(self):
+        self.prefs['eva_rects'] = {k: r['rect'] for k, r in self.rows.items() if r['rect']}
+        self.prefs['eva_keys'] = dict({k: r['key'].get() for k, r in self.rows.items()}, save=self.v_save.get())
+        try:
+            self.prefs['eva_show'] = bool(self.v_show.get())
+        except Exception:
+            pass
+        try:
+            save_prefs(self.prefs)
+        except Exception:
+            pass
+
+    def _refresh_rects(self):
+        for k, r in self.rows.items():
+            rc = r['rect']
+            r['st'].config(text=('%d×%d ที่ (%d, %d)' % (rc[2], rc[3], rc[0], rc[1])) if rc else '— ยังไม่ได้ตั้ง',
+                           fg=C['fg'] if rc else C['warn'])
+
+    def _keymap(self):
+        m = {}
+        for i, (k, _, _) in enumerate(EVA_REGIONS, 1):
+            m[i] = ('shot', k, self.rows[k]['key'].get())
+        m[9] = ('save', '', self.v_save.get())
+        return m
+
+    def _keys_changed(self):
+        m = self._keymap()
+        used = [v[2] for v in m.values()]
+        dup = sorted({x for x in used if used.count(x) > 1})
+        if self.hot:
+            self.hot.stop()
+            self.hot = None
+        if dup:
+            self.lbl_keys.config(text='⚠ คีย์ลัดซ้ำกัน: %s — เลือกให้ไม่ซ้ำ' % ', '.join(dup))
+            return
+        self._save_prefs()
+        try:
+            self.hot = self.hotkey_cls({i: v[2] for i, v in m.items()}, self._hotkey)
+            bad = list(getattr(self.hot, 'bad', []))
+        except Exception as ex:
+            bad = ['ใช้คีย์ลัดไม่ได้ (%s)' % str(ex)[:60]]
+        self.lbl_keys.config(text=('⚠ คีย์ลัดใช้ไม่ได้: %s (โปรแกรมอื่นจองไว้ — เลือกคีย์อื่น หรือกดปุ่มในหน้าต่างนี้แทน)'
+                                   % ', '.join(bad)) if bad else
+                             'คีย์ลัดกดได้ตอนอยู่ในเกม: ' + ' · '.join('%s = %s' % (v[2], 'แคป ' + dict(
+                                 (k, l) for k, l, _ in EVA_REGIONS)[v[1]] if v[0] == 'shot' else 'บันทึก + เซ็ตถัดไป')
+                                 for v in m.values()), fg=C['warn'] if bad else C['dim'])
+
+    def _hotkey(self, i):
+        """เรียกจากเธรดคีย์ลัด — แค่ฝากคิวไว้ (ห้ามแตะ Tk จากเธรดนี้)"""
+        self.q.put(('key', i))
+
+    def _on_key(self, i):
+        m = self._keymap().get(i)
+        if not m:
+            return
+        if m[0] == 'shot':
+            self.snap(m[1])
+        else:
+            self.save_next()
+
+    def _tick(self):
+        try:
+            if (self.running and CHROME_HOLD.get('close') and CHROME_HOLD.get('what') == EVA_HOLD
+                    and self.state != 'sending'):
+                self._stop_run()
+                self._say('ปิด Chrome ให้งานอื่นใช้แล้ว — ภาพ/เซ็ตยังอยู่ครบ · จะทำต่อกด ▶ เริ่ม', C['warn'])
+            if self.sent_at and self.state == 'wait':
+                s = int((datetime.now() - self.sent_at).total_seconds())
+                self.lbl_t.config(text='ส่งไปแล้ว %d:%02d นาที  ·  แคปแล้ว %d ภาพ' % (s // 60, s % 60, len(self.ev.shots)))
+            elif self.state == 'idle':
+                self.lbl_t.config(text='')
+            self.top.after(1000, self._tick)
+        except Exception:
+            pass
+
+    # ---------- ตั้งกรอบแคป ----------
+    def pick(self, k):
+        """แคปทุกจอ แล้วให้ลากกรอบบนภาพ (ไม่ต้องสลับไปหน้าต่างอื่น)"""
+        try:
+            x0, y0, w, h, png = self.shot_fn()
+        except Exception as ex:
+            return messagebox.showerror('แคปจอไม่ได้', str(ex)[:300], parent=self.top)
+        import base64
+        a = self.app
+        sw, sh = a.root.winfo_screenwidth(), a.root.winfo_screenheight()
+        f = max(1, -(-w // max(1, sw - 40)), -(-h // max(1, sh - 120)))
+        img = tk.PhotoImage(data=base64.b64encode(png).decode())
+        if f > 1:
+            img = img.subsample(f)
+        t = tk.Toplevel(a.root)
+        t.title('ลากกรอบรอบ “%s” — Esc = ยกเลิก' % dict((kk, l) for kk, l, _ in EVA_REGIONS)[k])
+        t.configure(bg='black')
+        try:
+            t.attributes('-topmost', True)
+        except Exception:
+            pass
+        cv = tk.Canvas(t, width=img.width(), height=img.height(), highlightthickness=0, bg='black', cursor='crosshair')
+        cv.pack()
+        cv.create_image(0, 0, image=img, anchor='nw')
+        cv.img = img
+        cv.create_text(12, 12, anchor='nw', fill='yellow', font=('Segoe UI', 12, 'bold'),
+                       text='ลากเมาส์คลุมพื้นที่ที่จะแคป แล้วปล่อย  ·  Esc = ยกเลิก')
+        st = {}
+
+        def down(e):
+            st['p'] = (e.x, e.y)
+            st['r'] = cv.create_rectangle(e.x, e.y, e.x, e.y, outline='red', width=2)
+
+        def move(e):
+            if 'r' in st:
+                cv.coords(st['r'], st['p'][0], st['p'][1], e.x, e.y)
+
+        def up(e):
+            if 'p' not in st:
+                return
+            x1, y1 = st['p']
+            xa, xb = sorted((x1, e.x))
+            ya, yb = sorted((y1, e.y))
+            if xb - xa < 8 or yb - ya < 8:
+                return
+            rc = [x0 + xa * f, y0 + ya * f, (xb - xa) * f, (yb - ya) * f]
+            self.rows[k]['rect'] = rc
+            self._save_prefs()
+            self._refresh_rects()
+            t.destroy()
+            self.app.log('หลักฐานเทส (อัตโนมัติ): ตั้งกรอบ %s = %s' % (k, rc), 'INFO')
+        cv.bind('<ButtonPress-1>', down)
+        cv.bind('<B1-Motion>', move)
+        cv.bind('<ButtonRelease-1>', up)
+        t.bind('<Escape>', lambda e: t.destroy())
+        try:
+            t.geometry('+0+0')
+            t.focus_force()
+        except Exception:
+            pass
+
+    # ---------- แคป ----------
+    def _shot_dir(self):
+        d = os.path.join(self.ev.out_root, 'ภาพแคปอัตโนมัติ', datetime.now().strftime('%Y-%m-%d'))
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def snap(self, k, test=False):
+        rc = self.rows[k]['rect']
+        name = dict((kk, l) for kk, l, _ in EVA_REGIONS)[k]
+        if not rc:
+            return self._say('ยังไม่ได้ตั้งกรอบ “%s” — กด 📐 ตั้งกรอบ ก่อน' % name, C['warn'])
+        if not test and self.ev.cur is None:
+            return self._say('ยังไม่ได้เลือกเซ็ต — เลือกเซ็ตในแท็บหลักฐานเทส แล้วกด ▶ เริ่ม', C['warn'])
+        try:
+            w, h, bgra = self.grab_fn(rc)
+        except Exception as ex:
+            return self._say('✗ แคปไม่ได้: %s' % str(ex)[:120], C['err'])
+        blank = eva_blank(bgra)
+        s = self.ev.sets[self.ev.cur] if self.ev.cur is not None else {}
+        fn = '%s_%s_%s.png' % (datetime.now().strftime('%H%M%S%f')[:8], s.get('bundle') or 'x', k)
+        try:
+            path = os.path.join(self._shot_dir(), fn)
+            with open(path, 'wb') as fo:
+                fo.write(eva_png(w, h, bgra))
+        except Exception as ex:
+            return self._say('✗ เซฟภาพไม่ได้: %s' % str(ex)[:120], C['err'])
+        if test:
+            try:
+                os.startfile(path)
+            except Exception:
+                pass
+            return self._say(('⚠ ภาพดำ/สีเดียวทั้งภาพ — เกมเต็มจอแบบแคปไม่ได้ ตั้งเกมเป็นโหมดหน้าต่างก่อนนะ' if blank else
+                              '👁 ภาพทดลอง “%s” (%d×%d) เปิดให้ดูแล้ว — ไม่ได้ใส่ในเซ็ต' % (name, w, h)),
+                             C['warn'] if blank else C['ok'])
+        self.ev.take(path)
+        self.nshot += 1
+        self.app.log('หลักฐานเทส (อัตโนมัติ): 📸 %s %d×%d%s' % (name, w, h, ' ⚠ ภาพดำ' if blank else ''),
+                     'WARN' if blank else 'INFO')
+        if blank:
+            self._say('⚠ ภาพ “%s” ดำ/สีเดียว — เกมเต็มจอแบบแคปไม่ได้? (ลบภาพได้ที่ ✕ ในแท็บ)' % name, C['warn'])
+        else:
+            self._say('📸 แคป “%s” แล้ว (ภาพที่ %d ของเซ็ตนี้) — แคปต่อได้ · เสร็จกด %s บันทึก + เซ็ตถัดไป'
+                      % (name, len(self.ev.shots), self.v_save.get()), C['ok'])
+
+    # ---------- ส่ง Bundle ----------
+    def _urls(self):
+        u = self.prefs.get('eva_url')
+        return ([u] if u else []) + [x for x in EVA_URLS if x != u]
+
+    def _busy(self):
+        a = self.app
+        return bool(getattr(a, 'running', False) or getattr(a, 'c_running', False)
+                    or (getattr(a, 'b_running', False) and not self.running)
+                    or getattr(a, 'w_running', False) or getattr(getattr(a, 'gen', None), 'w_running', False))
+
+    def start(self):
+        ev = self.ev
+        if not self.rows['gift']['rect']:
+            return self._say('ตั้งกรอบ “กล่องของขวัญ” ก่อนนะ (📐 ตั้งกรอบ)', C['warn'])
+        if ev.cur is None:
+            i = ev._sel_index()
+            if i is None:
+                i = next((j for j in ev._view() if not ev.sets[j].get('done')), None)
+            if i is None:
+                return self._say('ไม่มีเซ็ตที่ยังไม่ได้บันทึก — นำเข้าไฟล์ชีทในแท็บหลักฐานเทสก่อน', C['warn'])
+            ev.choose(i)
+        if not self.running:
+            if CHROME_HOLD.get('on') and CHROME_HOLD.get('what') == EVA_HOLD:      # Chrome รอบก่อนยังปิดไม่เสร็จ
+                self._say('กำลังปิด Chrome รอบก่อน…', C['dim'])
+                return self.top.after(500, self.start)
+            if chrome_held_ask(self.app, self.start):
+                return
+            if self._busy():
+                return self._say('แท็บอื่นกำลังใช้ Chrome อยู่ — รอให้เสร็จก่อนนะ', C['warn'])
+            self._say('กำลังเปิด Chrome (ซ่อนหน้าต่าง)…', C['dim'])
+            self.top.update_idletasks()
+            self.sender = self.sender_cls(self.app, headless=not self.v_show.get())
+            if not self.sender.wait():
+                why = getattr(self.sender, 'err', '') or 'เปิด Chrome ไม่ได้'
+                self.sender = None
+                return self._say('✗ %s' % why[:160], C['err'])
+            self.running = True
+            self.app.b_running = True               # กันแท็บอื่นใช้ Chrome ชนกัน (แบบเดียวกับแท็บอื่นๆ)
+            # แท็บอื่นกดเริ่มงาน = ถามก่อนว่าให้ปิด Chrome ตัวนี้แล้วเริ่มเลยไหม (ตัวถามเดิม chrome_held_ask)
+            CHROME_HOLD.update(on=True, close=False, what=EVA_HOLD, thread=getattr(self.sender, 'th', None))
+            self.btn_go.config(text='▶  ส่งเซ็ตนี้')
+            self.app.log('หลักฐานเทส (อัตโนมัติ): เริ่มรอบส่งเทส + แคป', 'STEP')
+        self.send_current()
+
+    def send_current(self):
+        ev = self.ev
+        if ev.cur is None:
+            self.state = 'idle'
+            return self._say('✓ ครบทุกเซ็ตในรายการแล้ว', C['ok'])
+        s = ev.sets[ev.cur]
+        bid = str(s.get('bundle') or '').strip()
+        name = ev_set_name(s)
+        if not bid.isdigit():
+            self.state = 'idle'
+            return self._say('⚠ เซ็ต “%s” ไม่มีเลข Bundle — แก้เลขในแท็บ (✏ แก้ชื่อ / Bundle) แล้วกด 📤 ส่งซ้ำ '
+                             'หรือ ⏭ ข้ามเซ็ต' % name[:40], C['warn'])
+        if not self.running:
+            return self.start()
+        self.state = 'sending'
+        self.cur_bid = bid
+        self._say('📤 กำลังกด “%s” #%s  (%s)…' % (EVA_BTN, bid, name[:40]), C['dim'])
+        self.app.log('หลักฐานเทส (อัตโนมัติ): ส่ง Bundle #%s — %s' % (bid, name), 'INFO')
+        self.sender.send(bid, self._urls(), lambda r, b=bid, i=ev.cur: self.q.put(('sent', r, b, i)))
+
+    def _sent(self, r, bid, idx):
+        if idx != self.ev.cur:
+            return
+        if r.get('url') and r.get('url') != self.prefs.get('eva_url'):
+            self.prefs['eva_url'] = r['url']
+            self._save_prefs()
+        if r.get('ok'):
+            self.state = 'wait'
+            self.sent_at = datetime.now()
+            self.app.log('หลักฐานเทส (อัตโนมัติ): ✓ ส่ง Bundle #%s แล้ว%s' % (
+                bid, ('  (%s)' % r['toast'][:60]) if r.get('toast') else ''), 'OK')
+            keys = ' / '.join('%s %s' % (self.rows[k]['key'].get(), l.split(' (')[0]) for k, l, _ in EVA_REGIONS
+                              if self.rows[k]['rect'])
+            self._say('✓ ส่ง Bundle #%s แล้ว %s — ของเข้าช้า 1–2 นาที\nในเกม: สลับไปคลัง แล้วกลับมากล่องของขวัญ → กด %s '
+                      '(แคปได้หลายภาพ) · เสร็จกด %s บันทึก + เซ็ตถัดไป'
+                      % (bid, self.sent_at.strftime('%H:%M:%S'), keys, self.v_save.get()), C['ok'])
+        else:
+            self.state = 'wait' if r.get('unsure') else 'idle'
+            if r.get('unsure'):
+                self.sent_at = datetime.now()
+            self.app.log('หลักฐานเทส (อัตโนมัติ): %s Bundle #%s — %s' % ('?' if r.get('unsure') else '✗', bid,
+                                                                       r.get('why')), 'WARN' if r.get('unsure') else 'ERR')
+            self._say(('? %s\n(ของเข้าแล้ว = แคปต่อได้เลย · ไม่เข้า = 📤 ส่งซ้ำ)' if r.get('unsure') else
+                       '✗ ส่ง Bundle #%s ไม่สำเร็จ: %%s\n📤 ส่งซ้ำ / ⏭ ข้ามเซ็ต' % bid) % r.get('why', ''),
+                      C['warn'] if r.get('unsure') else C['err'])
+
+    def resend(self):
+        if self.state == 'sending' or self.state == 'saving':
+            return
+        self.send_current()
+
+    def skip(self):
+        ev = self.ev
+        if ev.cur is None or self.state in ('sending', 'saving'):
+            return
+        view = ev._view()
+        cur = ev.cur
+        nxt = next((j for j in view[view.index(cur) + 1:] if not ev.sets[j].get('done')), None) if cur in view else None
+        self.app.log('หลักฐานเทส (อัตโนมัติ): ⏭ ข้ามเซ็ต “%s” (ยังไม่ได้บันทึก)' % ev_set_name(ev.sets[cur]), 'WARN')
+        if nxt is None:
+            self.state = 'idle'
+            return self._say('ไม่มีเซ็ตถัดไปแล้ว', C['dim'])
+        ev.choose(nxt, ask=False)
+        self.send_current()
+
+    # ---------- บันทึก + เซ็ตถัดไป ----------
+    def save_next(self):
+        ev = self.ev
+        if self.state in ('sending', 'saving') or ev.saving:
+            return
+        if ev.cur is None:
+            return self._say('ยังไม่ได้เลือกเซ็ต', C['warn'])
+        if not ev.shots:
+            return self._say('ยังไม่มีภาพของเซ็ตนี้ — กดคีย์ลัดแคปก่อนนะ', C['warn'])
+        idx = ev.cur
+        # ตัวบันทึกเดิมถามได้ 2 แบบ (ยังไม่ได้ติ๊กตรวจ / มีภาพเดียว) — รอบอัตโนมัติผู้ใช้อยู่ในเกม ตอบ “บันทึกเลย” แทน
+        # ภาพที่ได้เขียนผลตามจริง (ยังไม่ได้ตรวจ N) เหมือนกดบันทึกเลยเอง
+        orig_ask, orig_yes = ev._ask_unchecked, messagebox.askyesno
+        ev._ask_unchecked = lambda *a_, **k_: True
+        messagebox.askyesno = lambda *a_, **k_: True
+        try:
+            ev.save()
+        finally:
+            messagebox.askyesno = orig_yes
+            try:
+                del ev._ask_unchecked
+            except Exception:
+                ev._ask_unchecked = orig_ask
+        if not ev.saving:
+            return self._say('บันทึกไม่ได้ — ดูในแท็บหลักฐานเทส', C['err'])
+        self.state = 'saving'
+        self._say('💾 กำลังบันทึกภาพรวม…', C['dim'])
+
+        def wait():
+            if ev.saving:
+                return self.top.after(300, wait)
+            self.state = 'idle'
+            if not ev.sets[idx].get('done'):
+                return self._say('✗ บันทึกไม่สำเร็จ — ดูในแท็บหลักฐานเทส', C['err'])
+            self.app.log('หลักฐานเทส (อัตโนมัติ): 💾 บันทึก “%s” แล้ว' % ev_set_name(ev.sets[idx]), 'OK')
+            if ev.cur is None:
+                return self._say('✓ บันทึกแล้ว — ครบทุกเซ็ตในรายการแล้ว 🎉', C['ok'])
+            if not self.running:
+                return self._say('✓ บันทึกแล้ว — กด ▶ เริ่ม เพื่อส่งเซ็ตถัดไป', C['ok'])
+            self.send_current()
+        self.top.after(300, wait)
+
+    def _stop_run(self):
+        """ปิด Chrome ของรอบนี้ + ปล่อยให้แท็บอื่นใช้ Chrome ได้ (ภาพ/เซ็ตในแท็บไม่หาย)"""
+        s, self.sender = self.sender, None
+        was = self.running
+        self.running = False
+        if was:
+            self.app.b_running = False
+            self.app.log('หลักฐานเทส (อัตโนมัติ): ปิด Chrome ของรอบส่งเทส + แคป', 'INFO')
+        self.state = 'idle'
+        self.sent_at = None
+        try:
+            self.btn_go.config(text='▶  เริ่ม (ส่งเซ็ตนี้)')
+        except Exception:
+            pass
+
+        def shut():
+            if s is not None:
+                try:
+                    s.close()
+                except Exception:
+                    pass
+            if CHROME_HOLD.get('what') == EVA_HOLD:
+                CHROME_HOLD.update(on=False, close=False, what='', thread=None)
+        threading.Thread(target=shut, daemon=True).start()
+
+    def close(self):
+        if self.state in ('sending', 'saving'):
+            return self._say('รอให้ขั้นนี้เสร็จก่อนค่อยปิดนะ', C['warn'])
+        if self.hot:
+            self.hot.stop()
+            self.hot = None
+        self._stop_run()
+        try:
+            self.top.destroy()
+        except Exception:
+            pass
+        if getattr(self.ev, '_eva', None) is self:
+            self.ev._eva = None
+
+
+def eva_open(app):
+    ev = getattr(app, 'ev', None)
+    if ev is None:
+        return None
+    w = getattr(ev, '_eva', None)
+    if w is not None:
+        try:
+            w.top.deiconify()
+            w.top.lift()
+            return w
+        except Exception:
+            pass
+    if os.name != 'nt' and EvaWin.grab_fn is eva_capture:
+        messagebox.showinfo('ส่งเทส + แคปอัตโนมัติ', 'ใช้ได้บน Windows เท่านั้น')
+        return None
+    ev._eva = EvaWin(ev)
+    return ev._eva
+
+
+def eva_install(app):
+    """วางปุ่ม “🤖 ส่งเทส + แคปอัตโนมัติ” ในแท็บหลักฐานเทส (ข้างปุ่ม เพิ่มภาพจากไฟล์ — หาจากข้อความ ไม่ยึดตำแหน่ง)"""
+    ev = getattr(app, 'ev', None)
+    if ev is None:
+        return None
+    b = link_find_btn(app.tab_ev, 'เพิ่มภาพจากไฟล์')
+    if b is None:
+        app.log('วางปุ่มส่งเทส + แคปอัตโนมัติไม่ได้ — หาปุ่มเดิมไม่เจอ', 'WARN')
+        return None
+    row = tk.Frame(b.master.master, bg=C['bg'])                     # แถวใหม่ใต้แถวปุ่มเดิม (แถวเดิมไม่ขยับ)
+    row.pack(fill='x', pady=(6, 0), after=b.master)
+    nb = app._btn(row, '🤖  ส่งเทส + แคปอัตโนมัติ', lambda: eva_open(app), primary=True)
+    nb.pack(side='left', ipadx=8, ipady=3)
+    tk.Label(row, text='กด “ทดสอบส่ง Bundle” บนเว็บให้ + คีย์ลัดแคปกรอบในเกม + บันทึกแล้วไปเซ็ตถัดไป',
+             bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(side='left', padx=(8, 0))
+    return nb
 
 
 if __name__ == '__main__':
