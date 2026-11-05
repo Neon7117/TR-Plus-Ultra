@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.8.1 : สร้าง Event — แก้ “เพิ่ม/เปิดชุดที่ 1 ไม่ได้” (เว็บจริงแยกเลขชุดคนละ text node) · ชื่อ Event ไม่หยิบป้าย (Event Type) · เลข Bundle ต่ำกว่า 1000 เตือน · พังแล้วเก็บหน้าตากล่องไว้ดู
 V1.8.0 : แท็บใหม่ 🎉 สร้าง Event (ถัดจาก Item Code) — 1 ชีท = 1 Event · ของรางวัล = ทุกตาราง fdItemNum · ช่วงรับรางวัลจากป้าย · ปีย่อ 69 = 2026 · เมนู ส่งไป… มีสร้าง Event
 V1.7.2 : ปุ่ม “ส่งไป…” ในแท็บสร้าง Bundle เพิ่ม 📸 หลักฐานเทส (ไฟล์เดิม ชีทเดิม + เติมเลข Bundle ที่ว่างตามตารางเดียวกัน)
 V1.7.1 : เชื่อมแท็บ — ปุ่ม “ส่งไป…” ค้นหา / สร้าง Item → สร้าง Bundle · สร้าง Bundle → Product / WR Master / Item Code / Check in Booster (เปิดหน้านำเข้าไฟล์เดิม ชีทเดิม ให้เลย)
@@ -22079,6 +22080,9 @@ _EVT_START = ('เริ่ม', 'start', 'startdate', 'วันเริ่ม
               'วันเริ่มรับรางวัล', 'from')
 _EVT_END = ('สิ้นสุด', 'end', 'enddate', 'วันสิ้นสุด', 'วันที่สิ้นสุด', 'หมดเขต', 'สิ้นสุดรับ', 'สิ้นสุดรับรางวัล',
             'วันสิ้นสุดการรับรางวัล', 'ถึง', 'to', 'จบ')
+_EVT_NAME_LBL = ('ชื่อกิจกรรม', 'ชื่ออีเว้นท์', 'ชื่ออีเว้นต์', 'ชื่อevent', 'eventname', 'eventtitle', 'webevent',
+                 'ชื่อ Event', 'Event Name', 'Web-Event')
+_EVT_LBL_SKIP = ('Event Type', 'ประเภท', 'ประเภทกิจกรรม', 'type', 'Date', 'วันที่', 'Start', 'End', 'Period', 'Status')
 _EVT_NOT_TITLE = ('วันที่จัดส่ง', 'สถานะการจัดส่ง', 'รายละเอียดกิจกรรม', 'ผู้รับผิดชอบ', 'no', 'reward')
 _EVT_MON = dict([(x.lower(), i + 1) for i, x in enumerate(_WR_MONTH)] + [(x, i + 1) for i, x in enumerate(_WR_MONTH_TH)]
                 + [(x, i + 1) for i, x in enumerate(_WR_MONTH_TH_S)]
@@ -22245,7 +22249,17 @@ def evt_find_period(rows):
 
 
 def evt_title(rows, sheet):
-    """ชื่อ Event = หัวเรื่องบนสุดของชีท (3 แถวแรก ข้อความแรกที่ไม่ใช่ป้าย) · ไม่มี = ชื่อชีท"""
+    """ชื่อ Event = ป้าย “ชื่อกิจกรรม / Event Name / Web-Event” -> ค่าทางขวา · ไม่มีป้าย = หัวเรื่องบนสุดของชีท
+    (3 แถวแรก ข้อความแรกที่ไม่ใช่ป้าย — ข้อความที่มีค่าอยู่ช่องถัดไป เช่น “Event Type | xxx” = ป้าย ไม่ใช่ชื่อ) · ไม่มี = ชื่อชีท"""
+    NAME = {_hkey(x) for x in _EVT_NAME_LBL}
+    right = lambda r, c: next((clean_text(rows[r][k]).replace('\n', ' ').strip() for k in range(c + 1, min(c + 4, len(rows[r])))
+                               if isinstance(rows[r][k], str) and clean_text(rows[r][k]).strip()), '')
+    for r in range(min(12, len(rows))):
+        for c, v in enumerate((rows[r] or [])[:12]):
+            if isinstance(v, str) and _hkey(clean_text(v)) in NAME:
+                t = right(r, c)
+                if t and len(t) <= 90:
+                    return t, 'label'
     for r in range(min(3, len(rows))):
         for c in range(min(4, len(rows[r] or []))):
             v = rows[r][c]
@@ -22254,10 +22268,50 @@ def evt_title(rows, sheet):
             t = clean_text(v).replace('\n', ' ').strip()
             if not t or len(t) > 90 or any(_hkey(t).startswith(_hkey(x)) for x in _EVT_NOT_TITLE):
                 continue
-            if _hkey(t) in ('template',):
+            if _hkey(t) in ('template',) or _hkey(t) in {_hkey(x) for x in _EVT_LBL_SKIP}:
                 continue
+            if any(rows[r][k] not in (None, '') for k in range(c + 1, min(c + 3, len(rows[r])))):
+                continue                                 # “ป้าย | ค่า” ไม่ใช่หัวเรื่อง
+            if any(rows[r][k] not in (None, '') for k in range(max(0, c - 2), c)):
+                continue                                 # ค่าของป้ายทางซ้าย ไม่ใช่หัวเรื่อง
             return t, 'sheet-title'
     return (clean_text(sheet) or str(sheet)).strip(), 'sheet-name'
+
+
+_EVT_BUNDLE_LBL = ('bundle', 'bundleid', 'bundleno', 'เลขbundle', 'bundlenumber', 'เลขบันเดิล', 'บันเดิล')
+
+
+def evt_bundle_label(rows, s):
+    """เลข Bundle จากป้าย “Bundle” เหนือตาราง (ไม่เกิน 5 แถว · เลขอยู่ทางขวาไม่เกิน 8 ช่อง หรือใต้ป้าย) -> 'เลข' | ''
+    (v1.8.1) ชีทบางแบบเขียนราคา “200฿” ไว้ช่องซ้ายของหัวตาราง (Excel เก็บเป็นเลข 200) — ป้าย Bundle ชัดกว่า เลยใช้ป้ายก่อน
+    ไม่ข้ามไปตารางข้างบน (เจอแถวหัวตาราง / แถวไอเทมของตารางอื่น = หยุด)"""
+    try:
+        r = int(s.get('row') or 0) - 1
+        m = re.search(r'!([A-Z]+)\d+$', str(s.get('ref') or ''))
+        c = col_index(m.group(1)) if m else 0
+        bl, br = s.get('_band') or (c, c)
+    except Exception:
+        return ''
+    L = {_hkey(x) for x in _EVT_BUNDLE_LBL}
+    for rr in range(r - 1, max(-1, r - 6), -1):
+        row = rows[rr] or []
+        if any(_hkey(v) == 'fditemnum' for v in row) or (rr < r - 1 and src_int(_ou_cell(rows, rr, c)) is not None):
+            break
+        for cc in range(max(0, bl - 3), min(len(row), br + 2)):
+            if _hkey(clean_text(row[cc])) not in L:
+                continue
+            for k in range(cc + 1, min(len(row), cc + 9)):
+                v = row[k]
+                if v is None or (isinstance(v, str) and not v.strip()):
+                    continue
+                n = src_int(v)
+                if n is not None and len(n) >= 3:
+                    return n
+                break                                   # เจอข้อความอื่นก่อนเลข = ไม่ใช่เลขของป้ายนี้
+            n = src_int(_ou_cell(rows, rr + 1, cc))
+            if n is not None and len(n) >= 3 and rr + 1 < r:
+                return n
+    return ''
 
 
 def evt_parse_rows(rows, sheet):
@@ -22270,6 +22324,9 @@ def evt_parse_rows(rows, sheet):
     rw = []
     for s in sets:
         title = ev_set_name(s)
+        lb = evt_bundle_label(rows, s)
+        if lb:
+            s['bundle'] = lb
         rw.append({'title': title, 'name': '%s - %s' % (name, title), 'bundle': str(s.get('bundle') or ''),
                    'bundle_src': 'ชีท' if s.get('bundle') else '', 'row': s.get('row'), 'items': len(s.get('items') or []),
                    'notitle': any('หาชื่อเซ็ต' in w for w in s.get('warn') or []), 'use': True})
@@ -22300,8 +22357,8 @@ def evt_dyn(t, now=None):
             S('ของรางวัล “%s” ยังไม่มีเลข Bundle' % (r.get('title') or i))
             continue
         seen.setdefault(b, []).append(r.get('title') or str(i))
-        if int(b) < 100:
-            W('ของรางวัล “%s” เลข Bundle %s น้อยผิดปกติ — ชีทอาจเขียนจำนวน/ราคาไว้ตรงนั้น' % (r.get('title'), b))
+        if int(b) < 1000:
+            W('ของรางวัล “%s” เลข Bundle %s น้อยผิดปกติ — ชีทอาจเขียนจำนวน/ราคาไว้ตรงนั้น เช็กเลขก่อนนะ' % (r.get('title'), b))
         if r.get('notitle'):
             W('ตาราง “%s” หาหัวตารางไม่เจอ — ชื่อรางวัลแก้ได้ในหน้าแก้ไข' % r.get('title'))
     for b, ts in seen.items():
@@ -22468,12 +22525,21 @@ JS_EVT = r"""
     }
     return null;
   }
+  // หัวชุด “ของรางวัลชุดที่ N” — เว็บจริง (React) แยก “ของรางวัลชุดที่ ” กับเลข N เป็นคนละ text node
+  // เลยต้องอ่านข้อความของทั้งแท็ก ไม่ใช่ทีละ node (v1.8.1 — เคยพลาดตรงนี้ เพิ่มชุดแล้วนับไม่เจอ)
   function headCur(cd) {
     const w = document.createTreeWalker(cd, NodeFilter.SHOW_TEXT, null, false);
     let n;
     while ((n = w.nextNode())) {
-      const m = (n.textContent || '').match(/ของรางวัลชุดที่\s*(\d+)/);
-      if (m && vis(n.parentElement)) return +m[1];
+      if ((n.textContent || '').indexOf('ของรางวัลชุดที่') < 0) continue;
+      let el = n.parentElement;
+      if (!el || !vis(el)) continue;
+      for (let i = 0; i < 3 && el; i++) {
+        const m = txt(el).match(/^ของรางวัลชุดที่\s*(\d+)/);
+        if (m) return +m[1];
+        if (txt(el).length > 60) break;
+        el = el.parentElement;
+      }
     }
     return 0;
   }
@@ -22510,6 +22576,12 @@ JS_EVT = r"""
     if (!hit) return 'ไม่เจอป้ายชุดที่ ' + a;
     mark(hit, 'data-trw-evtab');
     return 'ok';
+  }
+  if (act === 'dump') {                                // เก็บหน้าตากล่องของรางวัลไว้ดู (ไม่มีข้อมูลลับ)
+    const cd = card();
+    let el = cd;
+    if (!el) { el = addBtn(); for (let i = 0; i < 5 && el && el.parentElement; i++) el = el.parentElement; }
+    return el ? el.outerHTML.slice(0, 300000) : document.body.outerHTML.slice(0, 300000);
   }
   if (act === 'submit') {                              // ปุ่ม “สร้าง Event” (ข้อความตรงเป๊ะ ไม่ใช่ บันทึกและสร้างต่อ)
     const bs = [...document.querySelectorAll('button')].filter(x => vis(x) && !x.closest(POP) && txt(x) === a);
@@ -22588,6 +22660,17 @@ class EvtRunner(PdRunner):
             return False
         return cur == i or await self._goto_reward(page, i)
 
+    async def _dump(self, page, what):
+        """หน้าตาไม่เหมือนที่คาด -> เก็บโครงกล่องของรางวัลไว้ (ส่งไฟล์นี้มาให้ดูได้)"""
+        try:
+            html = await self._ej(page, 'dump')
+            path = os.path.join(DATA_DIR, 'evt_debug_reward.html')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('<!-- %s · rw=%s -->\n' % (what, await self._ej(page, 'rw')) + html)
+            self.log('     (เก็บหน้าตากล่องของรางวัลไว้ที่ %s — ส่งไฟล์นี้มาให้ดูได้)' % path, 'INFO')
+        except Exception:
+            pass
+
     async def _bundle_name(self, page, bid):
         r = str(await page.evaluate(JS_CODE_BUNDLE_NAME, [bid]))
         return r.split('|', 1)[1] if r.startswith('ok|') else ''
@@ -22618,7 +22701,9 @@ class EvtRunner(PdRunner):
                 break
             who = 'ของรางวัล %d “%s”' % (i, (r.get('title') or '')[:30])
             if not await self._add_reward(page, i):
-                self.log('   ! %s: เพิ่ม/เปิดชุดที่ %d ไม่ได้' % (who, i), 'WARN')
+                n_, c_ = await self._rw(page)
+                self.log('   ! %s: เพิ่ม/เปิดชุดที่ %d ไม่ได้ (บนเว็บนับได้ %s ชุด · เปิดชุดที่ %s)' % (who, i, n_, c_), 'WARN')
+                await self._dump(page, who)
                 bad.append('%s (เพิ่มชุด)' % who)
                 break
             for lbl, val, what in ((SEL_EVT['r_th'], r['name'], 'ชื่อรางวัล (ไทย)'),
