@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.8.2 : เชื่อมแท็บ — ค้นหา/สร้าง Item → สร้าง Bundle เติม Aztek Item Id ได้กับชีทแบบ “ตำแหน่งช่อง” + หัว “ฺBundle” (เดิมเอาเลขช่อง 1, 2, 3 เป็น Id) · ผลค้นหาที่ข้ามบางแถวก็ยังจับคู่ได้
 V1.8.1 : สร้าง Event — แก้ “เพิ่ม/เปิดชุดที่ 1 ไม่ได้” (เว็บจริงแยกเลขชุดคนละ text node) · ชื่อ Event ไม่หยิบป้าย (Event Type) · เลข Bundle ต่ำกว่า 1000 เตือน · พังแล้วเก็บหน้าตากล่องไว้ดู
 V1.8.0 : แท็บใหม่ 🎉 สร้าง Event (ถัดจาก Item Code) — 1 ชีท = 1 Event · ของรางวัล = ทุกตาราง fdItemNum · ช่วงรับรางวัลจากป้าย · ปีย่อ 69 = 2026 · เมนู ส่งไป… มีสร้าง Event
 V1.7.2 : ปุ่ม “ส่งไป…” ในแท็บสร้าง Bundle เพิ่ม 📸 หลักฐานเทส (ไฟล์เดิม ชีทเดิม + เติมเลข Bundle ที่ว่างตามตารางเดียวกัน)
@@ -21358,14 +21359,29 @@ def link_items_book(app):
     for r in list(getattr(app, 'results', None) or []):
         if not r.get('miss'):
             hits.setdefault(r.get('seq'), []).append(r)
-    for i, c in enumerate(crit, 1):
+    by_kind = {}
+    for c in crit:
+        by_kind.setdefault(str(c.get('kind') or '').strip(), []).append(c)
+    for i in sorted(k for k in hits if isinstance(k, int)):
         h = hits.get(i) or []
         if len(h) != 1:
             continue                                  # ไม่เจอ / เจอหลายตัว = ไม่เดา
         iid = str(h[0].get('id') or '').strip()
-        hk = str(h[0].get('kind') or '').strip()
-        if not re.fullmatch(r'\d+', iid) or (hk and hk != str(c.get('kind') or '').strip()):
+        hk = str(h[0].get('req') or h[0].get('kind') or '').strip()
+        if not re.fullmatch(r'\d+', iid):
             continue
+        c = crit[i - 1] if 0 < i <= len(crit) else None
+        if c is None or (hk and hk != str(c.get('kind') or '').strip()):
+            # v1.8.2 ลำดับไม่ตรงกับรายการนำเข้า (ตอนตรวจก่อนค้นหา เลือกข้ามบางแถว) -> หาแถวต้นทางจาก ItemKind
+            # แถวที่ ItemKind นี้ต้องเป็นไอเทมเดียวกันหมด (ระยะเวลา/จำนวน/ชื่อ ตรงกัน) ถึงจะใช้ ไม่งั้นไม่เดา
+            cs = by_kind.get(hk) or []
+            try:
+                ks = {link_item_key(row_to_item(x)) for x in cs}
+            except Exception:
+                ks = set()
+            if len(ks) != 1:
+                continue
+            c = cs[0]
         try:
             d = row_to_item(c)
         except Exception:
@@ -21426,6 +21442,49 @@ def link_row_keys(rows):
     return out
 
 
+_LINK_THAI_MARK = re.compile('^[\u0e31\u0e34-\u0e3a\u0e47-\u0e4e\u200b-\u200d\ufeff]+|[\u0e31\u0e34-\u0e3a\u0e47-\u0e4e\u200b-\u200d\ufeff]+$')
+_LINK_SLOT = re.compile(r'ตำแหน่ง|ช่อง|\bslot\b|^position$', re.I)
+
+
+def link_hnorm(v):
+    """หัวคอลัมน์ตัดสระ/วรรณยุกต์ลอยที่พิมพ์ติดมาหน้า/หลังคำ (เช่น “ฺBundle” มี ฺ นำหน้า) · ตัวพิมพ์เล็ก"""
+    return _LINK_THAI_MARK.sub('', clean_text(v)).strip().lower()
+
+
+def link_is_slot(h):
+    """หัว “ตำแหน่งช่อง / ช่อง / slot / position” = เลขช่องบนกระดาน ไม่ใช่ Aztek Item Id (fdPosition ไม่นับ)"""
+    h = link_hnorm(h)
+    return bool(h) and 'fd' not in h and bool(_LINK_SLOT.search(h))
+
+
+def link_fix_layout(out, rep):
+    """แก้ “ในสำเนา” ให้ตัวอ่านเดิมอ่านถูก (ไม่แก้ไฟล์): หัว “ฺBundle” -> “Bundle” ·
+    คอลัมน์ ตำแหน่งช่อง (เลข 1, 2, 3 …) ซ้ายของ fdItemNum ล้างเลขทิ้ง — ไม่งั้นตัวอ่านเอาเลขช่องไปเป็น Aztek Item Id
+    (v1.8.2 ชีท TiTi’s a little Witch: บันเดิลขึ้น Id 1 … 82)"""
+    heads = _link_heads(out)
+    for k, (hr, anc) in enumerate(heads):
+        end = heads[k + 1][0] if k + 1 < len(heads) else len(out)
+        head = out[hr]
+        for fc in anc:
+            drows = [r for r in range(hr + 1, end) if fc < len(out[r] or []) and src_int(out[r][fc]) is not None]
+            for c in range(fc - 1, max(-1, fc - 6), -1):
+                h = head[c] if c < len(head) else None
+                if h is None:
+                    continue
+                if link_hnorm(h) == 'bundle' and clean_text(h).strip().lower() != 'bundle':
+                    head[c] = 'Bundle'
+                    rep.setdefault('fixed', []).append({'hr': hr, 'c': c, 'what': 'หัว “%s” = Bundle' % clean_text(h)})
+                if link_is_slot(h) and drows:
+                    n = 0
+                    for r in drows:
+                        if c < len(out[r]) and out[r][c] not in (None, ''):
+                            out[r][c] = None
+                            n += 1
+                    if n:
+                        rep.setdefault('slot', []).append({'hr': hr, 'c': c, 'head': clean_text(h), 'n': n})
+    return out
+
+
 def link_id_col(rows, hr, fc, drows=()):
     """คอลัมน์ Aztek Item Id ของตาราง (กติกาเดียวกับตัวอ่านบันเดิล: อยู่ทางซ้ายของ fdItemNum ·
     หัวที่บอกชัดว่าเป็นอย่างอื่น เช่น Bundle No. / Day / Rank ไม่ใช่) — เลือกตามลำดับ:
@@ -21433,7 +21492,9 @@ def link_id_col(rows, hr, fc, drows=()):
     head = rows[hr] or []
     cands = []
     for c in range(fc - 1, max(-1, fc - 6), -1):
-        h = clean_text(head[c]).lower() if c < len(head) else ''
+        h = link_hnorm(head[c]) if c < len(head) else ''
+        if link_is_slot(h):
+            continue                                   # เลขช่องบนกระดาน ไม่ใช่ Id (v1.8.2)
         strong = h == 'bundle' or 'aztek' in h or _hkey(h) in ('itemid', 'id', 'bundleid')
         if h and not strong and (any(k in h for k in _SRC_KNOWN) or _SRC_NOT_ID.match(h)):
             continue
@@ -21450,9 +21511,10 @@ def link_patch_rows(rows, book):
     """เติม Aztek Item Id ลง “ช่องว่าง” ในชีท ให้เหมือนคนกรอกในเอกสาร (ไม่แก้ไฟล์ — แค่ในหน่วยความจำ)
     คืน (rows ใหม่, {'filled': [...], 'mism': [...], 'nocol': [...]})"""
     rep = {'filled': [], 'mism': [], 'nocol': []}
-    out = [list(r) if r else [] for r in rows]
+    out = link_fix_layout([list(r) if r else [] for r in rows], rep)
     if not book:
         return out, rep
+    rows = [list(r) for r in out]                     # สำเนาหลังแก้หัว/ล้างเลขช่อง (ไว้หาคอลัมน์ — ไม่โดนเลขที่เติม)
     keys = link_row_keys(rows)
     heads = _link_heads(rows)
     for (r, fc), key in sorted(keys.items()):
@@ -21475,7 +21537,7 @@ def link_patch_rows(rows, book):
             rep['filled'].append({'r': r, 'c': idc, 'kind': key[0], 'id': hit['id'], 'src': hit['src'],
                                   'name': hit.get('name') or ''})
         elif str(src_int(cur) or '') != hit['id']:
-            rep['mism'].append({'r': r, 'kind': key[0], 'sheet_val': clean_text(cur), 'id': hit['id'],
+            rep['mism'].append({'r': r, 'kind': key[0], 'sheet_val': clean_text(num_str(cur)), 'id': hit['id'],
                                 'src': hit['src']})
     return out, rep
 
@@ -21654,6 +21716,14 @@ class LinkBundleImportDialog(BundleSplitImportDialog):
             try:
                 self.info.config(text=self.info.cget('text') + '  ·  🔗 เติม Aztek Item Id ให้ %d แถว (%s)' % (
                     n, ' · '.join('จาก%s %d' % kv for kv in src.items())))
+            except Exception:
+                pass
+        nslot = sum(x['n'] for r in reps for x in r.get('slot') or [])
+        if nslot:
+            try:
+                heads = sorted({x['head'] for r in reps for x in r.get('slot') or []})
+                self.info.config(text=self.info.cget('text') + '  ·  คอลัมน์ “%s” = เลขช่อง ไม่ใช่ Aztek Item Id (ไม่เอามาใช้)'
+                                 % '/'.join(heads))
             except Exception:
                 pass
         self._link_reps = reps
