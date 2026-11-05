@@ -11,6 +11,8 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.10.0: หลักฐานเทส — 🎮 เล่นแทนในเกม: หลังส่ง Bundle สลับแท็บ คลังเก็บ/กล่องของขวัญ ให้เองจนของครบ · แคปกล่องของขวัญ (ทุกหน้า) + คลังเก็บก่อน/หลังกดรับ · อ่านชื่อไทย (Tesseract) เทียบชีท ครบตรง = ติ๊ก ✓ + บันทึกเอง · สอนตำแหน่งปุ่มในเกมครั้งเดียว
+V1.9.1 : หลักฐานเทส — ตาราง “1 ชิ้น 1 บันเดิล” (คอลัมน์ Bundle รายแถว เช่น ชีท TiTi) อ่านเลข Bundle ได้ + ชื่อเซ็ต = หัวตาราง · ส่งเทสอัตโนมัติเลือก Bundle ที่จะส่งได้ + ส่งรอบละ 10 · ลบหลายเซ็ตทีเดียว
 V1.9.0 : หลักฐานเทส — ปุ่ม 🤖 ส่งเทส + แคปอัตโนมัติ: กด “ทดสอบส่ง Bundle” บนเว็บให้ (Chrome ซ่อน) · คีย์ลัด F6/F7/F8 แคปกรอบที่ลากไว้ในเกม · F9 บันทึก + ส่งเซ็ตถัดไป (ยังไม่ตรวจชื่อไอเทมจากภาพ)
 V1.8.2 : เชื่อมแท็บ — ค้นหา/สร้าง Item → สร้าง Bundle เติม Aztek Item Id ได้กับชีทแบบ “ตำแหน่งช่อง” + หัว “ฺBundle” (เดิมเอาเลขช่อง 1, 2, 3 เป็น Id) · ผลค้นหาที่ข้ามบางแถวก็ยังจับคู่ได้
 V1.8.1 : สร้าง Event — แก้ “เพิ่ม/เปิดชุดที่ 1 ไม่ได้” (เว็บจริงแยกเลขชุดคนละ text node) · ชื่อ Event ไม่หยิบป้าย (Event Type) · เลข Bundle ต่ำกว่า 1000 เตือน · พังแล้วเก็บหน้าตากล่องไว้ดู
@@ -15905,11 +15907,15 @@ def ev_bundle_in(t):
     return m.group(1) if m else ''
 
 
+# v1.9.1 ป้ายบอกรูปแบบตาราง “1 ชิ้น 1 บันเดิล” (เหนือคอลัมน์ Bundle) — ไม่ใช่ชื่อเซ็ต
+_EV_ONE_EACH = re.compile(r'1(ชิ้น|ไอเทม|item|items|อัน)1(บันเดิ้?ล|บันเดิล|bundles?)')
+
+
 def ev_is_label(t):
     k = _ev_norm(t)
     return (k in _EV_LABELS or k.startswith('limit') or k.startswith('เงื่อนไข')
             or k.startswith('เติมซ้ำ') or k.startswith('เติมข้าม') or k.startswith('ไม่จำกัด')
-            or bool(ev_bundle_in(t)))
+            or bool(ev_bundle_in(t)) or bool(_EV_ONE_EACH.fullmatch(k)))
 
 
 def _ev_txt(v):
@@ -15934,6 +15940,34 @@ def _ev_cands(rows, r, bl, br):
             continue
         out.append(t)
     return out
+
+
+_EV_MARK = re.compile('^[\u0e31\u0e34-\u0e3a\u0e47-\u0e4e]+|[\u0e31\u0e34-\u0e3a\u0e47-\u0e4e]+$')
+_EV_ROW_BUNDLE = {'bundle', 'bundleid', 'bundleno', 'เลขbundle', 'บันเดิล', 'บันเดิ้ล', 'เลขบันเดิล', 'เลขบันเดิ้ล'}
+
+
+def ev_row_bundle_col(rows, r, bl, br, drows):
+    """v1.9.1 ตารางแบบ “1 ชิ้น 1 บันเดิล”: คอลัมน์หัว Bundle ในแถวหัวตาราง ที่แถวไอเทมมีเลขของตัวเอง
+    (หัวพิมพ์สระลอยติดมา เช่น “ฺBundle” ก็นับ) -> เลขคอลัมน์ หรือ None
+    ต้องมีป้าย “1 ชิ้น 1 บันเดิล” เหนือหัวคอลัมน์นั้น — ชีทแบบ Template วางของ / Monthly Plan / Event
+    ใช้หัว “Bundle” ใส่ Aztek Item Id (เช่น 891) ห้ามเดาเป็นเลข Bundle"""
+    for j in range(bl, br + 1):
+        h = _EV_MARK.sub('', _hkey(_ou_cell(rows, r, j)))
+        if h not in _EV_ROW_BUNDLE:
+            continue
+        if not any(_EV_ONE_EACH.fullmatch(_ev_norm(_ou_cell(rows, y, j))) for y in range(max(0, r - 3), r)):
+            continue
+        n = sum(1 for x in drows if src_int(_ou_cell(rows, x, j)) is not None)
+        if n and n * 2 >= len(drows):
+            return j
+    return None
+
+
+def ev_bundle_text(s):
+    """เลข Bundle ที่โชว์ในตาราง: เลขเดียว · หลายเลข (1 ชิ้น 1 บันเดิล) = “56 ตัว” · ไม่มี = —"""
+    if s.get('bundle'):
+        return s['bundle']
+    return ('%d ตัว' % len(s['bundles'])) if s.get('bundles') else '—'
 
 
 def ev_days(raw):
@@ -16062,6 +16096,18 @@ def ev_sets_from_rows(rows, sheet):
                 if bundle:
                     break
 
+        # (3) v1.9.1 ไม่เจอทั้ง 2 แบบ = ตาราง “1 ชิ้น 1 บันเดิล”: แต่ละแถวมีเลข Bundle ของตัวเองในคอลัมน์ Bundle
+        bundles, nob = [], 0
+        if not bundle:
+            bc = ev_row_bundle_col(rows, r, bl, br, drows)
+            if bc is not None:
+                for it, x in zip(items, drows):
+                    it['bundle'] = src_int(_ou_cell(rows, x, bc)) or ''
+                bundles = list(dict.fromkeys(it['bundle'] for it in items if it['bundle']))
+                nob = sum(1 for it in items if not it['bundle'])
+                if len(bundles) == 1:                   # เลขเดียวทั้งตาราง (ช่องรวม) = Bundle ของเซ็ต
+                    bundle, bundles, nob = bundles[0], [], 0
+
         # ชื่อเซ็ต: (1) ป้าย CODE แล้วข้อความถัดไป (ชีท WR) · (2) แถวเหนือหัวตารางที่มีข้อความเดียว
         title, ty = '', None
         top = max(r - 8, prev_end + 1, 0)
@@ -16087,8 +16133,10 @@ def ev_sets_from_rows(rows, sheet):
         if not title:
             title, ty = '%s แถว %d' % (sheet, r + 1), r
             warn.append('หาชื่อเซ็ตไม่เจอ (ตั้งชื่อเองได้)')
-        if not bundle:
+        if not bundle and not bundles:
             warn.append('ไม่เจอเลข Bundle')
+        if nob and (bundles or bundle):
+            warn.append('ไม่มีเลข Bundle %d แถว' % nob)
         if namec is None:
             warn.append('ไม่เจอคอลัมน์ Display Name')
         if dayc is None:
@@ -16096,6 +16144,8 @@ def ev_sets_from_rows(rows, sheet):
         sets.append({'sheet': sheet, 'title': title, 'group': '', 'bundle': bundle,
                      'items': items, 'row': r + 1, 'ref': '%s!%s%d' % (sheet, col_letter(c), r + 1),
                      'warn': warn, '_ty': ty, '_band': (bl, br)})
+        if bundles:
+            sets[-1]['bundles'] = bundles
 
     # ชื่อซ้ำกันในชีทเดียว (เช่น "Recall 30 วัน" ทั้ง Tier 1 และ Tier 2) -> หาหัวข้อใหญ่มากำกับ
     titles = {}
@@ -16521,6 +16571,9 @@ class EvTab:
         s = self.sets[i]
         t = '%s  ·  %d ไอเทม  ·  ชีท %s%s' % (ev_set_name(s), len(s['items']), s['sheet'],
                                             (' แถว %d' % s['row']) if s.get('row') else '')
+        if s.get('bundles') and not s.get('bundle'):        # v1.9.1 1 ชิ้น 1 บันเดิล
+            b = s['bundles']
+            t += '\nBundle %d ตัว (1 ชิ้น 1 บันเดิล): %s' % (len(b), ', '.join(b[:6]) + (' …' if len(b) > 6 else ''))
         if s.get('warn'):
             t += '\n⚠ ' + ' · '.join(s['warn'])
         d = s.get('done')
@@ -16726,19 +16779,32 @@ class EvTab:
         self._save()
 
     def del_set(self):
-        i = self._sel_index()
-        if i is None:
-            return messagebox.showinfo('ลบเซ็ต', 'เลือกเซ็ตในตารางก่อนนะ')
-        s = self.sets[i]
-        if not messagebox.askyesno('ลบเซ็ต', 'ลบ “%s” ออกจากรายการ?\n(ไม่แตะไฟล์ชีท ไม่แตะภาพที่เซฟไว้)'
-                                   % ev_set_name(s)[:60]):
+        """ลบเซ็ตที่เลือก — v1.9.1 เลือกหลายแถว (Ctrl / Shift + คลิก) แล้วลบทีเดียวได้"""
+        if self.saving:
+            return messagebox.showinfo('กำลังบันทึก', 'รอบันทึกภาพเสร็จก่อนนะ')
+        idx = sorted({self._rowmap[x] for x in self.tree.selection() if x in self._rowmap})
+        if not idx:
+            return messagebox.showinfo('ลบเซ็ต', 'เลือกเซ็ตในตารางก่อนนะ (เลือกหลายเซ็ต: กด Ctrl / Shift ค้างแล้วคลิก)')
+        if len(idx) == 1:
+            msg = 'ลบ “%s” ออกจากรายการ?' % ev_set_name(self.sets[idx[0]])[:60]
+        else:
+            names = ['• ' + ev_set_name(self.sets[i])[:50] for i in idx[:8]]
+            if len(idx) > 8:
+                names.append('… อีก %d เซ็ต' % (len(idx) - 8))
+            msg = 'ลบ %d เซ็ตที่เลือกออกจากรายการ?\n\n%s' % (len(idx), '\n'.join(names))
+        if self.cur in idx and self._busy_slots():
+            msg += '\n\n⚠ ภาพที่แคปค้างไว้ของเซ็ตที่ทำอยู่จะหายด้วย'
+        if not messagebox.askyesno('ลบเซ็ต', msg + '\n(ไม่แตะไฟล์ชีท ไม่แตะภาพที่เซฟไว้)'):
             return
-        if i == self.cur:
+        if self.cur in idx:
             self._clear_slots()
             self.cur = None
-        elif self.cur is not None and i < self.cur:
-            self.cur -= 1
-        del self.sets[i]
+        elif self.cur is not None:
+            self.cur -= sum(1 for i in idx if i < self.cur)
+        for i in reversed(idx):
+            del self.sets[i]
+        if len(idx) > 1:
+            self.app.log('หลักฐานเทส: ลบ %d เซ็ต' % len(idx), 'INFO')
         self._save()
         self.refresh()
 
@@ -17177,7 +17243,7 @@ class EvTab:
                 st, tag = '⚠ ต้องดู', 'warn'
             else:
                 st, tag = '', ''
-            row = self.tree.insert('', 'end', values=('%d. %s' % (n, ev_set_name(s)), s.get('bundle') or '—',
+            row = self.tree.insert('', 'end', values=('%d. %s' % (n, ev_set_name(s)), ev_bundle_text(s),
                                                       st), tags=(tag,))
             self._rowmap[row] = i
             if i == self.cur:
@@ -17309,8 +17375,11 @@ class EvTab:
         # v1.5.3 กดบันทึกแล้วกลับมาติ๊ก = แถวที่ยังไม่ติ๊กเป็นสีเหลือง (เฉพาะเซ็ตที่เพิ่งเตือน)
         nag = self.cur is not None and getattr(self, '_nag', None) == self.cur
         self.ck.tag_configure('need', background=C['row_warn_bg'], foreground=C['row_warn_fg'])
+        multi = self.cur is not None and bool(self.sets[self.cur].get('bundles')) and not self.sets[self.cur].get('bundle')
         for i, it in enumerate(its):
             gift, exp, bag = ev_expect(it, day)
+            if multi and it.get('bundle'):          # v1.9.1 1 ชิ้น 1 บันเดิล: บอกเลข Bundle ของแถว
+                gift = '#%s  %s' % (it['bundle'], gift)
             c = self.checks.get(i, '')
             self.ck.insert('', 'end', iid=str(i), values=(mark[c], gift, it.get('amt') or '1', exp, bag),
                            tags=(c,) if c else (('need',) if nag else ()))
@@ -23783,6 +23852,8 @@ EVA_KEYS = ('F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12')
 EVA_VK = {'F6': 0x75, 'F7': 0x76, 'F8': 0x77, 'F9': 0x78, 'F10': 0x79, 'F11': 0x7A, 'F12': 0x7B}
 EVA_REGIONS = (('gift', 'กล่องของขวัญ', 'F6'), ('bag', 'คลังไอเทม', 'F7'), ('win', 'ทั้งหน้าต่างเกม (ไว้แคปรายละเอียดไอเทม)', 'F8'))
 EVA_SAVE_KEY = 'F9'
+EVA_ROUND = 10                     # v1.9.1 ตาราง 1 ชิ้น 1 บันเดิล: ส่งทีละรอบ (ผู้ใช้เลือก รอบละ 10)
+EVA_ROUNDS = ('5', '10', '15', '20')
 EVA_YES = list(CONFIRM_YES) + ['ส่ง', 'ส่งเลย', 'ยืนยันการส่ง', 'ยืนยันส่ง', 'ส่งทดสอบ', 'ทดสอบส่ง', 'Send', 'Submit', EVA_BTN]
 EVA_HOLD = 'ส่งเทส + แคปอัตโนมัติ (หลักฐานเทส)'      # ชื่อที่แท็บอื่นเห็นตอนถามว่าให้ปิด Chrome นี้ไหม
 EVA_OK_RE = re.compile(r'ส่งทดสอบ|ทดสอบส่ง.*(สำเร็จ|แล้ว)|สำเร็จ|เช็คใน|success|sent', re.I)
@@ -24186,12 +24257,699 @@ class EvaSender:
             pass
 
 
+# ============================================================================
+#  [17] หลักฐานเทส — 🎮 เล่นแทนในเกม (v1.10.0) — ของใหม่ทั้งก้อน
+#
+#      ผู้ใช้อนุญาตให้คลิกในเกมได้ (เซิร์ฟเวอร์เทส) · ขั้นตอนต่อเซ็ต/รอบ หลังส่ง Bundle บนเว็บแล้ว:
+#        สลับแท็บ คลังเก็บ → กล่องของขวัญ (ให้ของขึ้น) ทุกๆ 20 วิ จนของครบตามชีท (หรือหมดเวลา)
+#        → แคปกล่องของขวัญ (ทุกหน้า) → แคปคลังเก็บ (ก่อนรับ) → กดรับทั้งหมด → แคปคลังเก็บ (หลังรับ)
+#        → อ่านชื่อไอเทมจากภาพ (Tesseract ภาษาไทย) เทียบกับชีท → ครบตรงทุกตัว = ติ๊ก ✓ แล้วบันทึกเอง
+#        ไม่ครบ/อ่านไม่ชัด = ไม่เดา หยุดให้ผู้ใช้ดูเอง
+#      ตำแหน่งปุ่ม/กรอบในเกม = ผู้ใช้ “สอน” ครั้งเดียว เก็บเป็นสัดส่วนของหน้าต่างเกม (ย้ายหน้าต่างได้)
+#      ระหว่างทำงานห้ามขยับเมาส์ — ขยับ = หยุดทันที (กันกดผิด)
+# ============================================================================
+import time                                    # noqa: E402 (ใช้ในส่วนเล่นแทนในเกม)
+EVG_TITLES = ('Tales Runner', 'TalesRunner', 'TALESRUNNER')
+EVG_POINTS = (('tab_gift', 'แท็บ “กล่องของขวัญ”', True), ('tab_bag', 'แท็บ “คลังเก็บ”', True),
+              ('take_all', 'ปุ่ม “รับทั้งหมด”', True), ('next', 'ปุ่ม “ถัดไป” (หน้าถัดไปของกล่องของขวัญ)', False),
+              ('ok', 'ปุ่ม “ตกลง” ที่เด้งหลังกดรับ (ไม่มีป๊อปอัป = ข้าม)', False))
+EVG_AREAS = (('gift_area', 'กรอบรายการในกล่องของขวัญ (ลากคลุมการ์ดของขวัญทั้งหมด)', True),
+             ('bag_area', 'กรอบรายการในคลังเก็บ (ลากคลุมแถวไอเทม)', True))
+EVG_POLL = 20                      # สลับแท็บดูของทุกกี่วิ
+EVG_WAIT = 180                     # รอของเข้าได้นานสุดกี่วิ (ของเข้าช้า 1–2 นาที)
+EVG_TESS = (r'C:\Program Files\Tesseract-OCR\tesseract.exe', r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe')
+EVG_TESS_URL = 'https://github.com/UB-Mannheim/tesseract/wiki'
+_EVG_TONES = re.compile('[\u0e48-\u0e4c\u0e47\u0e3a]')
+_EVG_SAME = str.maketrans({'ค': 'ก', 'ข': 'ช', 'ต': 'ด', 'ฏ': 'ด', 'ฎ': 'ด', 'บ': 'ป', 'ฝ': 'ผ', 'ฟ': 'พ', 'ซ': 'ช',
+                           'ศ': 'ส', 'ษ': 'ส', 'ื': 'ิ', 'ึ': 'ิ', 'ี': 'ิ', 'ั': 'ิ', 'O': '0', 'o': '0', 'l': '1',
+                           'I': '1', '|': '1'})
+
+
+# ---------- อ่านชื่อไอเทมจากภาพ ----------
+def evg_norm(t):
+    """ชื่อไอเทมแบบเทียบกับผล OCR: ตัดวรรค/วรรณยุกต์ · รวมตัวที่ OCR สับสนบ่อย (ค/ก ข/ช ต/ด …)"""
+    t = _EVG_TONES.sub('', str(t or '')).translate(_EVG_SAME)
+    return re.sub(r'[^0-9a-zก-ฮะ-ฺเ-ๅ%]', '', t.lower())
+
+
+def evg_score(line, name):
+    """0–1 · ตัวเลขในชื่อต้องตรง (5 ชิ้น ≠ 50 ชิ้น) · ชื่อยาวที่การ์ดตัดท้ายก็ยังเทียบได้"""
+    import difflib
+    a, b = evg_norm(line), evg_norm(name)
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    s = difflib.SequenceMatcher(None, a, b).ratio()
+    if len(b) * 0.6 <= len(a) < len(b):
+        s = max(s, 0.97 * difflib.SequenceMatcher(None, a, b[:len(a)]).ratio())
+    da, db = re.findall(r'\d+', a), re.findall(r'\d+', b)
+    if da != db and not (len(a) < len(b) and db[:len(da)] == da):
+        s *= 0.75                                  # ตัวเลขไม่ตรง = ไม่ให้ผ่าน (อ่านเลขพลาด -> ปล่อยให้ผู้ใช้ดูเอง)
+    return s
+
+
+def evg_match(lines, names, th=0.78, gap=0.03):
+    """lines = บรรทัดที่อ่านได้ (1 การ์ด = 1 ชื่อ) · names = ชื่อที่คาด (ไม่ซ้ำ)
+    -> ({ชื่อ: จำนวนการ์ด}, ไม่แน่ใจ [(บรรทัด, ชื่อ1, ชื่อ2)], ไม่รู้จัก [บรรทัดที่ดูเป็นชื่อไอเทมแต่ไม่ตรงชีท])"""
+    cnt = {n: 0 for n in names}
+    unsure, unknown = [], []
+    for ln in lines:
+        sc = sorted(((evg_score(ln, n), n) for n in names), reverse=True)
+        if not sc or sc[0][0] < th:
+            if re.search('[ชข][ิี]?[้]?น', ln) and len(evg_norm(ln)) >= 6:
+                unknown.append(ln)
+            continue
+        if len(sc) > 1 and sc[0][0] - sc[1][0] < gap:
+            unsure.append((ln, sc[0][1], sc[1][1]))
+            continue
+        cnt[sc[0][1]] += 1
+    return cnt, unsure, unknown
+
+
+def evg_expect(items):
+    """ไอเทมจากชีท -> {ชื่อ: จำนวนการ์ดที่ควรเห็น (รวม Amt ของแถวชื่อเดียวกัน)}"""
+    out = {}
+    for it in items:
+        n = clean_text(it.get('name'))
+        if not n:
+            continue
+        try:
+            a = max(1, int(float(it.get('amt') or 1)))
+        except Exception:
+            a = 1
+        out[n] = out.get(n, 0) + a
+    return out
+
+
+def evg_tess_find(prefs=None):
+    """หา tesseract.exe — ที่ตั้งเอง > ที่ติดตั้งปกติ > PATH"""
+    c = [(prefs or {}).get('evg_tess') or '']
+    c += list(EVG_TESS) + [os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Tesseract-OCR', 'tesseract.exe'),
+                           shutil.which('tesseract') or '']
+    for p in c:
+        if p and os.path.isfile(p):
+            return p
+    return ''
+
+
+def evg_exec(args, timeout=60):
+    import subprocess
+    kw = {'capture_output': True, 'timeout': timeout}
+    if os.name == 'nt':
+        kw['creationflags'] = 0x08000000              # ไม่เด้งหน้าต่างดำ
+    r = subprocess.run(args, **kw)
+    return r.returncode, r.stdout.decode('utf-8', 'replace'), r.stderr.decode('utf-8', 'replace')
+
+
+def evg_tess_ok(exe):
+    """'' = พร้อม (มีภาษาไทย) · ข้อความ = เหตุผลที่ยังใช้ไม่ได้"""
+    if not exe:
+        return 'ยังไม่ได้ลงตัวอ่านภาษาไทย (Tesseract)'
+    try:
+        code, out, err = evg_exec([exe, '--list-langs'], 20)
+    except Exception as ex:
+        return 'เปิด Tesseract ไม่ได้: %s' % str(ex)[:80]
+    langs = {x.strip() for x in (out + '\n' + err).splitlines()}
+    return '' if 'tha' in langs else 'Tesseract ยังไม่มีภาษาไทย (tha) — ลงเพิ่มตอนติดตั้ง หรือใส่ไฟล์ tha.traineddata'
+
+
+def evg_ocr_lines(exe, png_path):
+    """อ่านภาพ -> [(ข้อความ 1 บรรทัด, (ซ้าย, บน, กว้าง, สูง))] เรียงบนลงล่าง ซ้ายไปขวา"""
+    code, out, err = evg_exec([exe, png_path, 'stdout', '-l', 'tha', '--psm', '11', 'tsv'], 90)
+    if code != 0:
+        raise RuntimeError('อ่านภาพไม่ได้: %s' % (err.strip()[:160] or code))
+    lines = {}
+    for row in out.splitlines()[1:]:
+        f = row.split('\t')
+        if len(f) < 12 or f[0] != '5' or not f[11].strip():
+            continue
+        k = (int(f[2]), int(f[3]), int(f[4]))
+        l, t, w, h = (int(x) for x in f[6:10])
+        if k not in lines:
+            lines[k] = [[], [l, t, l + w, t + h]]
+        lines[k][0].append(f[11].strip())
+        b = lines[k][1]
+        b[:] = [min(b[0], l), min(b[1], t), max(b[2], l + w), max(b[3], t + h)]
+    out = [(' '.join(ws), (b[0], b[1], b[2] - b[0], b[3] - b[1])) for ws, b in lines.values()]
+    return sorted(out, key=lambda x: (x[1][1] // 12, x[1][0]))
+
+
+# ---------- หน้าต่างเกม (Windows) ----------
+class EvgGame:
+    """คุมหน้าต่างเกม: หา · พิกัดจริง · ดึงขึ้นหน้า · คลิก · แคป — เรียกจากเธรดที่ตั้ง DPI แล้วเท่านั้น"""
+
+    def find(self):
+        ct = eva_ctypes()
+        u = ct.windll.user32
+        found = []
+        cb_t = ct.WINFUNCTYPE(ct.c_bool, ct.c_void_p, ct.c_void_p)
+
+        def cb(h, _):
+            if u.IsWindowVisible(h):
+                n = u.GetWindowTextLengthW(h)
+                if n:
+                    buf = ct.create_unicode_buffer(n + 1)
+                    u.GetWindowTextW(h, buf, n + 1)
+                    if any(t.lower() in buf.value.lower() for t in EVG_TITLES):
+                        found.append(h)
+            return True
+        u.EnumWindows(cb_t(cb), 0)
+        best = None
+        for h in found:
+            r = self.client(h)
+            if r and (best is None or r[2] * r[3] > best[1]):
+                best = (h, r[2] * r[3])
+        return best[0] if best else None
+
+    def client(self, h):
+        ct = eva_ctypes()
+        u = ct.windll.user32
+
+        class RECT(ct.Structure):
+            _fields_ = [('l', ct.c_long), ('t', ct.c_long), ('r', ct.c_long), ('b', ct.c_long)]
+
+        class PT(ct.Structure):
+            _fields_ = [('x', ct.c_long), ('y', ct.c_long)]
+        rc, p = RECT(), PT()
+        if not u.GetClientRect(ct.c_void_p(h), ct.byref(rc)):
+            return None
+        u.ClientToScreen(ct.c_void_p(h), ct.byref(p))
+        w, hh = rc.r - rc.l, rc.b - rc.t
+        return (p.x, p.y, w, hh) if w > 50 and hh > 50 else None
+
+    def front(self, h):
+        ct = eva_ctypes()
+        u = ct.windll.user32
+        u.GetForegroundWindow.restype = ct.c_void_p
+        if u.IsIconic(ct.c_void_p(h)):
+            u.ShowWindow(ct.c_void_p(h), 9)               # SW_RESTORE
+        if u.GetForegroundWindow() != h:
+            u.keybd_event(0x12, 0, 0, 0)                  # Alt กด-ปล่อย = Windows ยอมให้ดึงหน้าต่างขึ้นหน้า
+            u.keybd_event(0x12, 0, 2, 0)
+            u.SetForegroundWindow(ct.c_void_p(h))
+            time.sleep(0.35)
+        return u.GetForegroundWindow() == h
+
+    def is_front(self, h):
+        u = eva_ctypes().windll.user32
+        u.GetForegroundWindow.restype = eva_ctypes().c_void_p
+        return u.GetForegroundWindow() == h
+
+    def cursor(self):
+        ct = eva_ctypes()
+
+        class PT(ct.Structure):
+            _fields_ = [('x', ct.c_long), ('y', ct.c_long)]
+        p = PT()
+        ct.windll.user32.GetCursorPos(ct.byref(p))
+        return p.x, p.y
+
+    def move(self, x, y):
+        eva_ctypes().windll.user32.SetCursorPos(int(x), int(y))
+
+    def click(self, x, y):
+        u = eva_ctypes().windll.user32
+        u.SetCursorPos(int(x), int(y))
+        time.sleep(0.08)
+        u.mouse_event(0x0002, 0, 0, 0, 0)                 # ปุ่มซ้ายลง
+        time.sleep(0.07)
+        u.mouse_event(0x0004, 0, 0, 0, 0)                 # ปุ่มซ้ายขึ้น
+
+    def grab(self, rect):
+        x, y, w, h = [int(v) for v in rect]
+        return w, h, eva_grab(x, y, w, h)
+
+    def admin_issue(self, h):
+        """เกมเปิดแบบผู้ดูแลระบบ แต่โปรแกรมนี้ไม่ใช่ = Windows ไม่ยอมให้คลิก -> ข้อความเตือน · '' = ไม่มีปัญหา"""
+        try:
+            ct = eva_ctypes()
+            if ct.windll.shell32.IsUserAnAdmin():
+                return ''
+            pid = ct.c_ulong()
+            ct.windll.user32.GetWindowThreadProcessId(ct.c_void_p(h), ct.byref(pid))
+            k, a = ct.windll.kernel32, ct.windll.advapi32
+            k.OpenProcess.restype = ct.c_void_p
+            hp = k.OpenProcess(0x1000, False, pid.value)
+            if not hp:
+                return 'เกมเปิดแบบผู้ดูแลระบบ (Admin) — ปิด TR Plus Ultra แล้วคลิกขวา “Run as administrator” ก่อน ไม่งั้นกดในเกมไม่ได้'
+            tok = ct.c_void_p()
+            el = ct.c_ulong()
+            n = ct.c_ulong()
+            try:
+                if a.OpenProcessToken(ct.c_void_p(hp), 0x0008, ct.byref(tok)):
+                    a.GetTokenInformation(tok, 20, ct.byref(el), 4, ct.byref(n))
+                    k.CloseHandle(tok)
+            finally:
+                k.CloseHandle(ct.c_void_p(hp))
+            if el.value:
+                return 'เกมเปิดแบบผู้ดูแลระบบ (Admin) — ปิด TR Plus Ultra แล้วคลิกขวา “Run as administrator” ก่อน ไม่งั้นกดในเกมไม่ได้'
+        except Exception:
+            pass
+        return ''
+
+
+def evg_abs(cl, frac):
+    """สัดส่วนในหน้าต่างเกม -> พิกัดจริงบนจอ · cl = (x, y, w, h) ของพื้นที่เกม"""
+    if len(frac) == 2:
+        return round(cl[0] + frac[0] * cl[2]), round(cl[1] + frac[1] * cl[3])
+    return (round(cl[0] + frac[0] * cl[2]), round(cl[1] + frac[1] * cl[3]),
+            max(8, round(frac[2] * cl[2])), max(8, round(frac[3] * cl[3])))
+
+
+def evg_same(a, b):
+    """ภาพเดิม (กด “ถัดไป” แล้วไม่เปลี่ยน = หน้าสุดท้าย)"""
+    if a[0] != b[0] or a[1] != b[1]:
+        return False
+    x, y = a[2], b[2]
+    n = len(x)
+    step = max(4, (n // 6000) // 4 * 4)
+    diff = sum(1 for i in range(0, n, step) if abs(x[i] - y[i]) > 24 or abs(x[i + 1] - y[i + 1]) > 24)
+    return diff <= max(2, (n // step) // 200)
+
+
+class EvgAbort(Exception):
+    pass
+
+
+class EvgJob:
+    """เล่นแทนในเกม 1 รอบ (ทำในเธรดแยก) — post(kind, data) ส่งความคืบหน้ากลับหน้าจอ (ห้ามแตะ Tk ในนี้)"""
+    sleep = staticmethod(time.sleep)
+
+    def __init__(self, game, pts, areas, expect, out_dir, tag, tess, post, wait=EVG_WAIT, poll=EVG_POLL,
+                 take_all=True, mode='check'):
+        self.mode = mode
+        self.g, self.pts, self.areas, self.expect = game, dict(pts), dict(areas), dict(expect)
+        self.out_dir, self.tag, self.tess, self._post = out_dir, tag, tess, post
+        self.wait, self.poll, self.take_all = wait, poll, take_all
+        self.stop_flag = False
+        self.h = None
+        self.cl = None
+        self._last = None
+        self.files = []
+
+    # ----- ทั่วไป -----
+    def post(self, kind, data):
+        cb = self._post                                 # ตัวรับที่หน้าจอส่งมา (ฝากเข้าคิว)
+        cb(kind, data)
+
+    def say(self, t):
+        self.post('gmsg', t)
+
+    def nap(self, s):
+        end = time.time() + s
+        while True:
+            if self.stop_flag:
+                raise EvgAbort('กดหยุด')
+            self._watch()
+            left = end - time.time()
+            if left <= 0:
+                return
+            self.sleep(min(0.25, left))
+
+    def _watch(self):
+        if self._last is not None:
+            c = self.g.cursor()
+            if abs(c[0] - self._last[0]) > 6 or abs(c[1] - self._last[1]) > 6:
+                raise EvgAbort('เมาส์ขยับ — หยุดให้ก่อน (ระหว่างเล่นแทนห้ามจับเมาส์)')
+
+    def click(self, k):
+        if self.stop_flag:
+            raise EvgAbort('กดหยุด')
+        self._watch()
+        if not self.g.is_front(self.h) and not self.g.front(self.h):
+            raise EvgAbort('ดึงหน้าต่างเกมขึ้นมาไม่ได้ (มีหน้าต่างอื่นบังอยู่?)')
+        cl = self.g.client(self.h)
+        if not cl:
+            raise EvgAbort('หาหน้าต่างเกมไม่เจอแล้ว')
+        self.cl = cl
+        x, y = evg_abs(cl, self.pts[k])
+        self.g.click(x, y)
+        self._last = (x, y)
+
+    def shot(self, k):
+        cl = self.g.client(self.h) or self.cl
+        return self.g.grab(evg_abs(cl, self.areas[k]))
+
+    def save(self, img, kind):
+        os.makedirs(self.out_dir, exist_ok=True)
+        p = os.path.join(self.out_dir, '%s_%s_%s.png' % (datetime.now().strftime('%H%M%S%f')[:8], self.tag, kind))
+        with open(p, 'wb') as fo:
+            fo.write(eva_png(*img))
+        return p
+
+    def read(self, imgs):
+        lines = []
+        for k, im in enumerate(imgs):
+            p = os.path.join(self.out_dir, '_ocr_%d.png' % k)
+            os.makedirs(self.out_dir, exist_ok=True)
+            with open(p, 'wb') as fo:
+                fo.write(eva_png(*im))
+            try:
+                lines += [t for t, _ in evg_ocr_lines(self.tess, p)]
+            finally:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+        return lines
+
+    def gift_pages(self):
+        """แคปกล่องของขวัญทุกหน้า (กด ถัดไป จนภาพไม่เปลี่ยน)"""
+        pages = [self.shot('gift_area')]
+        if 'next' in self.pts:
+            for _ in range(7):
+                self.click('next')
+                self.nap(0.9)
+                im = self.shot('gift_area')
+                if evg_same(im, pages[-1]):
+                    break
+                pages.append(im)
+        return pages
+
+    def refresh(self):
+        self.click('tab_bag')
+        self.nap(0.9)
+        self.click('tab_gift')
+        self.nap(1.3)
+
+    # ----- ขั้นตอนหลัก -----
+    def run(self):
+        res = {'ok': False, 'why': '', 'files': [], 'cnt': {}, 'exp': dict(self.expect), 'unsure': [], 'unknown': [],
+               'aborted': False, 'timeout': False}
+        start = self.g.cursor()
+        try:
+            self.h = self.g.find()
+            if not self.h:
+                raise EvgAbort('หาหน้าต่างเกม “Tales Runner” ไม่เจอ — เปิดเกม (โหมดหน้าต่าง) ไว้ก่อน')
+            iss = self.g.admin_issue(self.h)
+            if iss:
+                raise EvgAbort(iss)
+            if not self.g.front(self.h):
+                raise EvgAbort('ดึงหน้าต่างเกมขึ้นมาไม่ได้')
+            self.cl = self.g.client(self.h)
+            if self.mode == 'clear':                       # กดรับของค้างในกล่องก่อนส่ง (กันนับปน)
+                self.say('🎮 กดรับของค้างในกล่องของขวัญก่อนส่ง …')
+                self.refresh()
+                self.click('take_all')
+                self.nap(1.4)
+                if 'ok' in self.pts:
+                    self.click('ok')
+                    self.nap(0.8)
+                res['ok'] = True
+                return res
+            names = list(self.expect)
+            need = sum(self.expect.values())
+            t0 = time.time()
+            n = 0
+            while True:
+                n += 1
+                self.say('🎮 สลับแท็บดูของ (ครั้งที่ %d) …' % n)
+                self.refresh()
+                pages = self.gift_pages()
+                cnt, uns, unk = evg_match(self.read(pages), names)
+                got = sum(min(cnt[x], self.expect[x]) for x in names)
+                self.say('🎮 เจอของตรงชีท %d/%d ชิ้น%s' % (got, need, (' · ไม่แน่ใจ %d' % len(uns)) if uns else ''))
+                if all(cnt[x] >= self.expect[x] for x in names):
+                    break
+                if time.time() - t0 + self.poll > self.wait:
+                    res['timeout'] = True
+                    break
+                self.nap(self.poll)
+            res['cnt'], res['unsure'], res['unknown'] = cnt, [list(u) for u in uns], unk
+            if len(pages) > 1:                             # กลับหน้าแรกก่อนแคปเก็บ
+                self.refresh()
+                pages = self.gift_pages()
+            for k, im in enumerate(pages, 1):
+                self.files.append(self.save(im, 'gift%d' % k if len(pages) > 1 else 'gift'))
+            self.click('tab_bag')
+            self.nap(1.3)
+            self.files.append(self.save(self.shot('bag_area'), 'bag_before'))
+            if self.take_all and not res['timeout']:
+                self.click('tab_gift')
+                self.nap(0.9)
+                self.click('take_all')
+                self.nap(1.6)
+                if 'ok' in self.pts:
+                    self.click('ok')
+                    self.nap(1.0)
+                self.click('tab_bag')
+                self.nap(1.6)
+                self.files.append(self.save(self.shot('bag_area'), 'bag_after'))
+                self.click('tab_gift')
+                self.nap(0.5)
+            res['ok'] = (not res['timeout'] and not uns and all(cnt[x] == self.expect[x] for x in names))
+            if not res['ok']:
+                bad = ['%s (เห็น %d / ชีท %d)' % (x, cnt[x], self.expect[x]) for x in names if cnt[x] != self.expect[x]]
+                res['why'] = ' · '.join(([('รอครบ %d วิ ของยังไม่ครบ' % self.wait)] if res['timeout'] else []) + bad[:4] +
+                                        (['อ่านชื่อไม่ชัด %d การ์ด' % len(uns)] if uns else []))
+        except EvgAbort as ex:
+            res['aborted'] = True
+            res['why'] = str(ex)
+        except Exception as ex:
+            res['why'] = 'เล่นแทนในเกมพัง: %s' % str(ex)[:160]
+        finally:
+            try:
+                if self._last is not None and not res.get('aborted'):
+                    self.g.move(*start)
+            except Exception:
+                pass
+        res['files'] = list(self.files)
+        return res
+
+
+def evg_start(job, done):
+    """รัน EvgJob ในเธรดแยกที่ใช้พิกเซลจริงของจอ แล้วเรียก done(res) จากเธรดนั้น"""
+    def run():
+        eva_dpi_thread()
+        try:
+            r = job.run()
+        except Exception as ex:
+            r = {'ok': False, 'why': str(ex)[:160], 'files': [], 'aborted': True}
+        done(r)
+    th = threading.Thread(target=run, daemon=True)
+    th.start()
+    return th
+
+
+def evg_snap_game(game):
+    """แคปพื้นที่เกมทั้งหมด (ไว้สอนตำแหน่ง) -> (x, y, w, h, png) — ทำในเธรดที่ใช้พิกเซลจริง"""
+    box = {}
+
+    def run():
+        try:
+            eva_dpi_thread()
+            h = game.find()
+            if not h:
+                raise RuntimeError('หาหน้าต่างเกม “Tales Runner” ไม่เจอ — เปิดเกม (โหมดหน้าต่าง) ไว้ก่อน')
+            game.front(h)
+            time.sleep(0.4)
+            cl = game.client(h)
+            w, hh, bg = game.grab(cl)
+            box['v'] = (cl[0], cl[1], w, hh, eva_png(w, hh, bg))
+        except Exception as ex:
+            box['err'] = str(ex)
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(30)
+    if 'v' not in box:
+        raise RuntimeError(box.get('err') or 'แคปเกมไม่สำเร็จ')
+    return box['v']
+
+
+def evg_click_game(game, frac):
+    """กดตำแหน่งที่สอนไว้ 1 ครั้ง (ปุ่ม “ลองกด” ในหน้าสอน)"""
+    def run():
+        try:
+            eva_dpi_thread()
+            h = game.find()
+            if h and game.front(h):
+                game.click(*evg_abs(game.client(h), frac))
+        except Exception:
+            pass
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(10)
+
+
+class EvgTeach:
+    """สอนตำแหน่งในเกมครั้งเดียว: คลิกปุ่ม / ลากกรอบ บนภาพเกม — เก็บเป็นสัดส่วนของหน้าต่างเกม"""
+
+    def __init__(self, win):
+        self.win = win
+        self.app = win.app
+        a = self.app
+        self.pts = dict(win.prefs.get('evg_pts') or {})
+        self.areas = dict(win.prefs.get('evg_areas') or {})
+        self.steps = [(k, l, 'pt', must) for k, l, must in EVG_POINTS] + [(k, l, 'area', must) for k, l, must in EVG_AREAS]
+        self.i = next((n for n, s in enumerate(self.steps) if s[0] not in self.pts and s[0] not in self.areas), 0)
+        top = self.top = tk.Toplevel(a.root)
+        top.title('🎮 สอนตำแหน่งในเกม (ครั้งเดียว)')
+        top.configure(bg=C['bg'])
+        try:
+            top.attributes('-topmost', True)
+        except Exception:
+            pass
+        side = tk.Frame(top, bg=C['bg'])
+        side.pack(side='left', fill='y', padx=10, pady=10)
+        tk.Label(side, text='คลิกบนภาพเกม ตรงปุ่มที่บอก\n(กรอบ = ลากคลุม)\nทีละขั้น — เสร็จกด บันทึก', bg=C['bg'], fg=C['dim'],
+                 font=('Segoe UI', 9), justify='left').pack(anchor='w')
+        self.lb = tk.Listbox(side, width=44, height=len(self.steps), font=FM, activestyle='none', exportselection=False)
+        self.lb.pack(fill='x', pady=(6, 6))
+        self.lb.bind('<<ListboxSelect>>', lambda e: self._pick_step())
+        self.lbl = tk.Label(side, text='', bg=C['card'], fg=C['fg'], font=FB, wraplength=330, justify='left', padx=8, pady=6)
+        self.lbl.pack(fill='x')
+        for t, c in (('📷 ถ่ายภาพเกมใหม่', self.reshot), ('🖱 ลองกดตำแหน่งนี้ แล้วถ่ายใหม่', self.try_click),
+                     ('⏭ ข้ามขั้นนี้ (ไม่บังคับ)', self.skip), ('ล้างขั้นนี้', self.clear)):
+            a._btn(side, t, c).pack(fill='x', pady=(4, 0))
+        a._btn(side, '💾 บันทึก', self.save, primary=True).pack(fill='x', pady=(14, 0), ipady=3)
+        a._btn(side, 'ยกเลิก', top.destroy).pack(fill='x', pady=(4, 0))
+        self.cv = tk.Canvas(top, bg='black', highlightthickness=0, cursor='crosshair')
+        self.cv.pack(side='left', padx=(0, 10), pady=10)
+        self.cv.bind('<ButtonPress-1>', self._down)
+        self.cv.bind('<B1-Motion>', self._move)
+        self.cv.bind('<ButtonRelease-1>', self._up)
+        self.img = None
+        self.f = 1
+        self.size = (1, 1)
+        self.reshot()
+
+    def _cur(self):
+        return self.steps[self.i]
+
+    def reshot(self):
+        try:
+            self.top.withdraw()
+            self.app.root.update()
+            x, y, w, h, png = self.win.snapgame_fn(self.win.game)
+        except Exception as ex:
+            self.top.deiconify()
+            self.lbl.config(text='✗ %s' % str(ex)[:200], fg=C['err'])
+            self._draw()
+            return
+        self.top.deiconify()
+        import base64
+        sw, sh = self.app.root.winfo_screenwidth(), self.app.root.winfo_screenheight()
+        self.f = max(1, -(-w // max(1, sw - 420)), -(-h // max(1, sh - 120)))
+        img = tk.PhotoImage(data=base64.b64encode(png).decode())
+        self.img = img.subsample(self.f) if self.f > 1 else img
+        self.size = (w, h)
+        self.cv.config(width=self.img.width(), height=self.img.height())
+        self._draw()
+
+    def _draw(self):
+        cv = self.cv
+        cv.delete('all')
+        if self.img is not None:
+            cv.create_image(0, 0, image=self.img, anchor='nw')
+        W, H = (self.img.width(), self.img.height()) if self.img is not None else (1, 1)
+        for k, (fx, fy) in self.pts.items():
+            cv.create_oval(fx * W - 7, fy * H - 7, fx * W + 7, fy * H + 7, outline='red', width=3)
+            cv.create_text(fx * W + 10, fy * H, text=k, anchor='w', fill='yellow', font=('Segoe UI', 9, 'bold'))
+        for k, (fx, fy, fw, fh) in self.areas.items():
+            cv.create_rectangle(fx * W, fy * H, (fx + fw) * W, (fy + fh) * H, outline='lime', width=2)
+            cv.create_text(fx * W + 4, fy * H + 4, text=k, anchor='nw', fill='lime', font=('Segoe UI', 9, 'bold'))
+        self.lb.delete(0, 'end')
+        for n, (k, l, kind, must) in enumerate(self.steps):
+            done = k in self.pts or k in self.areas
+            self.lb.insert('end', '%s %s%s' % ('✓' if done else ('•' if must else '◦'), l, '' if must else ' (ไม่บังคับ)'))
+        self.lb.selection_clear(0, 'end')
+        self.lb.selection_set(self.i)
+        k, l, kind, must = self._cur()
+        self.lbl.config(text='ขั้นที่ %d: %s %s' % (self.i + 1, 'คลิกที่' if kind == 'pt' else 'ลากกรอบ', l), fg=C['fg'])
+
+    def _pick_step(self):
+        s = self.lb.curselection()
+        if s:
+            self.i = s[0]
+            self._draw()
+
+    def _next(self):
+        nxt = [n for n, s in enumerate(self.steps) if s[0] not in self.pts and s[0] not in self.areas and n > self.i]
+        self.i = nxt[0] if nxt else min(self.i + 1, len(self.steps) - 1)
+        self._draw()
+
+    def _down(self, e):
+        self._p = (e.x, e.y)
+        self._r = None
+
+    def _move(self, e):
+        if self._cur()[2] != 'area' or not getattr(self, '_p', None):
+            return
+        if self._r is None:
+            self._r = self.cv.create_rectangle(*self._p, e.x, e.y, outline='red', width=2)
+        self.cv.coords(self._r, self._p[0], self._p[1], e.x, e.y)
+
+    def _up(self, e):
+        if self.img is None or not getattr(self, '_p', None):
+            return
+        W, H = self.img.width(), self.img.height()
+        k, l, kind, must = self._cur()
+        if kind == 'pt':
+            self.pts[k] = [round(e.x / W, 5), round(e.y / H, 5)]
+        else:
+            xa, xb = sorted((self._p[0], e.x))
+            ya, yb = sorted((self._p[1], e.y))
+            if xb - xa < 10 or yb - ya < 10:
+                return
+            self.areas[k] = [round(xa / W, 5), round(ya / H, 5), round((xb - xa) / W, 5), round((yb - ya) / H, 5)]
+        self._p = None
+        self._next()
+
+    def try_click(self):
+        k = self._cur()[0]
+        if k not in self.pts:
+            return self.lbl.config(text='ขั้นนี้ยังไม่ได้คลิกตำแหน่ง', fg=C['warn'])
+        self.top.withdraw()
+        self.app.root.update()
+        self.win.clickgame_fn(self.win.game, self.pts[k])
+        time.sleep(0.8)
+        self.reshot()
+
+    def skip(self):
+        if self._cur()[3]:
+            return self.lbl.config(text='ขั้นนี้ข้ามไม่ได้ (ต้องมี)', fg=C['warn'])
+        self._next()
+
+    def clear(self):
+        k = self._cur()[0]
+        self.pts.pop(k, None)
+        self.areas.pop(k, None)
+        self._draw()
+
+    def save(self):
+        miss = [l for k, l, kind, must in self.steps if must and k not in self.pts and k not in self.areas]
+        if miss:
+            return self.lbl.config(text='ยังขาด: ' + ' · '.join(miss), fg=C['err'])
+        self.win.prefs['evg_pts'] = self.pts
+        self.win.prefs['evg_areas'] = self.areas
+        self.win.prefs['evg_size'] = list(self.size)
+        try:
+            save_prefs(self.win.prefs)
+        except Exception:
+            pass
+        self.app.log('หลักฐานเทส (เล่นแทนในเกม): สอนตำแหน่งแล้ว %d ปุ่ม %d กรอบ (หน้าต่างเกม %d×%d)'
+                     % (len(self.pts), len(self.areas), self.size[0], self.size[1]), 'OK')
+        self.top.destroy()
+        self.win._evg_info()
+        if self.win.state == 'idle':
+            self.win._say_intro()
+
+
 class EvaWin:
     """หน้าต่างเล็กลอยบนสุด คุมรอบ “ส่งเทส + แคปอัตโนมัติ” ของแท็บหลักฐานเทส (ใช้ตัวรับภาพ/ตัวบันทึกเดิมของแท็บ)"""
     grab_fn = staticmethod(eva_capture)          # เทสแทนได้
     shot_fn = staticmethod(eva_screen_shot)
     sender_cls = EvaSender
     hotkey_cls = EvaHotkeys
+    # v1.10.0 เล่นแทนในเกม (เทสแทนได้)
+    game_cls = EvgGame
+    job_cls = EvgJob
+    jobstart_fn = staticmethod(evg_start)
+    snapgame_fn = staticmethod(evg_snap_game)
+    clickgame_fn = staticmethod(evg_click_game)
+    tess_fn = staticmethod(evg_tess_find)
+    tessok_fn = staticmethod(evg_tess_ok)
 
     def __init__(self, ev):
         self.ev = ev
@@ -24219,6 +24977,9 @@ class EvaWin:
         tk.Label(body, text='เปิดเกมไว้ (โหมดหน้าต่าง) · เครื่องมือกด “ทดสอบส่ง Bundle” ให้ · ในเกมสลับคลังให้ของขึ้น '
                             'แล้วกดคีย์ลัดแคป · เสร็จเซ็ตกดคีย์ลัดบันทึก (ส่งเซ็ตถัดไปเอง)',
                  bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), wraplength=520, justify='left', anchor='w').pack(fill='x')
+        self._evg_build(body)
+        tk.Label(body, text='แคปเองด้วยคีย์ลัด (ใช้ตอนไม่ได้เปิด 🎮 เล่นแทนในเกม) — กรอบ = พื้นที่ที่จะแคป ไม่ใช่ปุ่มในเกม',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8, 'bold'), anchor='w').pack(fill='x', pady=(8, 0))
         self.rows = {}
         rg = tk.Frame(body, bg=C['bg'])
         rg.pack(fill='x', pady=(8, 0))
@@ -24246,6 +25007,20 @@ class EvaWin:
                        command=self._save_prefs, bg=C['bg'], fg=C['dim'], selectcolor=C['input'],
                        activebackground=C['bg'], activeforeground=C['fg'], font=('Segoe UI', 9),
                        anchor='w').pack(fill='x', pady=(6, 0))
+        # v1.9.1 ตาราง “1 ชิ้น 1 บันเดิล” (หลาย Bundle ในเซ็ตเดียว): เลือก Bundle ที่จะส่ง + ส่งทีละรอบ
+        mf = tk.Frame(body, bg=C['bg'])
+        mf.pack(fill='x', pady=(4, 0))
+        tk.Label(mf, text='เซ็ตแบบ 1 ชิ้น 1 บันเดิล: ส่งรอบละ', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9)).pack(side='left')
+        self.v_round = tk.StringVar(value=str(self.prefs.get('eva_round') or EVA_ROUND))
+        cr = ttk.Combobox(mf, values=list(EVA_ROUNDS), textvariable=self.v_round, width=4, state='readonly', font=FM)
+        cr.pack(side='left', padx=4)
+        cr.bind('<<ComboboxSelected>>', lambda e: self._save_prefs())
+        tk.Label(mf, text='ตัว', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9)).pack(side='left')
+        self.btn_pick = a._btn(mf, '☑ เลือก Bundle ที่จะส่ง', self.pick_bundles)
+        self.btn_pick.pack(side='left', padx=(10, 0), ipadx=4)
+        self.lbl_pick = tk.Label(mf, text='', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w')
+        self.lbl_pick.pack(side='left', padx=(6, 0))
+        self.round = None
         self.lbl_keys = tk.Label(body, text='', bg=C['bg'], fg=C['warn'], font=('Segoe UI', 8), anchor='w', justify='left')
         self.lbl_keys.pack(fill='x')
         self.lbl = tk.Label(body, text='', bg=C['card'], fg=C['fg'], font=('Segoe UI', 11, 'bold'), anchor='w',
@@ -24263,7 +25038,7 @@ class EvaWin:
         a._btn(bb, '■ ปิด', self.close).pack(side='right', ipadx=6, ipady=3)
         self._refresh_rects()
         self._keys_changed()
-        self._say('ตั้งกรอบแคปให้ครบก่อน (อย่างน้อย กล่องของขวัญ) · เลือกเซ็ตในแท็บหลักฐานเทส แล้วกด ▶ เริ่ม', C['dim'])
+        self._say_intro()
         self._tick()
         self._poll()
 
@@ -24277,6 +25052,12 @@ class EvaWin:
                         self._on_key(it[1])
                     elif it[0] == 'sent':
                         self._sent(*it[1:])
+                    elif it[0] == 'rsent':
+                        self._rsent(*it[1:])
+                    elif it[0] == 'gmsg':
+                        self._say(it[1], C['dim'])
+                    elif it[0] == 'gdone':
+                        self._gdone(*it[1:])
                 except Exception as ex:
                     self.app.log('หลักฐานเทส (อัตโนมัติ): %s' % str(ex)[:120], 'ERR')
         except queue.Empty:
@@ -24296,6 +25077,9 @@ class EvaWin:
         self.prefs['eva_keys'] = dict({k: r['key'].get() for k, r in self.rows.items()}, save=self.v_save.get())
         try:
             self.prefs['eva_show'] = bool(self.v_show.get())
+            self.prefs['eva_round'] = int(self.v_round.get())
+            for k, v in self.evg_vars.items():
+                self.prefs[k] = v.get()
         except Exception:
             pass
         try:
@@ -24357,11 +25141,15 @@ class EvaWin:
                     and self.state != 'sending'):
                 self._stop_run()
                 self._say('ปิด Chrome ให้งานอื่นใช้แล้ว — ภาพ/เซ็ตยังอยู่ครบ · จะทำต่อกด ▶ เริ่ม', C['warn'])
+            if self.state == 'need_sheet' and self.ev.cur is not None and self.ev.shots:
+                self.state = 'idle'
+                self.send_current()
             if self.sent_at and self.state == 'wait':
                 s = int((datetime.now() - self.sent_at).total_seconds())
                 self.lbl_t.config(text='ส่งไปแล้ว %d:%02d นาที  ·  แคปแล้ว %d ภาพ' % (s // 60, s % 60, len(self.ev.shots)))
             elif self.state == 'idle':
                 self.lbl_t.config(text='')
+            self._pick_info()
             self.top.after(1000, self._tick)
         except Exception:
             pass
@@ -24446,7 +25234,8 @@ class EvaWin:
             return self._say('✗ แคปไม่ได้: %s' % str(ex)[:120], C['err'])
         blank = eva_blank(bgra)
         s = self.ev.sets[self.ev.cur] if self.ev.cur is not None else {}
-        fn = '%s_%s_%s.png' % (datetime.now().strftime('%H%M%S%f')[:8], s.get('bundle') or 'x', k)
+        tag = s.get('bundle') or (('รอบ%d' % self.round['no']) if self.round and self.round['idx'] == self.ev.cur else 'x')
+        fn = '%s_%s_%s.png' % (datetime.now().strftime('%H%M%S%f')[:8], tag, k)
         try:
             path = os.path.join(self._shot_dir(), fn)
             with open(path, 'wb') as fo:
@@ -24484,8 +25273,13 @@ class EvaWin:
 
     def start(self):
         ev = self.ev
-        if not self.rows['gift']['rect']:
-            return self._say('ตั้งกรอบ “กล่องของขวัญ” ก่อนนะ (📐 ตั้งกรอบ)', C['warn'])
+        if self._evg_on():
+            why = self._evg_ready()
+            if why:
+                self._evg_info()
+                return self._say('🎮 ' + why + '\n(หรือเอาติ๊ก 🎮 เล่นแทนในเกม ออก เพื่อแคปเองด้วยคีย์ลัด)', C['warn'])
+        elif not self.rows['gift']['rect']:
+            return self._say('ตั้งกรอบ “กล่องของขวัญ” ก่อนนะ (📐 ตั้งกรอบ) — หรือติ๊ก 🎮 เล่นแทนในเกม', C['warn'])
         if ev.cur is None:
             i = ev._sel_index()
             if i is None:
@@ -24524,6 +25318,22 @@ class EvaWin:
         s = ev.sets[ev.cur]
         bid = str(s.get('bundle') or '').strip()
         name = ev_set_name(s)
+        if self._evg_on():                              # v1.10.0 เล่นแทนในเกม: ภาพชีทก่อน · เคลียร์กล่องก่อน
+            if not self.running:
+                return self.start()
+            why = self._evg_ready()
+            if why:
+                self.state = 'idle'
+                self._evg_info()
+                return self._say('🎮 ' + why, C['warn'])
+            if self.evg_vars['evg_sheet'].get() and not ev.shots:
+                self.state = 'need_sheet'
+                return self._say('📋 แคปตารางชีทของเซ็ต “%s” ก่อน (Win+Shift+S) — ได้ภาพแล้วเครื่องมือเริ่มส่งเอง'
+                                 % name[:50], C['warn'])
+            if self.evg_vars['evg_clear'].get() and self._cleared != (ev.cur, len(ev.shots)):
+                return self._evg_run('clear')
+        if self._multi(s):
+            return self._send_round(s)
         if not bid.isdigit():
             self.state = 'idle'
             return self._say('⚠ เซ็ต “%s” ไม่มีเลข Bundle — แก้เลขในแท็บ (✏ แก้ชื่อ / Bundle) แล้วกด 📤 ส่งซ้ำ '
@@ -24552,6 +25362,8 @@ class EvaWin:
             self._say('✓ ส่ง Bundle #%s แล้ว %s — ของเข้าช้า 1–2 นาที\nในเกม: สลับไปคลัง แล้วกลับมากล่องของขวัญ → กด %s '
                       '(แคปได้หลายภาพ) · เสร็จกด %s บันทึก + เซ็ตถัดไป'
                       % (bid, self.sent_at.strftime('%H:%M:%S'), keys, self.v_save.get()), C['ok'])
+            if self._evg_on():
+                self._evg_run('check')
         else:
             self.state = 'wait' if r.get('unsure') else 'idle'
             if r.get('unsure'):
@@ -24561,15 +25373,25 @@ class EvaWin:
             self._say(('? %s\n(ของเข้าแล้ว = แคปต่อได้เลย · ไม่เข้า = 📤 ส่งซ้ำ)' if r.get('unsure') else
                        '✗ ส่ง Bundle #%s ไม่สำเร็จ: %%s\n📤 ส่งซ้ำ / ⏭ ข้ามเซ็ต' % bid) % r.get('why', ''),
                       C['warn'] if r.get('unsure') else C['err'])
+            if r.get('unsure') and self._evg_on():         # เว็บเงียบ = ให้ไปดูในเกมแทน (ของครบ = ส่งได้จริง)
+                self._evg_run('check')
 
     def resend(self):
-        if self.state == 'sending' or self.state == 'saving':
+        if self.state in ('sending', 'saving', 'game'):
             return
+        ev = self.ev
+        rd = self.round
+        if ev.cur is not None and self._multi(ev.sets[ev.cur]) and rd and rd['idx'] == ev.cur:
+            # ส่งซ้ำ = ตัวที่ไม่ผ่าน/ไม่แน่ใจในรอบล่าสุด (ผ่านหมด = ส่งทั้งรอบซ้ำ)
+            if not self.running:
+                return self.start()
+            bids = [b for b in rd['bids'] if rd['res'].get(b) != 'ok'] or list(rd['bids'])
+            return self._run_round(ev.sets[ev.cur], bids, rd['no'])
         self.send_current()
 
     def skip(self):
         ev = self.ev
-        if ev.cur is None or self.state in ('sending', 'saving'):
+        if ev.cur is None or self.state in ('sending', 'saving', 'game'):
             return
         view = ev._view()
         cur = ev.cur
@@ -24578,19 +25400,440 @@ class EvaWin:
         if nxt is None:
             self.state = 'idle'
             return self._say('ไม่มีเซ็ตถัดไปแล้ว', C['dim'])
+        self.round = None
         ev.choose(nxt, ask=False)
         self.send_current()
+
+    # ---------- v1.9.1 เซ็ตแบบ 1 ชิ้น 1 บันเดิล (หลาย Bundle) ----------
+    @staticmethod
+    def _multi(s):
+        return not str(s.get('bundle') or '').strip() and bool(s.get('bundles'))
+
+    @staticmethod
+    def _picked(s):
+        p = s.get('eva_pick')
+        return [b for b in s.get('bundles') or [] if p is None or b in p]
+
+    def _pending(self, s):
+        sent = s.get('eva_sent') or {}
+        return [b for b in self._picked(s) if b not in sent]
+
+    def _round_n(self):
+        try:
+            return max(1, int(self.v_round.get()))
+        except Exception:
+            return EVA_ROUND
+
+    def _pick_info(self):
+        ev = self.ev
+        s = ev.sets[ev.cur] if ev.cur is not None and ev.cur < len(ev.sets) else None
+        if not s or not self._multi(s):
+            self.lbl_pick.config(text='(เซ็ตนี้ Bundle เดียว)' if s else '')
+            self.btn_pick.config(state='disabled')
+            return
+        self.btn_pick.config(state='normal')
+        sent = s.get('eva_sent') or {}
+        pk = self._picked(s)
+        self.lbl_pick.config(text='เลือก %d/%d · ส่งแล้ว %d · เหลือ %d' % (
+            len(pk), len(s['bundles']), sum(1 for b in pk if sent.get(b) in ('ok', 'unsure')), len(self._pending(s))))
+
+    def _send_round(self, s):
+        pk = self._picked(s)
+        if not pk:
+            self.state = 'idle'
+            return self._say('⚠ ยังไม่ได้เลือก Bundle ที่จะส่งในเซ็ตนี้ — กด ☑ เลือก Bundle ที่จะส่ง', C['warn'])
+        pend = self._pending(s)
+        if not pend:
+            self.state = 'wait'
+            return self._say('✓ ส่งครบทุก Bundle ที่เลือกแล้ว — แคปให้ครบ แล้วกด %s บันทึก + เซ็ตถัดไป'
+                             % self.v_save.get(), C['ok'])
+        if not self.running:
+            return self.start()
+        n = self._round_n()
+        no = (len(pk) - len(pend)) // n + 1
+        self._run_round(s, pend[:n], no)
+
+    def _run_round(self, s, bids, no):
+        ev = self.ev
+        sent = s.setdefault('eva_sent', {})
+        for b in bids:
+            sent.pop(b, None)
+        tot = -(-len(self._picked(s)) // self._round_n())
+        self.round = {'bids': list(bids), 'i': 0, 'res': {}, 'why': {}, 'idx': ev.cur, 'no': no, 'tot': max(tot, no),
+                      'shots0': len(ev.shots)}
+        self.state = 'sending'
+        self.app.log('หลักฐานเทส (อัตโนมัติ): รอบ %d — ส่ง Bundle %d ตัว (%s) — %s'
+                     % (no, len(bids), ', '.join(bids), ev_set_name(s)), 'INFO')
+        self._round_next()
+
+    def _round_next(self):
+        rd = self.round
+        b = rd['bids'][rd['i']]
+        self.cur_bid = b
+        self._say('📤 รอบ %d/%d: กด “%s” #%s  (%d/%d)…' % (rd['no'], rd['tot'], EVA_BTN, b, rd['i'] + 1, len(rd['bids'])),
+                  C['dim'])
+        self.sender.send(b, self._urls(), lambda r, b=b, i=rd['idx']: self.q.put(('rsent', r, b, i)))
+
+    def _rsent(self, r, bid, idx):
+        rd = self.round
+        ev = self.ev
+        if not rd or idx != ev.cur or idx != rd['idx'] or rd['i'] >= len(rd['bids']) or rd['bids'][rd['i']] != bid:
+            return
+        s = ev.sets[idx]
+        if r.get('url') and r.get('url') != self.prefs.get('eva_url'):
+            self.prefs['eva_url'] = r['url']
+            self._save_prefs()
+        k = 'ok' if r.get('ok') else ('unsure' if r.get('unsure') else 'fail')
+        rd['res'][bid] = k
+        if k != 'ok':
+            rd['why'][bid] = r.get('why', '')
+        s.setdefault('eva_sent', {})[bid] = k
+        self.app.log('หลักฐานเทส (อัตโนมัติ): %s Bundle #%s%s' % ({'ok': '✓', 'unsure': '?', 'fail': '✗'}[k], bid,
+                                                               (' — ' + r.get('why', '')) if k != 'ok' else ''),
+                     {'ok': 'OK', 'unsure': 'WARN', 'fail': 'ERR'}[k])
+        rd['i'] += 1
+        if rd['i'] < len(rd['bids']) and self.running:
+            return self._round_next()
+        try:
+            ev._save()
+        except Exception:
+            pass
+        ok = [b for b in rd['bids'] if rd['res'].get(b) == 'ok']
+        bad = [b for b in rd['bids'] if rd['res'].get(b) == 'fail']
+        uns = [b for b in rd['bids'] if rd['res'].get(b) == 'unsure']
+        self.state = 'wait'
+        self.sent_at = datetime.now()
+        left = len(self._pending(s))
+        nxt = ('กด %s = ส่งรอบถัดไป (เหลือ %d ตัว)' % (self.v_save.get(), left) if left else
+               'รอบสุดท้ายแล้ว — กด %s บันทึก + เซ็ตถัดไป' % self.v_save.get())
+        t = '✓ รอบ %d/%d ส่งแล้ว %d/%d ตัว %s — ของเข้าช้า 1–2 นาที' % (rd['no'], rd['tot'], len(ok), len(rd['bids']),
+                                                                    self.sent_at.strftime('%H:%M:%S'))
+        if bad:
+            t += '\n✗ ไม่สำเร็จ: %s (%s)' % (', '.join(bad), rd['why'].get(bad[0], '')[:60])
+        if uns:
+            t += '\n? ไม่แน่ใจ: %s — ดูในเกม' % ', '.join(uns)
+        t += '\nในเกม: สลับคลัง แล้วกลับมากล่องของขวัญ → แคปของรอบนี้ · %s%s' % (
+            nxt, ' · 📤 ส่งซ้ำ = ส่งตัวที่ไม่ผ่านอีกครั้ง' if bad or uns else '')
+        self._say(t, C['err'] if bad and not ok else (C['warn'] if bad or uns else C['ok']))
+        if self._evg_on() and (ok or uns):
+            self._evg_run('check')
+
+    def _multi_tag(self, s):
+        """เลข Bundle ที่ส่งแล้ว แบบสั้น (ใส่หัวภาพรวม/ชื่อไฟล์) เช่น 5447-5511 หรือ 5447-5511 (40 ตัว)"""
+        sent = s.get('eva_sent') or {}
+        bs = [b for b in s['bundles'] if sent.get(b) in ('ok', 'unsure')] or self._picked(s)
+        if not bs:
+            return ''
+        nums = sorted(int(b) for b in bs if str(b).isdigit()) or [0]
+        t = '%d-%d' % (nums[0], nums[-1]) if len(nums) > 1 else str(nums[0])
+        return t if len(bs) == len(s['bundles']) else '%s (%d ตัว)' % (t, len(bs))
+
+    def pick_bundles(self):
+        """เลือก Bundle ที่จะส่งในเซ็ตนี้ (ตัวที่คนอื่นเทสไปแล้ว เอาออกได้) — คลิกช่อง ☑ / เลือกหลายแถวแล้วกดปุ่ม"""
+        ev = self.ev
+        if ev.cur is None or not self._multi(ev.sets[ev.cur]):
+            return self._say('เลือกเซ็ตแบบ 1 ชิ้น 1 บันเดิล ก่อน (เซ็ตที่มีหลาย Bundle)', C['warn'])
+        s = ev.sets[ev.cur]
+        a = self.app
+        on = set(self._picked(s))
+        sent = s.get('eva_sent') or {}
+        rows = []
+        for it in s['items']:
+            b = it.get('bundle')
+            if b and b not in [x[0] for x in rows]:
+                rows.append((b, it.get('name') or ''))
+        top = tk.Toplevel(self.top)
+        top.title('เลือก Bundle ที่จะส่ง — %s' % ev_set_name(s)[:50])
+        top.configure(bg=C['bg'])
+        try:
+            top.attributes('-topmost', True)
+        except Exception:
+            pass
+        tk.Label(top, text='คลิกช่อง ☑ เพื่อเลือก/เอาออก · เลือกหลายแถว (Shift / Ctrl + คลิก) แล้วกดปุ่มด้านล่าง\n'
+                           'ตัวที่คนอื่นเทสไปแล้ว เอาออกได้เลย จะได้ไม่ส่งซ้ำ',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), justify='left', anchor='w').pack(fill='x', padx=12, pady=(10, 4))
+        fr = tk.Frame(top, bg=C['bg'])
+        fr.pack(fill='both', expand=True, padx=12)
+        tv = ttk.Treeview(fr, columns=('use', 'b', 'name', 'st'), show='headings', height=16, selectmode='extended',
+                          style='TR.Treeview')
+        for c_, t_, w_ in (('use', 'ส่ง', 50), ('b', 'Bundle', 80), ('name', 'ไอเทม', 300), ('st', 'สถานะ', 110)):
+            tv.heading(c_, text=t_)
+            tv.column(c_, width=w_, anchor='center' if c_ != 'name' else 'w')
+        sb = ttk.Scrollbar(fr, orient='vertical', command=tv.yview)
+        tv.configure(yscrollcommand=sb.set)
+        tv.pack(side='left', fill='both', expand=True)
+        sb.pack(side='right', fill='y')
+        stt = {'ok': '✓ ส่งแล้ว', 'unsure': '? ไม่แน่ใจ', 'fail': '✗ ไม่สำเร็จ'}
+
+        def draw():
+            for b, nm in rows:
+                v = ('☑' if b in on else '☐', b, nm, stt.get(sent.get(b), ''))
+                if tv.exists(b):
+                    tv.item(b, values=v)
+                else:
+                    tv.insert('', 'end', iid=b, values=v)
+            lbl.config(text='เลือก %d จาก %d' % (len(on), len(rows)))
+
+        def setsel(v, ids=None):
+            for b in (ids if ids is not None else [x[0] for x in rows]):
+                (on.add if v else on.discard)(b)
+            draw()
+
+        def click(e):
+            if tv.identify_region(e.x, e.y) == 'cell' and tv.identify_column(e.x) == '#1':
+                b = tv.identify_row(e.y)
+                if b:
+                    setsel(b not in on, [b])
+                    return 'break'
+        tv.bind('<Button-1>', click)
+        tv.bind('<space>', lambda e: setsel(not all(b in on for b in tv.selection()), list(tv.selection())))
+        bb = tk.Frame(top, bg=C['bg'])
+        bb.pack(fill='x', padx=12, pady=8)
+        a._btn(bb, '☑ ติ๊กแถวที่เลือก', lambda: setsel(True, list(tv.selection()))).pack(side='left', ipadx=4)
+        a._btn(bb, '☐ เอาแถวที่เลือกออก', lambda: setsel(False, list(tv.selection()))).pack(side='left', padx=(6, 0), ipadx=4)
+        a._btn(bb, 'ทั้งหมด', lambda: setsel(True)).pack(side='left', padx=(12, 0), ipadx=4)
+        a._btn(bb, 'ไม่เลือกเลย', lambda: setsel(False)).pack(side='left', padx=(6, 0), ipadx=4)
+        lbl = tk.Label(bb, text='', bg=C['bg'], fg=C['fg'], font=FB)
+        lbl.pack(side='left', padx=(12, 0))
+
+        def ok():
+            s['eva_pick'] = None if len(on) == len(rows) else [b for b, _ in rows if b in on]
+            try:
+                ev._save()
+            except Exception:
+                pass
+            self.app.log('หลักฐานเทส (อัตโนมัติ): เลือก Bundle ที่จะส่ง %d/%d — %s' % (len(on), len(rows), ev_set_name(s)),
+                         'INFO')
+            self._pick_info()
+            top.destroy()
+        a._btn(bb, 'ตกลง', ok, primary=True).pack(side='right', ipadx=10)
+        a._btn(bb, 'ยกเลิก', top.destroy).pack(side='right', padx=(0, 6), ipadx=4)
+        draw()
+        self._picker = top
+        return top
+
+    # ---------- v1.10.0 🎮 เล่นแทนในเกม ----------
+    def _evg_build(self, body):
+        a = self.app
+        p = self.prefs
+        self.game = self.game_cls()
+        self.job = None
+        self._cleared = None
+        self._tess = ''
+        fr = tk.Frame(body, bg=C['card'], padx=8, pady=6)
+        fr.pack(fill='x', pady=(8, 0))
+        self.evg_vars = {'evg_on': tk.BooleanVar(value=bool(p.get('evg_on'))),
+                         'evg_sheet': tk.BooleanVar(value=p.get('evg_sheet', True) is not False),
+                         'evg_clear': tk.BooleanVar(value=p.get('evg_clear', True) is not False),
+                         'evg_take': tk.BooleanVar(value=p.get('evg_take', True) is not False),
+                         'evg_wait': tk.StringVar(value=str(p.get('evg_wait') or EVG_WAIT))}
+        r1 = tk.Frame(fr, bg=C['card'])
+        r1.pack(fill='x')
+        tk.Checkbutton(r1, text='🎮 เล่นแทนในเกม (สลับแท็บ · แคป · อ่านชื่อไอเทม · กดรับ · บันทึก ให้เอง)',
+                       variable=self.evg_vars['evg_on'], command=self._evg_toggle, bg=C['card'], fg=C['fg'],
+                       selectcolor=C['input'], activebackground=C['card'], activeforeground=C['fg'], font=FB,
+                       anchor='w').pack(side='left')
+        r2 = tk.Frame(fr, bg=C['card'])
+        r2.pack(fill='x', pady=(4, 0))
+        a._btn(r2, '🎓 สอนตำแหน่งในเกม', self.evg_teach).pack(side='left', ipadx=4)
+        a._btn(r2, '🔍 เช็คในเกมเดี๋ยวนี้', lambda: self._evg_run('check', manual=True)).pack(side='left', padx=(6, 0), ipadx=4)
+        a._btn(r2, '■ หยุด', self.evg_stop).pack(side='left', padx=(6, 0), ipadx=4)
+        tk.Label(r2, text='รอของได้นาน', bg=C['card'], fg=C['dim'], font=('Segoe UI', 9)).pack(side='left', padx=(10, 2))
+        cw = ttk.Combobox(r2, values=['60', '120', '180', '240', '300'], textvariable=self.evg_vars['evg_wait'], width=4,
+                          state='readonly', font=FM)
+        cw.pack(side='left')
+        cw.bind('<<ComboboxSelected>>', lambda e: self._save_prefs())
+        tk.Label(r2, text='วิ', bg=C['card'], fg=C['dim'], font=('Segoe UI', 9)).pack(side='left', padx=(2, 0))
+        a._btn(r2, '📂 Tesseract', self.evg_pick_tess).pack(side='right', ipadx=2)
+        r3 = tk.Frame(fr, bg=C['card'])
+        r3.pack(fill='x', pady=(4, 0))
+        for k, t in (('evg_sheet', 'รอภาพตารางชีท (Win+Shift+S) ก่อนส่ง'), ('evg_clear', 'กดรับของค้างก่อนส่ง'),
+                     ('evg_take', 'กดรับทั้งหมด + แคปคลังเก็บหลังรับ')):
+            tk.Checkbutton(r3, text=t, variable=self.evg_vars[k], command=self._save_prefs, bg=C['card'], fg=C['dim'],
+                           selectcolor=C['input'], activebackground=C['card'], font=('Segoe UI', 8)).pack(side='left',
+                                                                                                         padx=(0, 8))
+        self.lbl_evg = tk.Label(fr, text='', bg=C['card'], fg=C['dim'], font=('Segoe UI', 8), anchor='w', justify='left',
+                                wraplength=520)
+        self.lbl_evg.pack(fill='x', pady=(4, 0))
+        self._evg_info()
+
+    def evg_pick_tess(self):
+        """ลง Tesseract ไว้ที่อื่น = เลือก tesseract.exe เอง"""
+        p = filedialog.askopenfilename(title='เลือก tesseract.exe', parent=self.top,
+                                       filetypes=[('tesseract.exe', 'tesseract.exe'), ('ทุกไฟล์', '*.*')])
+        if p:
+            self.prefs['evg_tess'] = p
+            self._save_prefs()
+            try:
+                save_prefs(self.prefs)
+            except Exception:
+                pass
+        self._evg_info()
+
+    def _evg_on(self):
+        return bool(self.evg_vars['evg_on'].get())
+
+    def _evg_ready(self):
+        """'' = พร้อมเล่นแทน · ข้อความ = ยังขาดอะไร"""
+        pts, areas = self.prefs.get('evg_pts') or {}, self.prefs.get('evg_areas') or {}
+        miss = [l for k, l, must in EVG_POINTS if must and k not in pts] + \
+               [l for k, l, must in EVG_AREAS if must and k not in areas]
+        if miss:
+            return 'ยังไม่ได้สอนตำแหน่งในเกม (%s) — กด 🎓 สอนตำแหน่งในเกม' % ', '.join(miss[:3])
+        self._tess = self.tess_fn(self.prefs)
+        why = self.tessok_fn(self._tess)
+        if why:
+            return '%s — ลงฟรีที่ %s (ติ๊ก Thai ตอนติดตั้ง)' % (why, EVG_TESS_URL)
+        return ''
+
+    def _evg_info(self):
+        why = self._evg_ready()
+        self.lbl_evg.config(text=('⚠ ' + why) if why else '✓ พร้อม: สอนตำแหน่งแล้ว · ตัวอ่านภาษาไทยพร้อม — ระหว่างเล่นแทนห้ามจับเมาส์ '
+                                                           '(ขยับ = หยุดเอง)', fg=C['warn'] if why else C['ok'])
+
+    def _say_intro(self):
+        if self._evg_on():
+            why = self._evg_ready()
+            return self._say(('🎮 ' + why) if why else
+                             '🎮 พร้อมเล่นแทนในเกม — เลือกเซ็ตในแท็บหลักฐานเทส แล้วกด ▶ เริ่ม\n'
+                             '(แคปตารางชีทเอง 1 ภาพต่อเซ็ต ที่เหลือเครื่องมือทำเอง · ห้ามจับเมาส์ระหว่างทำ)',
+                             C['warn'] if why else C['ok'])
+        self._say('ตั้งกรอบแคปให้ครบก่อน (อย่างน้อย กล่องของขวัญ) · เลือกเซ็ตในแท็บหลักฐานเทส แล้วกด ▶ เริ่ม\n'
+                  'หรือติ๊ก 🎮 เล่นแทนในเกม ให้เครื่องมือสลับแท็บ/แคป/ตรวจ/บันทึกเอง', C['dim'])
+
+    def _evg_toggle(self):
+        self._save_prefs()
+        self._evg_info()
+        if self.state == 'idle':
+            self._say_intro()
+        if self._evg_on():
+            self.app.log('หลักฐานเทส: เปิด 🎮 เล่นแทนในเกม', 'INFO')
+
+    def evg_teach(self):
+        if self.state == 'game':
+            return self._say('รอเล่นแทนในเกมรอบนี้จบก่อนนะ', C['warn'])
+        return EvgTeach(self)
+
+    def evg_stop(self):
+        if self.job is not None:
+            self.job.stop_flag = True
+
+    def _evg_expect(self):
+        """ไอเทมที่ควรเห็นในรอบนี้ -> ({ชื่อ: จำนวนการ์ด}, [index แถวในชีท], ป้ายไฟล์)"""
+        ev = self.ev
+        s = ev.sets[ev.cur]
+        rd = self.round if self.round and self.round['idx'] == ev.cur else None
+        if self._multi(s):
+            sent = set(b for b in (rd['bids'] if rd else []) if (s.get('eva_sent') or {}).get(b) in ('ok', 'unsure'))
+            idx = [i for i, it in enumerate(s['items']) if it.get('bundle') in sent]
+            tag = 'รอบ%d' % rd['no'] if rd else 'x'
+        else:
+            idx = list(range(len(s['items'])))
+            tag = s.get('bundle') or 'x'
+        return evg_expect([s['items'][i] for i in idx]), idx, tag
+
+    def _evg_run(self, mode, manual=False):
+        ev = self.ev
+        if self.state == 'game' or ev.cur is None:
+            return
+        why = self._evg_ready()
+        if why:
+            self._evg_info()
+            if mode == 'clear':                          # ยังไม่พร้อม = ข้ามการเคลียร์ แล้วส่งตามปกติ
+                self._cleared = (ev.cur, len(ev.shots))
+                self.send_current()
+            return self._say('🎮 ' + why, C['warn'])
+        exp, idx, tag = self._evg_expect() if mode == 'check' else ({}, [], 'x')
+        if mode == 'check' and not exp:
+            return self._say('🎮 รอบนี้ไม่มีไอเทมให้เช็ค (ยังไม่ได้ส่ง?)', C['warn'])
+        try:
+            wait = int(self.evg_vars['evg_wait'].get())
+        except Exception:
+            wait = EVG_WAIT
+        self.job = self.job_cls(self.game, self.prefs.get('evg_pts') or {}, self.prefs.get('evg_areas') or {}, exp,
+                                self._shot_dir(), tag, self._tess, lambda k, v: self.q.put((k, v)),
+                                wait=(5 if manual else wait), take_all=bool(self.evg_vars['evg_take'].get()), mode=mode)
+        self._prev_state = self.state
+        self.state = 'game'
+        try:
+            self.top.attributes('-topmost', False)      # ไม่บังเกม/ไม่ติดในภาพ
+        except Exception:
+            pass
+        self.app.log('หลักฐานเทส (เล่นแทนในเกม): %s — %s' % ('กดรับของค้างก่อนส่ง' if mode == 'clear' else
+                                                          'เช็คของ %d ชิ้น' % sum(exp.values()), ev_set_name(ev.sets[ev.cur])), 'STEP')
+        self._say('🎮 เล่นแทนในเกม… ห้ามจับเมาส์ (ขยับ = หยุด)', C['dim'])
+        cur = ev.cur
+        self.jobstart_fn(self.job, lambda r, m=mode, i=cur, x=idx: self.q.put(('gdone', r, m, i, x)))
+
+    def _gdone(self, r, mode, idx, rows):
+        ev = self.ev
+        self.job = None
+        self.state = 'wait' if self.sent_at else 'idle'
+        try:
+            self.top.attributes('-topmost', True)
+            self.top.lift()
+        except Exception:
+            pass
+        if r.get('aborted') or (mode == 'clear' and not r.get('ok')):
+            self.app.log('หลักฐานเทส (เล่นแทนในเกม): หยุด — %s' % r.get('why', ''), 'WARN')
+            self.top.bell()
+            return self._say('■ เล่นแทนในเกมหยุด: %s\nพร้อมแล้วกด 🔍 เช็คในเกมเดี๋ยวนี้ หรือ ▶ ส่งต่อ' % r.get('why', ''), C['warn'])
+        if mode == 'clear':
+            self.state = 'idle'
+            self._cleared = (idx, len(ev.shots))
+            return self.send_current() if idx == ev.cur else None
+        if idx != ev.cur:
+            return
+        for p in r.get('files') or []:
+            ev.take(p)
+        s = ev.sets[idx]
+        cnt, exp = r.get('cnt') or {}, r.get('exp') or {}
+        good = 0
+        for i in rows:
+            n = clean_text(s['items'][i].get('name'))
+            if n in exp and cnt.get(n) == exp[n]:
+                ev.checks[i] = 'ok'
+                good += 1
+        try:
+            ev.refresh_checks()
+            ev.refresh()
+        except Exception:
+            pass
+        self.app.log('หลักฐานเทส (เล่นแทนในเกม): แคป %d ภาพ · ตรงชีท %d/%d แถว%s' % (
+            len(r.get('files') or []), good, len(rows), '' if r.get('ok') else ' — ' + r.get('why', '')),
+            'OK' if r.get('ok') else 'WARN')
+        if r.get('ok'):
+            self._say('✓ ของในเกมตรงชีทครบ %d แถว — บันทึกให้เอง…' % good, C['ok'])
+            return self.save_next()
+        self.top.bell()
+        unk = r.get('unknown') or []
+        self._say('⚠ เช็คในเกมยังไม่ผ่าน: %s%s\nดูภาพในแท็บหลักฐานเทส ติ๊กเองได้ แล้วกด %s บันทึก · 🔍 เช็คอีกครั้ง · 📤 ส่งซ้ำ'
+                  % (r.get('why', '')[:160], ('\nของที่ไม่อยู่ในชีท: ' + ', '.join(unk[:3])) if unk else '',
+                     self.v_save.get()), C['warn'])
 
     # ---------- บันทึก + เซ็ตถัดไป ----------
     def save_next(self):
         ev = self.ev
-        if self.state in ('sending', 'saving') or ev.saving:
+        if self.state in ('sending', 'saving', 'game') or ev.saving:
             return
         if ev.cur is None:
             return self._say('ยังไม่ได้เลือกเซ็ต', C['warn'])
+        idx = ev.cur
+        s0 = ev.sets[idx]
+        multi = self._multi(s0)
+        rd = self.round if self.round and self.round['idx'] == idx else None
+        if multi and rd and len(ev.shots) <= rd['shots0']:
+            return self._say('ยังไม่ได้แคปของรอบ %d — สลับคลังในเกม แล้วแคปกล่องของขวัญก่อนนะ' % rd['no'], C['warn'])
         if not ev.shots:
             return self._say('ยังไม่มีภาพของเซ็ตนี้ — กดคีย์ลัดแคปก่อนนะ', C['warn'])
-        idx = ev.cur
+        if multi and self._pending(s0):                # ยังเหลือ Bundle ที่เลือกไว้ = ส่งรอบถัดไป (ยังไม่บันทึก)
+            if not self.running:
+                return self._say('ยังเหลือ Bundle ที่ยังไม่ส่ง %d ตัว — กด ▶ เริ่ม เพื่อส่งรอบถัดไป' % len(self._pending(s0)),
+                                 C['warn'])
+            return self.send_current()
+        tag_old = s0.get('bundle')
+        if multi:                                      # หัวภาพรวม/ชื่อไฟล์ บอกเลข Bundle ที่ส่ง (ชั่วคราวระหว่างบันทึก)
+            s0['bundle'] = self._multi_tag(s0)
         # ตัวบันทึกเดิมถามได้ 2 แบบ (ยังไม่ได้ติ๊กตรวจ / มีภาพเดียว) — รอบอัตโนมัติผู้ใช้อยู่ในเกม ตอบ “บันทึกเลย” แทน
         # ภาพที่ได้เขียนผลตามจริง (ยังไม่ได้ตรวจ N) เหมือนกดบันทึกเลยเอง
         orig_ask, orig_yes = ev._ask_unchecked, messagebox.askyesno
@@ -24605,6 +25848,8 @@ class EvaWin:
             except Exception:
                 ev._ask_unchecked = orig_ask
         if not ev.saving:
+            if multi:
+                s0['bundle'] = tag_old
             return self._say('บันทึกไม่ได้ — ดูในแท็บหลักฐานเทส', C['err'])
         self.state = 'saving'
         self._say('💾 กำลังบันทึกภาพรวม…', C['dim'])
@@ -24613,6 +25858,14 @@ class EvaWin:
             if ev.saving:
                 return self.top.after(300, wait)
             self.state = 'idle'
+            if multi:
+                s0['bundle'] = tag_old
+                try:
+                    ev._save()
+                    ev.refresh()
+                except Exception:
+                    pass
+            self.round = None
             if not ev.sets[idx].get('done'):
                 return self._say('✗ บันทึกไม่สำเร็จ — ดูในแท็บหลักฐานเทส', C['err'])
             self.app.log('หลักฐานเทส (อัตโนมัติ): 💾 บันทึก “%s” แล้ว' % ev_set_name(ev.sets[idx]), 'OK')
@@ -24649,6 +25902,9 @@ class EvaWin:
         threading.Thread(target=shut, daemon=True).start()
 
     def close(self):
+        if self.state == 'game':
+            self.evg_stop()
+            return self._say('กำลังหยุดเล่นแทนในเกม… กดปิดอีกครั้งหลังหยุดแล้ว', C['warn'])
         if self.state in ('sending', 'saving'):
             return self._say('รอให้ขั้นนี้เสร็จก่อนค่อยปิดนะ', C['warn'])
         if self.hot:
