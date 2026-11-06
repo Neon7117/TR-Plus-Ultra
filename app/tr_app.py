@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.10.3: หลักฐานเทส — สอนตำแหน่ง: คลิกในเกมแล้วขึ้น “ไม่ได้โดนหน้าเกม” ทุกครั้ง — ตอนนี้ดูหน้าต่างที่ถูกคลิกจริง (ชื่อ Tales Runner) · หาเกมเฉพาะหน้าต่างที่มองเห็น · คลิกพลาดบอกว่าโดนหน้าต่างไหน
 V1.10.2: หลักฐานเทส — ปุ่มแยก 📤 ส่งไอเทมเข้าเกม: เลือก Bundle จากเซ็ตในแท็บ (หรือพิมพ์เลขเอง 5446, 5450-5455) แล้วกด “ทดสอบส่ง Bundle” บนเว็บให้ทีละตัว (ไม่ต้องเปิดเว็บเอง)
 V1.10.1: หลักฐานเทส — เล่นแทนในเกม “ทำทีละส่วน”: สอนตำแหน่งโดยคลิกในเกมจริง (เดิมแคปภาพเกมแล้วค้าง/จอดำ) · ปุ่ม 🧪 ทดสอบ 1 กดแท็บ · 2 แคป · 3 อ่านชื่อ · ขั้นนี้ทำแค่กล่องของขวัญ (คลังใหญ่/กดรับ ผู้ใช้ทำเอง)
 V1.10.0: หลักฐานเทส — 🎮 เล่นแทนในเกม: หลังส่ง Bundle สลับแท็บ คลังเก็บ/กล่องของขวัญ ให้เองจนของครบ · แคปกล่องของขวัญ (ทุกหน้า) + คลังเก็บก่อน/หลังกดรับ · อ่านชื่อไทย (Tesseract) เทียบชีท ครบตรง = ติ๊ก ✓ + บันทึกเอง · สอนตำแหน่งปุ่มในเกมครั้งเดียว
@@ -24411,7 +24412,7 @@ class EvgGame:
         u.FindWindowW.argtypes = [ct.c_wchar_p, ct.c_wchar_p]
         for t in EVG_TITLES:
             h = u.FindWindowW(None, t)
-            if h and self.client(h):
+            if h and u.IsWindowVisible(ct.c_void_p(h)) and self.client(h):       # v1.10.3 ต้องเป็นหน้าต่างที่มองเห็น
                 return h
         found = []
         cb_t = ct.WINFUNCTYPE(ct.c_bool, ct.c_void_p, ct.c_void_p)
@@ -24431,6 +24432,36 @@ class EvgGame:
             if r and (best is None or r[2] * r[3] > best[1]):
                 best = (h, r[2] * r[3])
         return best[0] if best else None
+
+    def title(self, h):
+        ct = eva_ctypes()
+        buf = ct.create_unicode_buffer(256)
+        try:
+            ct.windll.user32.GetWindowTextW(ct.c_void_p(h), buf, 255)
+        except Exception:
+            return ''
+        return buf.value
+
+    def is_game(self, h):
+        return bool(self.game_of(h))
+
+    def game_of(self, h):
+        """หน้าต่างเกมของหน้าต่างนี้ (มองเห็น + ชื่อมี Tales Runner · หน้าต่างลูกไม่มีชื่อ = ดูเจ้าของ) -> hwnd หรือ None"""
+        if not h:
+            return None
+        ct = eva_ctypes()
+        u = ct.windll.user32
+        if not u.IsWindowVisible(ct.c_void_p(h)):
+            return None
+        u.GetWindow.restype = ct.c_void_p
+        for _ in range(4):                          # หน้าต่างลูกที่ไม่มีชื่อของเกม = ดูเจ้าของ (owner) ต่อ
+            if not h:
+                return None
+            t = self.title(h).lower()
+            if any(x.lower() in t for x in EVG_TITLES):
+                return h
+            h = u.GetWindow(ct.c_void_p(h), 4)       # GW_OWNER
+        return None
 
     def mouse_down(self):
         """ปุ่มซ้ายกดอยู่ไหม (อ่านสถานะเฉยๆ ไม่ดักเมาส์)"""
@@ -24461,11 +24492,15 @@ class EvgGame:
 
         class PT(ct.Structure):
             _fields_ = [('x', ct.c_long), ('y', ct.c_long)]
-        rc, p = RECT(), PT()
+        rc, p, q = RECT(), PT(), PT()
         if not u.GetClientRect(ct.c_void_p(h), ct.byref(rc)):
             return None
         u.ClientToScreen(ct.c_void_p(h), ct.byref(p))
-        w, hh = rc.r - rc.l, rc.b - rc.t
+        q.x, q.y = rc.r, rc.b                       # v1.10.3 มุมขวาล่างแปลงผ่าน ClientToScreen ด้วย
+        u.ClientToScreen(ct.c_void_p(h), ct.byref(q))  # (เกมที่ Windows ขยายให้ = ได้ขนาดจริงบนจอ ไม่ใช่ขนาดก่อนขยาย)
+        w, hh = q.x - p.x, q.y - p.y
+        if w <= 0 or hh <= 0:
+            w, hh = rc.r - rc.l, rc.b - rc.t
         return (p.x, p.y, w, hh) if w > 50 and hh > 50 else None
 
     def front(self, h):
@@ -24783,19 +24818,21 @@ def evg_watch_click(game, stop, post):
     def run():
         eva_dpi_thread()
         try:
-            h = game.find()
-            if not h:
-                return post(('err', 'หาหน้าต่างเกม “Tales Runner” ไม่เจอ — เปิดเกม (โหมดหน้าต่าง) ไว้ก่อน'))
+            # v1.10.3 ดูหน้าต่าง “ที่ถูกคลิกจริง” — เดิมเทียบกับหน้าต่างที่ FindWindow เจอ ซึ่งอาจเป็นหน้าต่างซ่อนชื่อเดียวกัน
+            #         (ผู้ใช้คลิกในเกมแล้วขึ้น “ไม่ได้โดนหน้าเกม” ทุกครั้ง)
             was = game.mouse_down()
             while not stop.is_set():
                 d = game.mouse_down()
                 if was and not d:                                  # ปล่อยปุ่ม = คลิก 1 ครั้ง
                     x, y = game.cursor()
-                    cl = game.client(h)
-                    if cl and cl[0] <= x < cl[0] + cl[2] and cl[1] <= y < cl[1] + cl[3] and game.root_at(x, y) == h:
+                    r = game.root_at(x, y)
+                    gh = game.game_of(r) if r else None
+                    cl = game.client(gh) if gh else None
+                    if cl and cl[0] <= x < cl[0] + cl[2] and cl[1] <= y < cl[1] + cl[3]:
                         return post(('pos', [round((x - cl[0]) / cl[2], 5), round((y - cl[1]) / cl[3], 5)],
                                      (cl[2], cl[3])))
-                    post(('miss', ''))
+                    post(('miss', '%s · จุด (%d, %d)%s' % ((game.title(r) or '(ไม่มีชื่อ)') if r else '(ไม่มีหน้าต่าง)', x, y,
+                                                         (' · พื้นที่เกม %s' % (cl,)) if cl else '')))
                 was = d
                 time.sleep(0.02)
         except Exception as ex:
@@ -24939,8 +24976,9 @@ class EvgTeach:
             self.lbl.config(text='✗ %s\n(เปิดเกมแล้วกด “ทำขั้นนี้ใหม่”)' % v, fg=C['err'])
             return
         if kind == 'miss':
-            self.lbl.config(text=self.lbl.cget('text').split('\n')[0] + '\n(คลิกนั้นไม่ได้โดนหน้าเกม — คลิกในหน้าต่างเกมนะ)',
-                            fg=C['warn'])
+            self.app.log('สอนตำแหน่ง: คลิกไม่โดนเกม — โดน %s' % v, 'WARN')
+            self.lbl.config(text=self.lbl.cget('text').split('\n')[0] + '\n(คลิกนั้นไม่ได้โดนหน้าเกม — โดน “%s”)'
+                            % str(v).split(' · ')[0][:40], fg=C['warn'])
             return
         size = rest[0] if rest else self.size
         self.size = tuple(size)
