@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.10.5: หลักฐานเทส — ตัวอ่านภาษาไทย (Tesseract): ลง tha แล้วยังขึ้น “ยังไม่มีภาษาไทย” — บอกโฟลเดอร์ภาษาข้าง tesseract.exe ตรงๆ (กันตัวแปร TESSDATA_PREFIX ชี้ที่อื่น / ชื่อโฟลเดอร์ภาษาไทย) · ส่งภาพทางท่อแทนชื่อไฟล์ · ลงไว้หลายที่ = เลือกตัวที่มีภาษาไทย · ไม่ผ่านบอกว่าใช้ตัวไหน มีภาษาอะไร
 V1.10.4: เชื่อมแท็บ — ส่งต่อจากสร้าง Bundle: หน้านำเข้าปลายทาง (สร้าง Event / หลักฐานเทส / Product / WR / Item Code / Check in Booster) โชว์เลข Bundle ที่จะเติมให้ตั้งแต่ก่อนกดใช้ข้อมูลนี้ (เดิมขึ้น “⚠ ไม่มี” ทั้งที่เติมให้หลังกด)
 V1.10.3: หลักฐานเทส — สอนตำแหน่ง: คลิกในเกมแล้วขึ้น “ไม่ได้โดนหน้าเกม” ทุกครั้ง — ตอนนี้ดูหน้าต่างที่ถูกคลิกจริง (ชื่อ Tales Runner) · หาเกมเฉพาะหน้าต่างที่มองเห็น · คลิกพลาดบอกว่าโดนหน้าต่างไหน
 V1.10.2: หลักฐานเทส — ปุ่มแยก 📤 ส่งไอเทมเข้าเกม: เลือก Bundle จากเซ็ตในแท็บ (หรือพิมพ์เลขเอง 5446, 5450-5455) แล้วกด “ทดสอบส่ง Bundle” บนเว็บให้ทีละตัว (ไม่ต้องเปิดเว็บเอง)
@@ -24354,19 +24355,42 @@ def evg_expect(items):
 
 
 def evg_tess_find(prefs=None):
-    """หา tesseract.exe — ที่ตั้งเอง > ที่ติดตั้งปกติ > PATH"""
+    """หา tesseract.exe — ที่ตั้งเอง > ที่ติดตั้งปกติ > PATH
+    v1.10.5 ลงไว้หลายที่ = เลือกตัวที่มี tessdata\\tha.traineddata ข้างตัวก่อน (ไม่มีสักตัว = ตัวแรกที่เจอ เหมือนเดิม)"""
     c = [(prefs or {}).get('evg_tess') or '']
     c += list(EVG_TESS) + [os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Tesseract-OCR', 'tesseract.exe'),
                            shutil.which('tesseract') or '']
+    c = [p for p in c if p and os.path.isfile(p)]
     for p in c:
-        if p and os.path.isfile(p):
+        d = evg_tess_data(p)
+        if d and os.path.isfile(os.path.join(d, 'tha.traineddata')):
             return p
-    return ''
+    return c[0] if c else ''
 
 
-def evg_exec(args, timeout=60):
+def evg_tess_data(exe):
+    """โฟลเดอร์ tessdata ข้าง tesseract.exe ('' = ไม่มี)"""
+    if not exe:
+        return ''
+    d = os.path.join(os.path.dirname(exe), 'tessdata')
+    return d if os.path.isdir(d) else ''
+
+
+def evg_tess_cmd(exe):
+    """(คำสั่งต้น, โฟลเดอร์ที่รัน) — v1.10.5 มี tessdata ข้าง exe = บอก --tessdata-dir แบบสัมพัทธ์ (รันในโฟลเดอร์ exe)
+    กัน 1) ตัวแปร TESSDATA_PREFIX ของเครื่องชี้ไป tessdata อื่นที่ไม่มี tha  2) ชื่อโฟลเดอร์ภาษาไทย (tesseract บางเครื่องเปิด path ไทยไม่ได้)"""
+    if evg_tess_data(exe):
+        return [exe, '--tessdata-dir', 'tessdata'], os.path.dirname(exe)
+    return [exe], None
+
+
+def evg_exec(args, timeout=60, cwd=None, data=None):
     import subprocess
     kw = {'capture_output': True, 'timeout': timeout}
+    if cwd:
+        kw['cwd'] = cwd
+    if data is not None:
+        kw['input'] = data
     if os.name == 'nt':
         kw['creationflags'] = 0x08000000              # ไม่เด้งหน้าต่างดำ
     r = subprocess.run(args, **kw)
@@ -24374,20 +24398,49 @@ def evg_exec(args, timeout=60):
 
 
 def evg_tess_ok(exe):
-    """'' = พร้อม (มีภาษาไทย) · ข้อความ = เหตุผลที่ยังใช้ไม่ได้"""
+    """'' = พร้อม (มีภาษาไทย) · ข้อความ = เหตุผลที่ยังใช้ไม่ได้ (v1.10.5 บอกว่าใช้ตัวไหน มีภาษาอะไร)"""
     if not exe:
         return 'ยังไม่ได้ลงตัวอ่านภาษาไทย (Tesseract)'
+    cmd, cwd = evg_tess_cmd(exe)
     try:
-        code, out, err = evg_exec([exe, '--list-langs'], 20)
+        code, out, err = evg_exec(cmd + ['--list-langs'], 20, cwd)
     except Exception as ex:
-        return 'เปิด Tesseract ไม่ได้: %s' % str(ex)[:80]
+        return 'เปิด Tesseract ไม่ได้ (%s): %s' % (exe, str(ex)[:80])
     langs = {x.strip() for x in (out + '\n' + err).splitlines()}
-    return '' if 'tha' in langs else 'Tesseract ยังไม่มีภาษาไทย (tha) — ลงเพิ่มตอนติดตั้ง หรือใส่ไฟล์ tha.traineddata'
+    d = evg_tess_data(exe)
+    tha = os.path.join(d, 'tha.traineddata') if d else ''
+    if 'tha' in langs:
+        try:
+            if tha and os.path.isfile(tha):
+                with open(tha, 'rb') as f:
+                    head = f.read(64)
+                if os.path.getsize(tha) < 200000 or head.lstrip()[:1] == b'<':
+                    return 'ไฟล์ %s ไม่ใช่ไฟล์ภาษาจริง (น่าจะโหลดหน้าเว็บมา) — โหลดใหม่แบบ Download raw file' % tha
+        except Exception:
+            pass
+        return ''
+    have = sorted(x for x in langs if re.fullmatch(r'[a-z][a-z_]{1,15}', x))
+    msg = 'Tesseract ยังไม่มีภาษาไทย (tha) — ตัวที่ใช้: %s · ภาษาที่มี: %s' % (exe, ', '.join(have) or 'ไม่มี')
+    if tha and os.path.isfile(tha):
+        e = [x for x in (err + '\n' + out).splitlines() if x.strip() and 'List of available' not in x]
+        return msg + ' · มีไฟล์ tha.traineddata แต่ Tesseract อ่านไม่ได้%s' % ((': ' + e[0].strip()[:100]) if e else '')
+    return msg + ' — ใส่ไฟล์ tha.traineddata ในโฟลเดอร์ %s หรือกด 📂 Tesseract เลือก tesseract.exe ตัวที่ลงภาษาไทยไว้' % (
+        d or os.path.join(os.path.dirname(exe), 'tessdata'))
 
 
 def evg_ocr_lines(exe, png_path):
-    """อ่านภาพ -> [(ข้อความ 1 บรรทัด, (ซ้าย, บน, กว้าง, สูง))] เรียงบนลงล่าง ซ้ายไปขวา"""
-    code, out, err = evg_exec([exe, png_path, 'stdout', '-l', 'tha', '--psm', '11', 'tsv'], 90)
+    """อ่านภาพ -> [(ข้อความ 1 บรรทัด, (ซ้าย, บน, กว้าง, สูง))] เรียงบนลงล่าง ซ้ายไปขวา
+    v1.10.5 ส่งภาพทางท่อ (stdin) — ชื่อไฟล์/โฟลเดอร์ภาษาไทยไม่ไปถึง tesseract · ท่อไม่ได้ค่อยส่งชื่อไฟล์แบบเดิม"""
+    cmd, cwd = evg_tess_cmd(exe)
+    opt = ['stdout', '-l', 'tha', '--psm', '11', 'tsv']
+    try:
+        with open(png_path, 'rb') as f:
+            data = f.read()
+        code, out, err = evg_exec(cmd + ['stdin'] + opt, 90, cwd, data)
+    except Exception as ex:
+        code, out, err = -1, '', str(ex)
+    if code != 0:
+        code, out, err = evg_exec(cmd + [os.path.abspath(png_path)] + opt, 90, cwd)
     if code != 0:
         raise RuntimeError('อ่านภาพไม่ได้: %s' % (err.strip()[:160] or code))
     lines = {}
