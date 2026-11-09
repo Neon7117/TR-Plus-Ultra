@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.10.6: หลักฐานเทส — เล่นแทนในเกม: ส่งแล้วรอ 15 วิ ก่อนสลับแท็บดูของครั้งแรก แล้วดูซ้ำทุก 10 วิ · ระหว่างรอขยับเมาส์ได้ (ไม่หยุด — ก่อนกดรอเมาส์นิ่ง) · 🔍 เช็คในเกมเดี๋ยวนี้ ดูซ้ำจนครบ (≤25 วิ) · ชื่อในเกมต่างจากชีท: (ซ่อมแซม) = (ความทนทาน) · 1 ชั่วโมง = 60 นาที · OCR อ่าน 0 เป็น ป หลังตัวเลข
 V1.10.5: หลักฐานเทส — ตัวอ่านภาษาไทย (Tesseract): ลง tha แล้วยังขึ้น “ยังไม่มีภาษาไทย” — บอกโฟลเดอร์ภาษาข้าง tesseract.exe ตรงๆ (กันตัวแปร TESSDATA_PREFIX ชี้ที่อื่น / ชื่อโฟลเดอร์ภาษาไทย) · ส่งภาพทางท่อแทนชื่อไฟล์ · ลงไว้หลายที่ = เลือกตัวที่มีภาษาไทย · ไม่ผ่านบอกว่าใช้ตัวไหน มีภาษาอะไร
 V1.10.4: เชื่อมแท็บ — ส่งต่อจากสร้าง Bundle: หน้านำเข้าปลายทาง (สร้าง Event / หลักฐานเทส / Product / WR / Item Code / Check in Booster) โชว์เลข Bundle ที่จะเติมให้ตั้งแต่ก่อนกดใช้ข้อมูลนี้ (เดิมขึ้น “⚠ ไม่มี” ทั้งที่เติมให้หลังกด)
 V1.10.3: หลักฐานเทส — สอนตำแหน่ง: คลิกในเกมแล้วขึ้น “ไม่ได้โดนหน้าเกม” ทุกครั้ง — ตอนนี้ดูหน้าต่างที่ถูกคลิกจริง (ชื่อ Tales Runner) · หาเกมเฉพาะหน้าต่างที่มองเห็น · คลิกพลาดบอกว่าโดนหน้าต่างไหน
@@ -24287,7 +24288,8 @@ EVG_POINTS = (('tab_gift', 'แท็บ “กล่องของขวัญ
               ('tab_bag', 'แท็บ “คลังเก็บ” (ข้างกล่องของขวัญ — ไว้สลับให้ของขึ้น)', True),
               ('next', 'ปุ่ม “ถัดไป ▶” ใต้รายการกล่องของขวัญ (ไม่บังคับ)', False))
 EVG_AREAS = (('gift_area', 'กรอบรายการกล่องของขวัญ — คลิกมุมซ้ายบน แล้วมุมขวาล่าง ของพื้นที่การ์ด', True),)
-EVG_POLL = 20                      # สลับแท็บดูของทุกกี่วิ
+EVG_POLL = 10                      # สลับแท็บดูของทุกกี่วิ (v1.10.6 จาก 20 — ของทยอยขึ้นทีละใบ)
+EVG_FIRST = 15                     # v1.10.6 ส่งแล้วรอกี่วิก่อนสลับแท็บดูครั้งแรก (ของเข้าช้า 15–30 วิ)
 EVG_WAIT = 180                     # รอของเข้าได้นานสุดกี่วิ (ของเข้าช้า 1–2 นาที)
 EVG_TESS = (r'C:\Program Files\Tesseract-OCR\tesseract.exe', r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe')
 EVG_TESS_URL = 'https://github.com/UB-Mannheim/tesseract/wiki'
@@ -24298,10 +24300,19 @@ _EVG_SAME = str.maketrans({'ค': 'ก', 'ข': 'ช', 'ต': 'ด', 'ฏ': 'ด
 
 
 # ---------- อ่านชื่อไอเทมจากภาพ ----------
+def evg_canon(t):
+    """v1.10.6 คำที่ชีทกับในเกมเขียนต่างกันแต่เป็นของเดียวกัน: (ซ่อมแซม) = (ความทนทาน) · N ชั่วโมง = N×60 นาที
+    ทำกับข้อความที่ evg_norm แล้ว (ตัดวรรค/วรรณยุกต์ — OCR ชอบเว้นวรรคกลางคำ) : ชอมแชม→กวามทนทาน · Nชิวโมง→(N×60)นาทิ"""
+    t = t.replace('ชอมแชม', 'กวามทนทาน')
+    return re.sub(r'(\d+)ชิวโมง', lambda m: '%dนาทิ' % (int(m.group(1)) * 60), t)
+
+
 def evg_norm(t):
-    """ชื่อไอเทมแบบเทียบกับผล OCR: ตัดวรรค/วรรณยุกต์ · รวมตัวที่ OCR สับสนบ่อย (ค/ก ข/ช ต/ด …)"""
+    """ชื่อไอเทมแบบเทียบกับผล OCR: ตัดวรรค/วรรณยุกต์ · รวมตัวที่ OCR สับสนบ่อย (ค/ก ข/ช ต/ด …)
+    v1.10.6 ป ที่ติดหลังตัวเลข (ไม่มีสระตาม) = 0 ที่ OCR อ่านพลาด (60 → 6ป) · แปลงคำที่เขียนต่างกัน (evg_canon)"""
     t = _EVG_TONES.sub('', str(t or '')).translate(_EVG_SAME)
-    return re.sub(r'[^0-9a-zก-ฮะ-ฺเ-ๅ%]', '', t.lower())
+    t = re.sub(r'[^0-9a-zก-ฮะ-ฺเ-ๅ%]', '', t.lower())
+    return evg_canon(re.sub(r'(?<=\d)ป(?![ะ-ฺ])', '0', t))
 
 
 def evg_score(line, name):
@@ -24662,8 +24673,9 @@ class EvgJob:
     sleep = staticmethod(time.sleep)
 
     def __init__(self, game, pts, areas, expect, out_dir, tag, tess, post, wait=EVG_WAIT, poll=EVG_POLL,
-                 take_all=True, mode='check'):
+                 take_all=True, mode='check', first=0):
         self.mode = mode
+        self.first = first                               # v1.10.6 รอก่อนดูครั้งแรก (ของเข้าช้า)
         self.g, self.pts, self.areas, self.expect = game, dict(pts), dict(areas), dict(expect)
         self.out_dir, self.tag, self.tess, self._post = out_dir, tag, tess, post
         self.wait, self.poll, self.take_all = wait, poll, take_all
@@ -24691,6 +24703,45 @@ class EvgJob:
             if left <= 0:
                 return
             self.sleep(min(0.25, left))
+
+    def rest(self, s, why='รอของเข้า'):
+        """v1.10.6 รอเฉยๆ ระหว่างรอบ — ผู้ใช้ขยับเมาส์ได้ (ไม่หยุด) · หมดเวลาแล้วรอเมาส์นิ่งก่อนกดต่อ"""
+        end = time.time() + s
+        shown = None
+        while True:
+            if self.stop_flag:
+                raise EvgAbort('กดหยุด')
+            left = end - time.time()
+            if left <= 0:
+                break
+            if shown is None or shown - left >= 5:
+                shown = left
+                self.say('🎮 %s… ดูอีกครั้งใน %d วิ (ระหว่างรอขยับเมาส์ได้)' % (why, int(left + 0.5)))
+            self.sleep(min(0.25, left))
+        self.settle()
+
+    def settle(self, still=1.0, most=30):
+        """v1.10.6 เมาส์ไม่อยู่ที่จุดที่เรากดล่าสุด = ผู้ใช้ใช้อยู่ → รอให้นิ่ง still วิ ก่อนกดต่อ (นานสุด most วิ แล้วหยุด)"""
+        c = self.g.cursor()
+        if self._last is None or (abs(c[0] - self._last[0]) <= 6 and abs(c[1] - self._last[1]) <= 6):
+            return
+        t0 = calm = time.time()
+        told = False
+        while True:
+            if self.stop_flag:
+                raise EvgAbort('กดหยุด')
+            self.sleep(0.25)
+            n = self.g.cursor()
+            if abs(n[0] - c[0]) > 3 or abs(n[1] - c[1]) > 3:
+                c, calm = n, time.time()
+                if not told:
+                    told = True
+                    self.say('🎮 รอเมาส์นิ่งก่อน แล้วจะสลับแท็บในเกมต่อ (ปล่อยเมาส์ไว้)')
+            if time.time() - calm >= still:
+                self._last = None                        # กดครั้งต่อไปเริ่มนับจากจุดใหม่
+                return
+            if time.time() - t0 > most:
+                raise EvgAbort('เมาส์ไม่นิ่งเกิน %d วิ — หยุดให้ก่อน กด 🔍 เช็คในเกมเดี๋ยวนี้ เมื่อพร้อม' % most)
 
     def _watch(self):
         if self._last is not None:
@@ -24787,6 +24838,8 @@ class EvgJob:
             need = sum(self.expect.values())
             t0 = time.time()
             n = 0
+            if self.first > 0:
+                self.rest(self.first, 'ส่งแล้ว รอของเข้ากล่องของขวัญ')
             while True:
                 n += 1
                 self.say('🎮 สลับแท็บดูของ (ครั้งที่ %d) …' % n)
@@ -24800,7 +24853,7 @@ class EvgJob:
                 if time.time() - t0 + self.poll > self.wait:
                     res['timeout'] = True
                     break
-                self.nap(self.poll)
+                self.rest(self.poll, 'ของยังไม่ครบ %d/%d' % (got, need))
             res['cnt'], res['unsure'], res['unknown'] = cnt, [list(u) for u in uns], unk
             if len(pages) > 1:                             # กลับหน้าแรกก่อนแคปเก็บ
                 self.refresh()
@@ -26021,7 +26074,8 @@ class EvaWin:
         areas = {k: v for k, v in (self.prefs.get('evg_areas') or {}).items() if k in {x[0] for x in EVG_AREAS}}
         self.job = self.job_cls(self.game, pts, areas, exp,
                                 self._shot_dir(), tag, self._tess, lambda k, v: self.q.put((k, v)),
-                                wait=(5 if manual else wait), take_all=False, mode=mode)
+                                wait=(25 if manual else wait), take_all=False, mode=mode,
+                                poll=(8 if manual else EVG_POLL), first=(0 if manual or mode != 'check' else EVG_FIRST))
         self._prev_state = self.state
         self.state = 'game'
         try:
@@ -26030,7 +26084,7 @@ class EvaWin:
             pass
         self.app.log('หลักฐานเทส (เล่นแทนในเกม): %s — %s' % ('กดรับของค้างก่อนส่ง' if mode == 'clear' else
                                                           'เช็คของ %d ชิ้น' % sum(exp.values()), ev_set_name(ev.sets[ev.cur])), 'STEP')
-        self._say('🎮 เล่นแทนในเกม… ห้ามจับเมาส์ (ขยับ = หยุด)', C['dim'])
+        self._say('🎮 เล่นแทนในเกม… ตอนสลับแท็บห้ามจับเมาส์ (ขยับ = หยุด) · ตอนรอของเข้าขยับได้', C['dim'])
         cur = ev.cur
         self.jobstart_fn(self.job, lambda r, m=mode, i=cur, x=idx: self.q.put(('gdone', r, m, i, x)))
 
