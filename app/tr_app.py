@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.10.4: เชื่อมแท็บ — ส่งต่อจากสร้าง Bundle: หน้านำเข้าปลายทาง (สร้าง Event / หลักฐานเทส / Product / WR / Item Code / Check in Booster) โชว์เลข Bundle ที่จะเติมให้ตั้งแต่ก่อนกดใช้ข้อมูลนี้ (เดิมขึ้น “⚠ ไม่มี” ทั้งที่เติมให้หลังกด)
 V1.10.3: หลักฐานเทส — สอนตำแหน่ง: คลิกในเกมแล้วขึ้น “ไม่ได้โดนหน้าเกม” ทุกครั้ง — ตอนนี้ดูหน้าต่างที่ถูกคลิกจริง (ชื่อ Tales Runner) · หาเกมเฉพาะหน้าต่างที่มองเห็น · คลิกพลาดบอกว่าโดนหน้าต่างไหน
 V1.10.2: หลักฐานเทส — ปุ่มแยก 📤 ส่งไอเทมเข้าเกม: เลือก Bundle จากเซ็ตในแท็บ (หรือพิมพ์เลขเอง 5446, 5450-5455) แล้วกด “ทดสอบส่ง Bundle” บนเว็บให้ทีละตัว (ไม่ต้องเปิดเว็บเอง)
 V1.10.1: หลักฐานเทส — เล่นแทนในเกม “ทำทีละส่วน”: สอนตำแหน่งโดยคลิกในเกมจริง (เดิมแคปภาพเกมแล้วค้าง/จอดำ) · ปุ่ม 🧪 ทดสอบ 1 กดแท็บ · 2 แคป · 3 อ่านชื่อ · ขั้นนี้ทำแค่กล่องของขวัญ (คลังใหญ่/กดรับ ผู้ใช้ทำเอง)
@@ -21901,6 +21902,10 @@ def link_install(app):
         eva_install(app)                             # v1.9.0 หลักฐานเทส: ส่งเทส + แคปอัตโนมัติ
     except Exception as ex:
         app.log('วางปุ่มส่งเทส + แคปอัตโนมัติไม่สำเร็จ: %s' % str(ex)[:80], 'WARN')
+    try:
+        link_preview_install()                       # v1.10.4 หน้านำเข้าปลายทางโชว์เลข Bundle ที่จะเติมให้
+    except Exception as ex:
+        app.log('ติดตั้งตัวเติมเลข Bundle ในหน้านำเข้าไม่สำเร็จ: %s' % str(ex)[:80], 'WARN')
 
 
 # ---- v1.7.1 ปุ่ม “ส่งไป…” — เปิดหน้านำเข้าของแท็บปลายทาง ด้วยไฟล์เดิม + ชีทเดิมที่เลือกไว้ให้ ----
@@ -22083,12 +22088,14 @@ def link_open(app, fn, path, sheets, star_only=True):
         pass
     LINK['pre'] = None
     filedialog.askopenfilename = once
+    LINK['opening'] = True                           # v1.10.4 หน้านำเข้านี้เปิดจากปุ่มส่งไป… (หลักฐานเทสเติมเลขเฉพาะทางนี้)
     try:
         app.root.after(150, lambda: link_preselect(app, before, list(sheets or []), live, 0, star_only))
         fn()
     finally:
         filedialog.askopenfilename = orig
         live['on'] = False
+        LINK['opening'] = False
     return used['n']
 
 
@@ -26507,6 +26514,87 @@ def eva_install(app):
     tk.Label(row, text='กด “ทดสอบส่ง Bundle” บนเว็บให้ + คีย์ลัดแคปกรอบในเกม + บันทึกแล้วไปเซ็ตถัดไป',
              bg=C['bg'], fg=C['dim'], font=('Segoe UI', 8), anchor='w').pack(side='left', padx=(8, 0))
     return nb
+
+
+# ============================================================================
+#  [18] v1.10.4 ส่งต่อเลข Bundle — โชว์ในหน้านำเข้าตั้งแต่ก่อนกด “ใช้ข้อมูลนี้”
+#      ผู้ใช้ส่งต่อจากแท็บสร้าง Bundle ไปสร้าง Event แล้วหน้านำเข้าขึ้น “⚠ ไม่มี / ⛔ ยังไม่มีเลข Bundle”
+#      ทั้งที่กดใช้ข้อมูลนี้แล้วเครื่องมือเติมให้จริง (เติมหลังกด) -> ดูเหมือนพัง
+#      ตอนนี้เติมเลขจากแท็บสร้าง Bundle ให้ตั้งแต่หน้าดูก่อน (กติกาเดียวกับตอนเติมหลังกด · มีเลขแล้วไม่ทับ)
+#      ทุกปลายทาง: สร้าง Event · หลักฐานเทส · สร้าง Product · WR Master · Item Code · Check in Booster
+# ============================================================================
+def link_preview_fill(dest, dlg, bs):
+    """เติมเลข Bundle ที่ว่างในรายการหน้าดูก่อน (ของจริงที่จะนำเข้า) -> [ชื่อที่เติมให้ ไว้ตัดคำเตือนเก่า]"""
+    app = LINK.get('app')
+    if app is None or not bs:
+        return []
+    if dest == 'ev' and not LINK.get('opening'):
+        return []                                    # หลักฐานเทสเติมเลขเฉพาะตอนส่งมาจากแท็บสร้าง Bundle (เหมือนเดิม)
+    path = getattr(dlg, 'path', '') or ''
+    made = list(getattr(app, 'made', None) or [])
+    if not any(re.fullmatch(r'\d+', str(m.get('id') or '').strip()) for m in made):
+        return []                                    # ยังไม่ได้สร้างบันเดิลเลย = ไม่มีอะไรให้เติม
+    book = link_bundle_book(app)
+    names = []
+    if dest == 'evt':
+        for t, r, bid, src in evt_fill_bundles(bs, path, book, made)[0]:
+            names.append(r.get('title') or r.get('name') or '')
+    elif dest == 'ev':
+        for s in link_fill_ev(bs, path, book)[0]:
+            names.append(ev_set_name(s))
+    elif dest in ('wr', 'gen'):
+        fb = os.path.basename(path)
+        for d in bs:
+            d.setdefault('_file', fb)
+        for d, bid, nm in link_fill_codes(bs, fb, dest, book)[0]:
+            names.append(str(d.get('code') or d.get('name') or ''))
+    elif dest == 'shop':
+        for p in link_fill_products(bs, path, book):
+            names.append(p.get('name') or '')
+        fill, _ = shop_bundle_match(bs, made)
+        for p, bid in fill:
+            p['bundle'], p['bundle_src'] = bid, 'แท็บ Bundle'
+            names.append(p.get('name') or '')
+    elif dest == 'cib':
+        fill, _ = cib_bundle_match(bs, made)
+        for x, bid in fill:
+            x['bundle'], x['bundle_src'] = bid, 'แท็บ Bundle'
+            names.append('Day %s' % x.get('day'))
+    return [n for n in names if n]
+
+
+def link_preview_wrap(dest, orig):
+    """หน้าดูก่อนแสดง “สำเนา” ที่เติมเลขแล้ว · ของที่จะนำเข้าจริงยังเป็นตัวเดิม
+    -> กดใช้ข้อมูลนี้แล้วตัวเติมเดิมทำงานเหมือนเดิมทุกอย่าง (เติม + จด Log + ที่มาเลข)"""
+    def _show(self, bs, ws, note):
+        show = bs
+        try:
+            import copy
+            cp = copy.deepcopy(bs)
+            got = link_preview_fill(dest, self, cp)
+            if got:
+                show = cp
+                ws = [w for w in (ws or []) if not ('Bundle' in w and any(n in w for n in got))]
+                note = '%s · 🔗 เลข Bundle จากแท็บสร้าง Bundle %d รายการ (เติมให้ตอนกดใช้ข้อมูลนี้)' % (note, len(got))
+        except Exception as ex:
+            app = LINK.get('app')
+            if app is not None:
+                app.log('🔗 เติมเลข Bundle ในหน้านำเข้าไม่สำเร็จ: %s' % str(ex)[:80], 'WARN')
+        r = orig(self, show, ws, note)
+        if show is not bs and getattr(self, 'bundles', None) is show:
+            self.bundles = bs                      # นำเข้าตัวเดิม (ตัวเติมเดิมเติม + จด Log ตอนกด)
+        return r
+    _show._link_prev = dest
+    return _show
+
+
+def link_preview_install():
+    """ห่อหน้าดูก่อนของหน้านำเข้าปลายทาง (ไม่แก้โค้ดหน้าต่างเดิม — ห่อตอนเปิดโปรแกรม ครั้งเดียว)"""
+    for dest, cls in (('evt', EvtImportDialog), ('ev', EvImportDialog), ('shop', ShopImportDialog),
+                      ('cib', CibImportDialog), ('wr', LinkCodeImportDialog), ('gen', LinkGenImportDialog)):
+        if getattr(cls.__dict__.get('_show'), '_link_prev', None):
+            continue
+        cls._show = link_preview_wrap(dest, cls._show)
 
 
 if __name__ == '__main__':
