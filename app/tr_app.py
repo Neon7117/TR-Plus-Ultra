@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.10.7: เชื่อมแท็บ — ค้นหาเจอหลายตัว (ItemKind ซ้ำ) แล้วส่งไปสร้าง Bundle: เดิมไม่เติมเลยสักตัว — ตอนนี้ขึ้นหน้าให้เลือกว่าจะใช้ Aztek Item Id ตัวไหน (ทีละรายการ · ข้ามได้) แล้วเติมให้ · จำที่เลือกไว้ (กดส่งซ้ำเลือกไว้ให้)
 V1.10.6: หลักฐานเทส — เล่นแทนในเกม: ส่งแล้วรอ 15 วิ ก่อนสลับแท็บดูของครั้งแรก แล้วดูซ้ำทุก 10 วิ · ระหว่างรอขยับเมาส์ได้ (ไม่หยุด — ก่อนกดรอเมาส์นิ่ง) · 🔍 เช็คในเกมเดี๋ยวนี้ ดูซ้ำจนครบ (≤25 วิ) · ชื่อในเกมต่างจากชีท: (ซ่อมแซม) = (ความทนทาน) · 1 ชั่วโมง = 60 นาที · OCR อ่าน 0 เป็น ป หลังตัวเลข
 V1.10.5: หลักฐานเทส — ตัวอ่านภาษาไทย (Tesseract): ลง tha แล้วยังขึ้น “ยังไม่มีภาษาไทย” — บอกโฟลเดอร์ภาษาข้าง tesseract.exe ตรงๆ (กันตัวแปร TESSDATA_PREFIX ชี้ที่อื่น / ชื่อโฟลเดอร์ภาษาไทย) · ส่งภาพทางท่อแทนชื่อไฟล์ · ลงไว้หลายที่ = เลือกตัวที่มีภาษาไทย · ไม่ผ่านบอกว่าใช้ตัวไหน มีภาษาอะไร
 V1.10.4: เชื่อมแท็บ — ส่งต่อจากสร้าง Bundle: หน้านำเข้าปลายทาง (สร้าง Event / หลักฐานเทส / Product / WR / Item Code / Check in Booster) โชว์เลข Bundle ที่จะเติมให้ตั้งแต่ก่อนกดใช้ข้อมูลนี้ (เดิมขึ้น “⚠ ไม่มี” ทั้งที่เติมให้หลังกด)
@@ -21440,6 +21441,8 @@ def link_items_book(app):
         by_kind.setdefault(str(c.get('kind') or '').strip(), []).append(c)
     for i in sorted(k for k in hits if isinstance(k, int)):
         h = hits.get(i) or []
+        if len(h) > 1:                                # v1.10.7 เจอหลายตัว = ใช้ตัวที่ผู้ใช้เลือก (หน้าเลือกไอเทมซ้ำ)
+            h = link_dup_chosen(app, i, h)
         if len(h) != 1:
             continue                                  # ไม่เจอ / เจอหลายตัว = ไม่เดา
         iid = str(h[0].get('id') or '').strip()
@@ -22115,6 +22118,8 @@ def link_send(app, dest, src_kind):
     tab, fn = link_dest(app, dest)
     if fn is None:
         return messagebox.showwarning('ส่งไป ' + nm, 'แท็บ %s ยังไม่พร้อม (ดูใน Log)' % nm)
+    if dest == 'bundle' and not link_dup_step(app):    # v1.10.7 ค้นหาเจอหลายตัว = ให้เลือกก่อน (กดยกเลิก = ไม่ส่ง)
+        return None
     try:
         app.nb.select(tab)
     except Exception:
@@ -26702,6 +26707,144 @@ def link_preview_install():
         if getattr(cls.__dict__.get('_show'), '_link_prev', None):
             continue
         cls._show = link_preview_wrap(dest, cls._show)
+
+
+# ============================================================================
+#  [19] ค้นหาเจอหลายตัว → เลือกเองก่อนส่งไปสร้าง Bundle (v1.10.7) — ของใหม่ ไม่แตะตัวค้นหา/ตัวนำเข้าเดิม
+#      ItemKind เดียวเจอหลาย Aztek Item Id (เช่น 133262 → 136 / 2393 / 2394 / 2395) เดิม “ไม่เดา” = ไม่เติมเลย
+#      กดส่งไปสร้าง Bundle → หน้าต่างเลือกทีละรายการ (หรือ ข้าม) → จดไว้ที่ app.link_pick {(ลำดับ, ItemKind): Id}
+#      link_items_book ใช้ตัวที่เลือก (ต้องเป็นหนึ่งในผลค้นหาของลำดับนั้นจริง) · ค้นหาใหม่ผลเปลี่ยน = ที่เลือกเก่าไม่ถูกใช้มั่ว
+# ============================================================================
+def link_dup_groups(app):
+    """ลำดับที่ค้นหาเจอหลาย Aztek Item Id -> [{'seq', 'kind', 'name', 'hits': [ผลค้นหา]}] เรียงตามลำดับ"""
+    crit = list(getattr(app, 'imported', None) or [])
+    hits = {}
+    for r in list(getattr(app, 'results', None) or []):
+        if not r.get('miss') and re.fullmatch(r'\d+', str(r.get('id') or '').strip()):
+            hits.setdefault(r.get('seq'), []).append(r)
+    out = []
+    for i in sorted(k for k in hits if isinstance(k, int)):
+        h = hits[i]
+        if len({str(r.get('id')).strip() for r in h}) < 2:
+            continue
+        c = crit[i - 1] if 0 < i <= len(crit) else {}
+        kind = str(h[0].get('req') or c.get('kind') or h[0].get('kind') or '').strip()
+        nm = (c.get('raw') or c.get('disp') or c.get('name') or '') if c else ''     # ชื่อแบบในชีท (Display Name)
+        if c and c.get('dur'):
+            nm = '%s · %s' % (nm, c.get('dur'))
+        out.append({'seq': i, 'kind': kind, 'name': clean_text(nm), 'hits': h})
+    return out
+
+
+def link_dup_chosen(app, seq, hits):
+    """ผลค้นหาหลายตัวของลำดับนี้ -> [ตัวที่ผู้ใช้เลือก] (ยังไม่เลือก/ที่เลือกไม่อยู่ในผลแล้ว = คืนตามเดิม)"""
+    pk = getattr(app, 'link_pick', None) or {}
+    kind = str(hits[0].get('req') or hits[0].get('kind') or '').strip()
+    want = pk.get((seq, kind))
+    got = [r for r in hits if want and str(r.get('id') or '').strip() == want]
+    return got[:1] if got else hits
+
+
+class LinkDupDialog:
+    """หน้าต่างเลือกไอเทมที่ค้นหาเจอหลายตัว — 1 กลุ่ม = 1 รายการในชีท · เลือก Id เดียว หรือ ข้าม"""
+    TITLE = 'เลือกไอเทมที่ค้นหาเจอหลายตัว'
+
+    def __init__(self, root, groups, prev):
+        self.result = None
+        self.groups = groups
+        self.top = top = tk.Toplevel(root)
+        top.title(self.TITLE)
+        top.configure(bg=C['bg'])
+        top.transient(root)
+        top.geometry('900x%d' % min(640, 190 + sum(34 + 28 * len(gp['hits']) for gp in groups)))
+        tk.Label(top, text='ค้นหาเจอหลาย Aztek Item Id — เลือกตัวที่จะใช้สร้าง Bundle', bg=C['bg'], fg=C['fg'],
+                 font=('Segoe UI', 12, 'bold')).pack(anchor='w', padx=14, pady=(12, 2))
+        tk.Label(top, text='ItemKind เดียวกันแต่คนละไอเทมบนเว็บ (ชื่อ/ระยะเวลา/จำนวนต่างกัน) — ดูชื่อให้ตรงชีท · '
+                           'ไม่แน่ใจกด “ข้าม” (แถวนั้นไม่เติม ใส่เองทีหลังได้)',
+                 bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), wraplength=860, justify='left').pack(anchor='w', padx=14)
+        bot = tk.Frame(top, bg=C['bg'])
+        bot.pack(side='bottom', fill='x', padx=14, pady=10)
+        body = tk.Frame(top, bg=C['bg'])
+        body.pack(fill='both', expand=True, padx=14, pady=6)
+        cv = tk.Canvas(body, bg=C['bg'], highlightthickness=0)
+        sb = ttk.Scrollbar(body, orient='vertical', command=cv.yview)
+        inner = tk.Frame(cv, bg=C['bg'])
+        inner.bind('<Configure>', lambda e: cv.configure(scrollregion=cv.bbox('all')))
+        cv.create_window((0, 0), window=inner, anchor='nw')
+        cv.configure(yscrollcommand=sb.set)
+        cv.pack(side='left', fill='both', expand=True)
+        sb.pack(side='right', fill='y')
+        self.vars = []
+        for gp in groups:
+            card = tk.Frame(inner, bg=C['card'], highlightthickness=1, highlightbackground=C['line'])
+            card.pack(fill='x', pady=4, ipady=4)
+            tk.Label(card, text='ลำดับ %s · ItemKind %s · ในชีท: %s' % (gp['seq'], gp['kind'] or '?', gp['name'] or '—'),
+                     bg=C['card'], fg=C['fg'], font=('Segoe UI', 10, 'bold')).pack(anchor='w', padx=10, pady=(4, 2))
+            ids = [str(r.get('id')).strip() for r in gp['hits']]
+            p = prev.get((gp['seq'], gp['kind']))
+            v = tk.StringVar(value=p if p in ids else '')
+            for r, iid in zip(gp['hits'], ids):
+                tk.Radiobutton(card, variable=v, value=iid, bg=C['card'], fg=C['fg'], selectcolor=C['input'],
+                               activebackground=C['card'], anchor='w', font=('Segoe UI', 10),
+                               text='Id %s   ·   %s   ·   %s   ·   %s' % (iid, r.get('name') or '?', r.get('type') or '',
+                                                                       r.get('notes') or '')).pack(fill='x', padx=22)
+            tk.Radiobutton(card, variable=v, value='', bg=C['card'], fg=C['dim'], selectcolor=C['input'],
+                           activebackground=C['card'], anchor='w', font=('Segoe UI', 10),
+                           text='ข้าม (ไม่เติมแถวนี้)').pack(fill='x', padx=22)
+            self.vars.append((gp, v))
+        self.info = tk.Label(bot, text='', bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9))
+        self.info.pack(side='left')
+        tk.Button(bot, text='ใช้ตัวที่เลือก', command=self._ok, bg=C['btn1_bg'], fg='white', relief='flat',
+                  font=('Segoe UI', 10, 'bold'), padx=16, pady=4, cursor='hand2').pack(side='right')
+        tk.Button(bot, text='ยกเลิก', command=self._cancel, bg=C['input'], fg=C['fg'], relief='flat',
+                  font=('Segoe UI', 10), padx=14, pady=4, cursor='hand2').pack(side='right', padx=(0, 8))
+        for _, v in self.vars:
+            v.trace_add('write', lambda *a: self._count())
+        self._count()
+        top.protocol('WM_DELETE_WINDOW', self._cancel)
+        try:
+            top.grab_set()
+        except Exception:
+            pass
+
+    def _count(self):
+        n = sum(1 for _, v in self.vars if v.get())
+        self.info.config(text='เลือกแล้ว %d / %d รายการ%s' % (n, len(self.vars), '' if n == len(self.vars) else ' (ที่เหลือ = ข้าม)'))
+
+    def _ok(self):
+        self.result = {(gp['seq'], gp['kind']): v.get() for gp, v in self.vars}
+        self.top.destroy()
+
+    def _cancel(self):
+        self.result = None
+        self.top.destroy()
+
+    def show(self):
+        self.top.wait_window()
+        return self.result
+
+
+def link_dup_step(app):
+    """ก่อนส่งไปสร้าง Bundle: มีลำดับที่ค้นหาเจอหลายตัว = ให้เลือก · True = ส่งต่อ · False = ผู้ใช้กดยกเลิก"""
+    try:
+        groups = link_dup_groups(app)
+    except Exception as ex:
+        app.log('🔗 ตรวจไอเทมที่ค้นหาเจอหลายตัวไม่สำเร็จ: %s' % str(ex)[:80], 'WARN')
+        return True
+    if not groups:
+        return True
+    prev = dict(getattr(app, 'link_pick', None) or {})
+    got = LinkDupDialog(app.root, groups, prev).show()
+    if got is None:
+        app.log('🔗 ส่งไปสร้าง Bundle: ยกเลิก (ยังไม่ได้เลือกไอเทมที่ค้นหาเจอหลายตัว)', 'INFO')
+        return False
+    prev.update(got)
+    app.link_pick = prev
+    for gp in groups:
+        iid = got.get((gp['seq'], gp['kind']))
+        app.log('🔗 ลำดับ %s ItemKind %s (เจอ %d ตัว): %s' % (gp['seq'], gp['kind'], len(gp['hits']),
+                                                            ('ใช้ Id %s' % iid) if iid else 'ข้าม'), 'INFO')
+    return True
 
 
 if __name__ == '__main__':
