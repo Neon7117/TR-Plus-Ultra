@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.10.9: หลักฐานเทส (ทำเอง) — 🔎 ตรวจจากภาพอัตโนมัติ: ภาพที่แคปเข้ามาอ่านชื่อไอเทม (Tesseract) ข้ามภาพชีทเอง แล้วติ๊ก ✓ ตัวที่เจอครบตาม Amt (ไม่เจอปล่อยว่างให้ดูเอง · ไม่ทับที่ติ๊กเอง · ไม่บันทึกเอง)
 V1.10.8: อ่านชีท — fdItemNum เดียวกันแต่ระยะเวลาต่างกัน (เช่น ถาวร กับ 7 วัน) = คนละไอเทมบนเว็บ: เดิมเก็บแถวแรกแถวเดียว อีกแถวหายไป (ไม่ถูกค้นหา/สร้าง/เติมใน Bundle) — ตอนนี้เก็บทั้งสองแถว ค้นหา/สร้างแยกกัน · ป้ายเตือนเปลี่ยนเป็น ⚠ ควรเช็ก (ยังบอกว่ามีอีกแถว)
 V1.10.7: เชื่อมแท็บ — ค้นหาเจอหลายตัว (ItemKind ซ้ำ) แล้วส่งไปสร้าง Bundle: เดิมไม่เติมเลยสักตัว — ตอนนี้ขึ้นหน้าให้เลือกว่าจะใช้ Aztek Item Id ตัวไหน (ทีละรายการ · ข้ามได้) แล้วเติมให้ · จำที่เลือกไว้ (กดส่งซ้ำเลือกไว้ให้)
 V1.10.6: หลักฐานเทส — เล่นแทนในเกม: ส่งแล้วรอ 15 วิ ก่อนสลับแท็บดูของครั้งแรก แล้วดูซ้ำทุก 10 วิ · ระหว่างรอขยับเมาส์ได้ (ไม่หยุด — ก่อนกดรอเมาส์นิ่ง) · 🔍 เช็คในเกมเดี๋ยวนี้ ดูซ้ำจนครบ (≤25 วิ) · ชื่อในเกมต่างจากชีท: (ซ่อมแซม) = (ความทนทาน) · 1 ชั่วโมง = 60 นาที · OCR อ่าน 0 เป็น ป หลังตัวเลข
@@ -26870,6 +26871,258 @@ def link_dup_step(app):
         app.log('🔗 ลำดับ %s ItemKind %s (เจอ %d ตัว): %s' % (gp['seq'], gp['kind'], len(gp['hits']),
                                                             ('ใช้ Id %s' % iid) if iid else 'ข้าม'), 'INFO')
     return True
+
+
+# ============================================================================
+#  [20] หลักฐานเทส (ทำเอง) — 🔎 ตรวจจากภาพอัตโนมัติ (v1.10.9) — ของใหม่ ห่อ EvTab.take / EvTab.refresh ไม่แก้โค้ดเดิม
+#      ผู้ใช้เลือก: อ่านทุกภาพ ข้ามภาพชีทเอง · ติ๊ก ✓ เฉพาะตัวที่เจอ (ไม่เจอปล่อยว่าง) · ไม่บันทึกเอง
+#      ภาพชีท = เจอหัวคอลัมน์ “ระยะเวลาของขวัญ”/fdItemNum หรือเจอเลข fdItemNum ของเซ็ตในภาพ (ภาพในเกมไม่มีเลขนี้)
+#      นับ = ต่อชื่อเอาภาพที่เห็นมากสุด (กล่องของขวัญกับคลังมีชื่อเดียวกัน ไม่นับซ้ำ) ต้อง ≥ Amt ในชีท
+#      อ่านในเธรดแยก (หน้าจอไม่ค้าง) · จำผลต่อไฟล์ · ✓ ที่ติ๊กให้เองแล้วเอาภาพออกจนไม่เจอ = เอาติ๊กออก (ที่ผู้ใช้ติ๊กเองไม่แตะ)
+# ============================================================================
+EV_OCR_PREF = 'ev_auto_ocr'
+
+
+def ev_ocr_is_sheet(lines, items):
+    """บรรทัดที่อ่านจากภาพ -> เป็นภาพตารางชีทไหม"""
+    raw = ' '.join(lines)
+    flat = re.sub(r'\s+', '', raw).lower()
+    if 'fditem' in flat or 'displayname' in flat or evg_norm('ระยะเวลาของขว') in evg_norm(raw):
+        return True
+    kinds = {str(it.get('kind') or '').strip() for it in items or []}
+    kinds = {k for k in kinds if re.fullmatch(r'\d{3,}', k)}
+    if not kinds:
+        return False
+    toks = set()
+    for ln in lines:
+        toks.update(re.findall(r'\d{3,}', ln.replace(' ', '')))
+        toks.update(re.findall(r'\d{3,}', ln))
+    return len(kinds & toks) >= min(2, len(kinds))
+
+
+def ev_ocr_count(per_img, items):
+    """[[บรรทัดของภาพ 1], …] (เฉพาะภาพในเกม) -> (ที่ควรเห็น {ชื่อ: n}, ที่เห็น {ชื่อ: มากสุดในภาพเดียว})"""
+    exp = evg_expect(items)
+    names = list(exp)
+    best = {n: 0 for n in names}
+    nn = {n: evg_norm(n) for n in names}
+    for lines in per_img:
+        cnt = dict(evg_match(lines, names)[0])
+        for ln in lines:                        # การ์ด 2 คอลัมน์ชื่ออยู่แถวเดียวกัน = ตัวอ่านรวมเป็นบรรทัดเดียว -> นับชื่อที่อยู่ในบรรทัด
+            if not names or max(evg_score(ln, n) for n in names) >= 0.78:
+                continue
+            nl = evg_norm(ln)
+            for n in names:
+                if nn[n] and len(nl) >= len(nn[n]) * 1.6:
+                    cnt[n] = cnt.get(n, 0) + nl.count(nn[n])
+        for n in names:
+            best[n] = max(best[n], cnt.get(n, 0))
+    return exp, best
+
+
+def ev_ocr_state(ev):
+    st = ev.__dict__.get('_ocr')
+    if st is None:
+        st = ev.__dict__['_ocr'] = {'cache': {}, 'q': [], 'busy': False, 'auto': set(), 'cur': None, 'sig': None,
+                                    'ui': None, 'var': None, 'lbl': None, 'tess': None, 'why': None, 'done': [],
+                                    'logged': None}
+    return st
+
+
+def ev_ocr_on(ev):
+    st = ev_ocr_state(ev)
+    if st['var'] is not None:
+        try:
+            return bool(st['var'].get())
+        except Exception:
+            pass
+    return bool((getattr(ev.app, 'prefs', None) or {}).get(EV_OCR_PREF, True))
+
+
+def ev_ocr_say(ev, text, color=None):
+    lbl = ev_ocr_state(ev).get('lbl')
+    if lbl is not None:
+        try:
+            lbl.config(text=text, fg=color or C['dim'])
+        except Exception:
+            pass
+
+
+def ev_ocr_ui(ev):
+    """วางติ๊ก “🔎 ตรวจจากภาพอัตโนมัติ” ข้างปุ่ม ✓ ตรงทั้งหมด (หาจากข้อความบนปุ่ม) — ไม่เจอปุ่ม = ไม่วาง"""
+    st = ev_ocr_state(ev)
+    if st['ui'] is not None:
+        return
+    st['ui'] = False
+    b = link_find_btn(ev.tab, 'ตรงทั้งหมด')
+    if b is None:
+        return
+    prefs = getattr(ev.app, 'prefs', None)
+    var = tk.BooleanVar(value=bool((prefs or {}).get(EV_OCR_PREF, True)))
+
+    def toggle():
+        if prefs is not None:
+            prefs[EV_OCR_PREF] = bool(var.get())
+            try:
+                save_prefs(prefs)
+            except Exception:
+                pass
+        if var.get():
+            st['sig'] = None
+            ev_ocr_kick(ev)
+        else:
+            ev_ocr_say(ev, '')
+    cb = tk.Checkbutton(b.master, text='🔎 ตรวจจากภาพอัตโนมัติ', variable=var, command=toggle, bg=b.master.cget('bg'),
+                        fg=C['fg'], selectcolor=C['input'], activebackground=b.master.cget('bg'), font=('Segoe UI', 9))
+    cb.pack(side='left', padx=(14, 4))
+    lbl = tk.Label(b.master, text='', bg=b.master.cget('bg'), fg=C['dim'], font=('Segoe UI', 9))
+    lbl.pack(side='left')
+    st.update(ui=cb, var=var, lbl=lbl)
+
+
+def ev_ocr_kick(ev):
+    """ภาพของเซ็ตที่ยังไม่ได้อ่าน -> คิวอ่าน (เธรดแยก) · อ่านครบแล้ว -> ติ๊ก"""
+    if not ev_ocr_on(ev) or ev.cur is None:
+        return
+    st = ev_ocr_state(ev)
+    if st['tess'] is None:
+        st['tess'] = evg_tess_find(getattr(ev.app, 'prefs', None)) or ''
+        st['why'] = evg_tess_ok(st['tess'])
+    if st['why']:
+        return ev_ocr_say(ev, '⚠ ตรวจจากภาพต้องมีตัวอ่านภาษาไทย (Tesseract) — ตั้งที่หน้าต่าง 🤖 ส่งเทส + แคปอัตโนมัติ', C['warn'])
+    for x in list(ev.shots):
+        p = x.get('path')
+        if p and p not in st['cache'] and p not in st['q']:
+            st['q'].append(p)
+    if st['q'] and not st['busy']:
+        st['busy'] = True
+        q, tess, done = st['q'], st['tess'], st['done']
+
+        def work():
+            while q:
+                p = q[0]
+                try:
+                    res = [t for t, _ in evg_ocr_lines(tess, p)]
+                except Exception as ex:
+                    res = ('err', str(ex)[:120])
+                done.append((p, res))
+                q.pop(0)
+            st['busy'] = False
+        threading.Thread(target=work, daemon=True).start()
+        try:
+            ev.tab.after(250, lambda: ev_ocr_poll(ev))
+        except Exception:
+            pass
+    ev_ocr_apply(ev)
+
+
+def ev_ocr_poll(ev):
+    st = ev_ocr_state(ev)
+    while st['done']:
+        p, res = st['done'].pop(0)
+        st['cache'][p] = res
+    ev_ocr_apply(ev)
+    if st['busy'] or st['q'] or st['done']:
+        try:
+            ev.tab.after(250, lambda: ev_ocr_poll(ev))
+        except Exception:
+            pass
+    elif any(x.get('path') not in st['cache'] for x in ev.shots):
+        ev_ocr_kick(ev)
+
+
+def ev_ocr_apply(ev):
+    """ผลอ่านของภาพเซ็ตนี้ -> ✓ แถวที่เจอครบ (ช่องว่างเท่านั้น) · ✓ ที่เคยติ๊กให้แต่ตอนนี้ไม่เจอแล้ว = เอาออก"""
+    st = ev_ocr_state(ev)
+    if not ev_ocr_on(ev) or ev.cur is None:
+        return
+    if st['cur'] != ev.cur:
+        st['cur'], st['auto'], st['sig'] = ev.cur, set(), None
+    paths = [x.get('path') for x in ev.shots]
+    wait = [p for p in paths if p not in st['cache']]
+    sig = (ev.cur, tuple(p for p in paths if p in st['cache']))
+    items = ev._items()
+    if sig == st['sig']:
+        if wait:
+            ev_ocr_say(ev, '🔎 กำลังอ่านภาพ… (เหลือ %d)' % len(wait))
+        return
+    st['sig'] = sig
+    game, sheet, err = [], 0, 0
+    for p in sig[1]:
+        res = st['cache'][p]
+        if isinstance(res, tuple):
+            err += 1
+        elif ev_ocr_is_sheet(res, items):
+            sheet += 1
+        else:
+            game.append(res)
+    exp, best = ev_ocr_count(game, items)
+    changed = False
+    good = 0
+    for i, it in enumerate(items):
+        n = clean_text(it.get('name'))
+        ok = bool(n) and n in exp and best.get(n, 0) >= exp[n]
+        good += ok
+        c = ev.checks.get(i, '')
+        if ok and not c:
+            ev.checks[i] = 'ok'
+            st['auto'].add(i)
+            changed = True
+        elif not ok and i in st['auto'] and c == 'ok':
+            ev.checks.pop(i, None)
+            st['auto'].discard(i)
+            changed = True
+    if changed:
+        try:
+            ev.refresh_checks()
+        except Exception:
+            pass
+    if not sig[1]:
+        return ev_ocr_say(ev, '🔎 รอภาพ…' if not wait else '🔎 กำลังอ่านภาพ…')
+    t = '🔎 อ่าน %d ภาพ (ภาพชีท %d · ภาพเกม %d%s) — เจอครบ %d/%d รายการ' % (
+        len(sig[1]), sheet, len(game), (' · อ่านไม่ได้ %d' % err) if err else '', good, len(items))
+    if wait:
+        t += ' · กำลังอ่านอีก %d' % len(wait)
+    ev_ocr_say(ev, t, C['ok'] if items and good == len(items) else C['dim'])
+    if not wait and st['logged'] != sig:
+        st['logged'] = sig
+        miss = [clean_text(it.get('name')) for it in items if not (clean_text(it.get('name')) in exp and
+                                                                   best.get(clean_text(it.get('name')), 0) >= exp[clean_text(it.get('name'))])]
+        try:
+            ev.app.log('หลักฐานเทส: 🔎 ตรวจจากภาพ — ภาพชีท %d · ภาพเกม %d · เจอครบ %d/%d%s' % (
+                sheet, len(game), good, len(items), (' · ยังไม่เจอ: ' + ', '.join(miss[:4])) if miss else ''),
+                'OK' if items and good == len(items) else 'INFO')
+        except Exception:
+            pass
+
+
+def ev_ocr_install():
+    """ห่อ EvTab.take (ภาพใหม่) / EvTab.refresh (เปลี่ยนเซ็ต/เอาภาพออก) ครั้งเดียว"""
+    if getattr(EvTab.take, '_ocr', False):
+        return
+    take0, refresh0 = EvTab.take, EvTab.refresh
+
+    def take(self, path):
+        r = take0(self, path)
+        try:
+            ev_ocr_kick(self)
+        except Exception as ex:
+            self.app.log('หลักฐานเทส: ตรวจจากภาพไม่สำเร็จ — %s' % str(ex)[:80], 'WARN')
+        return r
+
+    def refresh(self, *a, **k):
+        r = refresh0(self, *a, **k)
+        try:
+            ev_ocr_ui(self)
+            ev_ocr_kick(self)
+        except Exception as ex:
+            self.app.log('หลักฐานเทส: ตรวจจากภาพไม่สำเร็จ — %s' % str(ex)[:80], 'WARN')
+        return r
+    take._ocr = refresh._ocr = True
+    EvTab.take, EvTab.refresh = take, refresh
+
+
+ev_ocr_install()
 
 
 if __name__ == '__main__':
