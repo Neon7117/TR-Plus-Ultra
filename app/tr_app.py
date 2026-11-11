@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.11.1: เชื่อมแท็บ — สร้าง Item → ส่งไปสร้าง Bundle: ไอเทมชื่อซ้ำกันแต่คนละตัว (ถุงไข่เอช I (Gift) จำนวน 2 / 4 / Storage) เดิมจับคู่ด้วยชื่อแล้วไม่กล้าเดา = ไม่เติม (ไอเทมหายจาก Bundle) — ตอนนี้ตอนสร้างจดตัวตนไอเทม (ItemKind · จำนวน · ระยะเวลา · แลกเปลี่ยน) ไว้กับ Aztek Item Id ที่ได้ แล้วใช้จับคู่ตรงตัว
 V1.11.0: ค้นหา → ตัวที่ไม่เจอ → คิวสร้าง Item: เดิมตัดซ้ำด้วย ItemKind อย่างเดียว ไอเทมเดียวกันที่ Amt/ระยะเวลา/คลังต่างกัน (เช่น ถุงไข่เอช 2 ชิ้น × Amount 2 = 4) หายไป เหลือตัวแรก — ตอนนี้ดู ItemKind + จำนวนบนเว็บ + ระยะเวลา + แลกเปลี่ยน · คอลัมน์ “คลัง” (Gift/Storage) = Itemmove · ชื่อในชีทมี (Gift)/(Storage) อยู่แล้ว ไม่เติม (Gift) ซ้ำ
 V1.10.9: หลักฐานเทส (ทำเอง) — 🔎 ตรวจจากภาพอัตโนมัติ: ภาพที่แคปเข้ามาอ่านชื่อไอเทม (Tesseract) ข้ามภาพชีทเอง แล้วติ๊ก ✓ ตัวที่เจอครบตาม Amt (ไม่เจอปล่อยว่างให้ดูเอง · ไม่ทับที่ติ๊กเอง · ไม่บันทึกเอง)
 V1.10.8: อ่านชีท — fdItemNum เดียวกันแต่ระยะเวลาต่างกัน (เช่น ถาวร กับ 7 วัน) = คนละไอเทมบนเว็บ: เดิมเก็บแถวแรกแถวเดียว อีกแถวหายไป (ไม่ถูกค้นหา/สร้าง/เติมใน Bundle) — ตอนนี้เก็บทั้งสองแถว ค้นหา/สร้างแยกกัน · ป้ายเตือนเปลี่ยนเป็น ⚠ ควรเช็ก (ยังบอกว่ามีอีกแถว)
@@ -11277,6 +11278,10 @@ class App:
                'id': str(aztek_id or '').strip() or '-', 'notes': notes,
                'pic': '🖼' if pic else '—', 'ok': bool(ok),
                'at': datetime.now().strftime('%H:%M:%S')}
+        try:
+            row['lk'] = link_item_key(d)       # v1.11.1 ตัวตนไอเทมตอนสร้าง (ชื่อซ้ำแต่จำนวน/คลังต่าง = คนละตัว)
+        except Exception:
+            pass
         self.made_items.append(row)
         row['no'] = len(self.made_items)
 
@@ -21504,6 +21509,9 @@ def link_items_book(app):
     for m in list(getattr(app, 'made_items', None) or []):
         iid = str(m.get('id') or '').strip()
         if not re.fullmatch(r'\d+', iid) or not m.get('ok', True):
+            continue
+        if m.get('lk'):                               # v1.11.1 จดตัวตนไว้ตอนสร้าง = จับคู่ตรงตัว ไม่ต้องเดาจากชื่อ
+            add(tuple(m['lk']), iid, 'สร้าง Item', m.get('name') or '')
             continue
         keys = {link_item_key(d) for d in cq
                 if str(d.get('kind') or '').strip() == str(m.get('kind') or '').strip() and d.get('name') == m.get('name')}
