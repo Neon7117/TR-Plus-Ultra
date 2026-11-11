@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.11.0: ค้นหา → ตัวที่ไม่เจอ → คิวสร้าง Item: เดิมตัดซ้ำด้วย ItemKind อย่างเดียว ไอเทมเดียวกันที่ Amt/ระยะเวลา/คลังต่างกัน (เช่น ถุงไข่เอช 2 ชิ้น × Amount 2 = 4) หายไป เหลือตัวแรก — ตอนนี้ดู ItemKind + จำนวนบนเว็บ + ระยะเวลา + แลกเปลี่ยน · คอลัมน์ “คลัง” (Gift/Storage) = Itemmove · ชื่อในชีทมี (Gift)/(Storage) อยู่แล้ว ไม่เติม (Gift) ซ้ำ
 V1.10.9: หลักฐานเทส (ทำเอง) — 🔎 ตรวจจากภาพอัตโนมัติ: ภาพที่แคปเข้ามาอ่านชื่อไอเทม (Tesseract) ข้ามภาพชีทเอง แล้วติ๊ก ✓ ตัวที่เจอครบตาม Amt (ไม่เจอปล่อยว่างให้ดูเอง · ไม่ทับที่ติ๊กเอง · ไม่บันทึกเอง)
 V1.10.8: อ่านชีท — fdItemNum เดียวกันแต่ระยะเวลาต่างกัน (เช่น ถาวร กับ 7 วัน) = คนละไอเทมบนเว็บ: เดิมเก็บแถวแรกแถวเดียว อีกแถวหายไป (ไม่ถูกค้นหา/สร้าง/เติมใน Bundle) — ตอนนี้เก็บทั้งสองแถว ค้นหา/สร้างแยกกัน · ป้ายเตือนเปลี่ยนเป็น ⚠ ควรเช็ก (ยังบอกว่ามีอีกแถว)
 V1.10.7: เชื่อมแท็บ — ค้นหาเจอหลายตัว (ItemKind ซ้ำ) แล้วส่งไปสร้าง Bundle: เดิมไม่เติมเลยสักตัว — ตอนนี้ขึ้นหน้าให้เลือกว่าจะใช้ Aztek Item Id ตัวไหน (ทีละรายการ · ข้ามได้) แล้วเติมให้ · จำที่เลือกไว้ (กดส่งซ้ำเลือกไว้ให้)
@@ -2920,7 +2921,7 @@ def _hkey(h):
 
 def is_move_header(h):
     k = _hkey(h)
-    return 'itemmove' in k
+    return 'itemmove' in k or k == 'คลัง'          # v1.11.0 ชีท Web Shop ใช้หัว “คลัง” (Gift / Storage)
 
 
 # หัวคอลัมน์ Tier ที่ชีทใช้จริง: Rank / Tier / ยศ / ระดับ (เคยมีชีทเขียน “ระดับ” แล้วอ่านไม่เจอ = General หมด)
@@ -3166,6 +3167,8 @@ def make_item_name(cname, suffix='', dur=''):
     s = (cname or '').strip()
     suffix = (suffix or '').strip()
     dur = str(dur or '').strip()
+    if suffix and re.search(r'\((gift|storage)\)\s*$', s, re.I) and re.fullmatch(r'\((gift|storage)\)', suffix, re.I):
+        suffix = ''                   # v1.11.0 ชื่อในชีทมี (Gift)/(Storage) อยู่แล้ว — ไม่เติม (Gift) ซ้ำ
     if suffix:
         s = (s + ' ' + suffix).strip()
     if dur:
@@ -11456,15 +11459,20 @@ class App:
         sfx = self.cv_suffix.get().strip()
         pr = self.cv_price.get().strip()
         ml = self.cv_mail.get().strip()
-        have = {str(d.get('kind') or '').strip() for d in self.cq}
+        # v1.11.0 ไอเทมเดียวกัน = ItemKind + จำนวนบนเว็บ + ระยะเวลา + แลกเปลี่ยน (เดิมดู ItemKind อย่างเดียว
+        #   -> ถุงไข่เอช 2 ชิ้น × Amount 2 = 4 หายเพราะมีตัว × 1 อยู่แล้ว)
+        def same(d):
+            return (str(d.get('kind') or '').strip(), str(d.get('qty') or '1').strip() or '1',
+                    str(d.get('dur') or '').strip(), str(d.get('trade') if d.get('trade') is not None else '').strip())
+        have = {same(d) for d in self.cq}
         add, dup = [], []
         for r in miss:
             it = miss_to_item(r, t, sfx, pr, ml)
-            k = str(it.get('kind') or '').strip()
-            if k and k in have:
-                dup.append(k)
+            k = same(it)
+            if k[0] and k in have:
+                dup.append(k[0])
                 continue
-            if k:
+            if k[0]:
                 have.add(k)
             add.append(it)
 
