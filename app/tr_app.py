@@ -11,6 +11,8 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.11.3: หน้าต่างเลือกชีท (ทุกแท็บ) — ไม่ดึงชีทที่ซ่อนไว้ในไฟล์ (Hidden / Very hidden) มาให้เลือก · ช่อง 🔎 พิมพ์ชื่อชีทกรองรายการ (ที่เลือกไว้ไม่หายตอนกรอง)
+V1.11.2: สร้าง Product — แก้ลำดับการแสดงได้ (ดับเบิลคลิกแถว → ช่อง “ลำดับการแสดง”) · ค่าเริ่มเปลี่ยนจาก 0 เป็น 1 (ผู้ใช้สั่ง) · ตารางมีคอลัมน์ ลำดับ · อ่านชีทซ้ำค่าที่แก้ยังอยู่
 V1.11.1: เชื่อมแท็บ — สร้าง Item → ส่งไปสร้าง Bundle: ไอเทมชื่อซ้ำกันแต่คนละตัว (ถุงไข่เอช I (Gift) จำนวน 2 / 4 / Storage) เดิมจับคู่ด้วยชื่อแล้วไม่กล้าเดา = ไม่เติม (ไอเทมหายจาก Bundle) — ตอนนี้ตอนสร้างจดตัวตนไอเทม (ItemKind · จำนวน · ระยะเวลา · แลกเปลี่ยน) ไว้กับ Aztek Item Id ที่ได้ แล้วใช้จับคู่ตรงตัว
 V1.11.0: ค้นหา → ตัวที่ไม่เจอ → คิวสร้าง Item: เดิมตัดซ้ำด้วย ItemKind อย่างเดียว ไอเทมเดียวกันที่ Amt/ระยะเวลา/คลังต่างกัน (เช่น ถุงไข่เอช 2 ชิ้น × Amount 2 = 4) หายไป เหลือตัวแรก — ตอนนี้ดู ItemKind + จำนวนบนเว็บ + ระยะเวลา + แลกเปลี่ยน · คอลัมน์ “คลัง” (Gift/Storage) = Itemmove · ชื่อในชีทมี (Gift)/(Storage) อยู่แล้ว ไม่เติม (Gift) ซ้ำ
 V1.10.9: หลักฐานเทส (ทำเอง) — 🔎 ตรวจจากภาพอัตโนมัติ: ภาพที่แคปเข้ามาอ่านชื่อไอเทม (Tesseract) ข้ามภาพชีทเอง แล้วติ๊ก ✓ ตัวที่เจอครบตาม Amt (ไม่เจอปล่อยว่างให้ดูเอง · ไม่ทับที่ติ๊กเอง · ไม่บันทึกเอง)
@@ -989,8 +991,47 @@ def cells_to_row(cells, cmap):
 
 
 def open_workbook(path):
-    """เปิดไฟล์ Excel ครั้งเดียวแล้วใช้ซ้ำ — ไฟล์ใหญ่การเปิดใหม่ทุกครั้งช้ามาก"""
-    return openpyxl.load_workbook(path, read_only=True, data_only=True)
+    """เปิดไฟล์ Excel ครั้งเดียวแล้วใช้ซ้ำ — ไฟล์ใหญ่การเปิดใหม่ทุกครั้งช้ามาก
+    v1.11.3 รายชื่อชีท (sheetnames) = เฉพาะชีทที่ไม่ได้ซ่อน — ทุกแท็บที่สแกน/ให้เลือกชีทได้ผลเดียวกัน"""
+    return WbVisible(openpyxl.load_workbook(path, read_only=True, data_only=True))
+
+
+class _VisNames(list):
+    """รายชื่อชีทที่มองเห็น — วนลูปได้แค่ชีทที่ไม่ซ่อน · แต่เช็ก “มีชีทนี้ไหม” นับชีทซ่อนด้วย
+    (ไฟล์เดิมที่เคยเลือกชีทซ่อนไว้ ยังอ่านได้ ไม่ขึ้นว่าไม่มีชีท)"""
+    _all = ()
+
+    def __contains__(self, k):
+        return list.__contains__(self, k) or k in self._all
+
+
+class WbVisible:
+    """ห่อ Workbook (อ่านอย่างเดียว) — sheetnames ตัดชีท Hidden / Very hidden ออก · อย่างอื่นส่งต่อให้ตัวจริง"""
+
+    def __init__(self, wb):
+        self._wb = wb
+        alln = list(wb.sheetnames)
+        vis = []
+        for n in alln:
+            try:
+                st = getattr(wb[n], 'sheet_state', 'visible') or 'visible'
+            except Exception:
+                st = 'visible'
+            if st == 'visible':
+                vis.append(n)
+        names = _VisNames(vis or alln)          # ซ่อนหมด (ไม่น่าเกิด) = โชว์ทั้งหมดเหมือนเดิม
+        names._all = tuple(alln)
+        self.sheetnames = names
+        self.hidden_sheets = [n for n in alln if n not in list(names)]
+
+    def __getitem__(self, k):
+        return self._wb[k]
+
+    def __contains__(self, k):
+        return k in self._wb
+
+    def __getattr__(self, k):
+        return getattr(self._wb, k)
 
 
 def scan_sheets_wb(wb, progress=None):
@@ -17537,7 +17578,13 @@ SHOP_LIST_URL = BASE + '/hof/talesrunner/shop/products'
 SHOP_NAMES = ('Main Shop', 'Fame Shop')
 SHOP_KNOWN = ('main shop', 'fame shop', 'friendship shop')
 SHOP_CURS = ('Dream Point', 'Fame Point')
-SHOP_ORDER = '0'                 # ลำดับการแสดง — ผู้ใช้สั่ง “ใส่ 0 ไปเลย”
+SHOP_ORDER = '1'                 # ลำดับการแสดง — เดิมผู้ใช้สั่ง “ใส่ 0 ไปเลย” · v1.11.2 ผู้ใช้สั่งค่าเริ่ม = 1 · แก้รายแถวได้ (ช่อง order · ว่าง = ค่านี้)
+
+
+def shop_order(p):
+    """v1.11.2 ลำดับการแสดงของแถวนี้ — แก้ไว้ (ตัวเลข) = ใช้ค่านั้น · ไม่ได้แก้/ไม่ใช่ตัวเลข = SHOP_ORDER (1)"""
+    v = str((p or {}).get('order') or '').strip()
+    return v if re.fullmatch(r'\d+', v) else SHOP_ORDER
 SHOP_PIC_CARD = 'รูปภาพสินค้า'
 SHOP_PIC_SLOT = 'Thumbnail'
 SHOP_LANGS = ('ไทย', 'English')
@@ -17913,7 +17960,7 @@ def shop_carry(old_rows, new_rows):
         o = idx.get((p.get('sheet'), p.get('sheet_name')))
         if not o:
             continue
-        for k in ('made', 'last', 'img'):
+        for k in ('made', 'last', 'img', 'order'):          # v1.11.2 + ลำดับการแสดงที่แก้ไว้
             if o.get(k):
                 p[k] = o[k]
         if not p.get('bundle') and o.get('bundle') and o.get('bundle_src') in ('พิมพ์เอง', 'แท็บ Bundle'):
@@ -18281,7 +18328,7 @@ class ShopRunner(PdRunner):
             bad.append('หมวดหมู่')
         await T(SEL_PD['name_th'], x['name'], 'ชื่อสินค้า (ไทย)')
         await T(SEL_PD['name_en'], x['name'], 'ชื่อสินค้า (อังกฤษ)')
-        await T(SEL_PD['order'], SHOP_ORDER, 'ลำดับการแสดง')
+        await T(SEL_PD['order'], shop_order(x), 'ลำดับการแสดง')
         res['pic'] = await self._shop_pic(page, x.get('img'))
         if not await self._pd_currency(page, '', x['cur'], x['cur']):
             bad.append('สกุลเงิน')
@@ -18611,7 +18658,7 @@ class ShopTab:
     """แท็บ 🛍 สร้าง Product — Main Shop (Fame Shop เผื่อไว้) จากชีทที่มีกล่อง Product (ไฟล์ไหนก็ได้) · ของใหม่ทั้งก้อน
     ใช้ Chrome ตัวเดียวกับแท็บอื่น (ตอนทำงานตั้ง b_running ไว้กันแท็บอื่นเปิดชน เหมือนแท็บ Oung › สร้าง Product)"""
     COLS = (('use', 'ใช้', 40), ('n', '#', 34), ('name', 'ชื่อสินค้า', 220), ('cat', 'หมวดหมู่บนเว็บ', 170),
-            ('price', 'ราคา', 116), ('bundle', 'Bundle', 64), ('limit', 'จำกัดการซื้อ', 96),
+            ('price', 'ราคา', 116), ('bundle', 'Bundle', 64), ('limit', 'จำกัดการซื้อ', 96), ('order', 'ลำดับ', 50),
             ('start', 'เริ่มขาย (ชีท)', 126), ('end', 'หยุดขาย', 142), ('pic', 'รูป', 40),
             ('st', 'สถานะ', 260))
     MCOLS = (('n', '#', 30), ('name', 'ชื่อสินค้า', 160), ('rs', 'เวลาเริ่ม', 116), ('id', 'Product id', 120),
@@ -18995,7 +19042,7 @@ class ShopTab:
                 n['warn'] += bool(warn and not stop)
             cb = PD_CB_ON if use else (PD_CB_DONE if made else PD_CB_OFF)
             vals = (cb, i, p.get('name') or '?', shop_cat_web(shop, p.get('cat')) or '—', self.price_text(p),
-                    p.get('bundle') or '—', self.lim_text(p), (p.get('start_sheet') or '—')[:16],
+                    p.get('bundle') or '—', self.lim_text(p), shop_order(p), (p.get('start_sheet') or '—')[:16],
                     (p.get('end') or '—')[:19], '🖼' if p.get('img') else '—', self._status(p, stop, warn))
             iid = tr.insert('', 'end', values=vals, tags=(tag,) if tag else ())
             self._rowmap[iid] = p.get('key')
@@ -19219,6 +19266,7 @@ class ShopTab:
                   ('ราคาเต็ม (เว้นว่าง = เท่าราคาที่ขายจริง)', 'full', 14),
                   ('เลข Bundle', 'bundle', 14),
                   ('จำกัดการซื้อ (ตัวเลข = PLAYER กี่ครั้ง · หรือ “ไม่จำกัด”)', 'limit', 14),
+                  ('ลำดับการแสดง (ตัวเลข · เว้นว่าง = 1)', 'order', 8),
                   ('เวลาเริ่มขายตามชีท (YYYY-MM-DD HH:MM:SS)', 'start_sheet', 22),
                   ('เวลาหยุดขาย (YYYY-MM-DD HH:MM:SS)', 'end', 22))
         ents = {}
@@ -19226,7 +19274,7 @@ class ShopTab:
             tk.Label(body, text=lbl, bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w').grid(
                 row=r, column=0, sticky='w', pady=3)
             e = a._entry(body, width=w)
-            e.insert(0, str(p.get(k) or ''))
+            e.insert(0, shop_order(p) if k == 'order' else str(p.get(k) or ''))
             e.grid(row=r, column=1, sticky='w', padx=(12, 0), pady=3, ipady=3)
             ents[k] = e
         r = len(fields)
@@ -19284,6 +19332,9 @@ class ShopTab:
                 if v[k] and not pd_dt_ok(v[k]):
                     err.config(text='%s ต้องเป็นแบบ 2026-11-24 23:59:59' % nm)
                     return
+            if v.get('order') and not re.fullmatch(r'\d+', v['order']):
+                err.config(text='ลำดับการแสดงต้องเป็นตัวเลข — เว้นว่าง = 1')
+                return
             if v['end'] and not re.search(r':\d{2}:\d{2}', v['end']):
                 v['end'] = wr_end_fix(pd_dt_ok(v['end'])[:16])        # 23:59 -> 23:59:59
             v['end'] = pd_dt_ok(v['end']) or ''
@@ -27139,6 +27190,139 @@ def ev_ocr_install():
 
 
 ev_ocr_install()
+
+
+# ============================================================================
+#  [21] หน้าต่างเลือกชีท — ช่อง 🔎 พิมพ์ชื่อชีทกรองรายการ (v1.11.3) — ห่อเมธอดของ ImportDialog / BundleImportDialog
+#      (ทุกหน้าต่างนำเข้าสืบทอดจาก 2 ตัวนี้) ไม่แก้โค้ดเดิม · ชีทที่ซ่อนในไฟล์ตัดตั้งแต่ open_workbook แล้ว
+#      กรอง = self.sheets เหลือเฉพาะชื่อที่มีคำนั้น (โค้ดเดิมใช้ self.sheets[index] ทุกที่ เลยทำงานต่อได้)
+#      ที่เลือกไว้แล้วถูกกรองหายจากรายการ = ยังนับว่าเลือก (จำไว้ใน _sh_keep) · ล้างที่เลือก = ล้างทั้งหมด
+# ============================================================================
+def sheet_filter_match(name, q):
+    q = re.sub(r'\s+', '', str(q or '')).lower()
+    if not q:
+        return True
+    return q in re.sub(r'\s+', '', clean_text(name) or str(name)).lower()
+
+
+def sheet_filter_sync(dlg):
+    """จำว่าเลือกชีทไหนไว้ (เฉพาะที่มองเห็นอยู่ตอนนี้ — ที่ถูกกรองไว้ไม่แตะ)"""
+    keep = dlg.__dict__.setdefault('_sh_keep', [])
+    try:
+        sel = set(dlg.lb.curselection())
+    except Exception:
+        return keep
+    for i, (nm, _) in enumerate(list(getattr(dlg, 'sheets', None) or [])):
+        if i in sel and nm not in keep:
+            keep.append(nm)
+        elif i not in sel and nm in keep:
+            keep.remove(nm)
+    return keep
+
+
+def sheet_filter_ui(dlg):
+    """วางช่องค้นหาเหนือรายการชีท (ครั้งเดียว)"""
+    if dlg.__dict__.get('_sh_ent') is not None:
+        return
+    dlg._sh_ent = False
+    try:
+        wrap = dlg.lb.master
+        holder = wrap.master
+        row = tk.Frame(holder, bg=holder.cget('bg'))
+        row.pack(fill='x', pady=(5, 0), before=wrap)
+        tk.Label(row, text='🔎', bg=holder.cget('bg'), fg=C['dim'], font=('Segoe UI', 9)).pack(side='left')
+        var = tk.StringVar()
+        ent = tk.Entry(row, textvariable=var, bg=C['input'], fg=C['fg'], insertbackground=C['fg'], relief='flat',
+                       font=('Segoe UI', 9), highlightthickness=1, highlightbackground=C['line'])
+        ent.pack(side='left', fill='x', expand=True, padx=(4, 0), ipady=2)
+        clr = tk.Label(row, text=' ✕ ', bg=holder.cget('bg'), fg=C['dim'], cursor='hand2', font=('Segoe UI', 9))
+        clr.pack(side='left')
+        clr.bind('<Button-1>', lambda e: var.set(''))
+        hint = tk.Label(holder, text='', bg=holder.cget('bg'), fg=C['dim'], font=('Segoe UI', 8), anchor='w')
+        hint.pack(fill='x', before=wrap)
+        var.trace_add('write', lambda *a: sheet_filter_apply(dlg))
+        dlg._sh_ent, dlg._sh_var, dlg._sh_hint = ent, var, hint
+        ent.bind('<Escape>', lambda e: (var.set(''), 'break')[1])
+    except Exception:
+        dlg._sh_ent = False
+
+
+def sheet_filter_apply(dlg):
+    """พิมพ์ในช่องค้นหา -> แสดงเฉพาะชีทที่ชื่อมีคำนั้น · ที่เลือกไว้ยังเลือกอยู่"""
+    allsh = dlg.__dict__.get('_sh_all')
+    if allsh is None:
+        return
+    keep = sheet_filter_sync(dlg)
+    q = dlg._sh_var.get() if dlg.__dict__.get('_sh_var') is not None else ''
+    dlg.sheets = [x for x in allsh if sheet_filter_match(x[0], q)]
+    dlg.__dict__['_sh_busy'] = True
+    try:
+        dlg.__class__._sh_fill0(dlg)
+    finally:
+        dlg.__dict__['_sh_busy'] = False
+    for i, (nm, _) in enumerate(dlg.sheets):
+        if nm in keep:
+            dlg.lb.selection_set(i)
+    hint = dlg.__dict__.get('_sh_hint')
+    if hint:
+        hidden = len([n for n in keep if n not in [x[0] for x in dlg.sheets]])
+        parts = (['แสดง %d / %d ชีท' % (len(dlg.sheets), len(allsh))] if q.strip() else []) + \
+                (['เลือกไว้นอกรายการนี้อีก %d ชีท' % hidden] if hidden else []) + \
+                ([dlg.__dict__['_sh_base']] if dlg.__dict__.get('_sh_base') else [])
+        hint.config(text=' · '.join(parts))
+    dlg._on_sheet()
+
+
+def sheet_filter_install():
+    for cls, fill in ((ImportDialog, '_fill_sheets'), (BundleImportDialog, '_fill')):
+        f0 = cls.__dict__.get(fill)
+        if f0 is None or getattr(f0, '_shf', False):
+            continue
+        sel0, none0, on0 = cls._selected, cls._pick_none, cls._on_sheet
+        cls._sh_fill0 = f0
+
+        def fill_w(self, _f0=f0):
+            if not self.__dict__.get('_sh_busy'):
+                self._sh_all = list(getattr(self, 'sheets', None) or [])     # รายการเต็ม (ชีทที่ไม่ซ่อน) จากการสแกน
+                self.__dict__.setdefault('_sh_keep', [])
+                try:
+                    sheet_filter_ui(self)
+                    q = self._sh_var.get() if self.__dict__.get('_sh_var') else ''
+                    nh = len(getattr(getattr(self, 'wb', None), 'hidden_sheets', None) or [])
+                    self._sh_base = ('ไม่แสดงชีทที่ซ่อนในไฟล์ %d ชีท' % nh) if nh else ''
+                    if self.__dict__.get('_sh_hint'):
+                        self._sh_hint.config(text=self._sh_base)
+                except Exception:
+                    q = ''
+                if q:
+                    return sheet_filter_apply(self)
+            return _f0(self)
+
+        def selected_w(self, _s0=sel0):
+            got = _s0(self)
+            keep = self.__dict__.get('_sh_keep') or []
+            vis = [x[0] for x in (getattr(self, 'sheets', None) or [])]
+            extra = [n for n in keep if n not in vis and n not in got]
+            if not extra:
+                return got
+            order = [x[0] for x in (self.__dict__.get('_sh_all') or [])]
+            return sorted(got + extra, key=lambda n: order.index(n) if n in order else 1 << 30)
+
+        def none_w(self, _n0=none0):
+            self.__dict__['_sh_keep'] = []
+            return _n0(self)
+
+        def on_w(self, *a, _o0=on0, **k):
+            if not self.__dict__.get('_sh_busy'):
+                sheet_filter_sync(self)
+            return _o0(self, *a, **k)
+        for w in (fill_w, selected_w, none_w, on_w):
+            w._shf = True
+        setattr(cls, fill, fill_w)
+        cls._selected, cls._pick_none, cls._on_sheet = selected_w, none_w, on_w
+
+
+sheet_filter_install()
 
 
 if __name__ == '__main__':
