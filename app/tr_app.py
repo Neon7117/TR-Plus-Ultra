@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.11.4: WR Master — ชีทที่ป้าย Bundle ว่าง แล้วหัวตาราง fdItemNum อยู่แถวถัดไปเลย: เดิมหยิบ Aztek Item Id ไอเทมแรกในตารางมาเป็นเลข Bundle (เช่น 2989) → ส่งต่อจากสร้าง Bundle ไม่เติมเลขจริง (57xx) เพราะคิดว่ามีเลขแล้ว — ตอนนี้หาใต้ป้ายถึงแค่ก่อนหัวตาราง
 V1.11.3: หน้าต่างเลือกชีท (ทุกแท็บ) — ไม่ดึงชีทที่ซ่อนไว้ในไฟล์ (Hidden / Very hidden) มาให้เลือก · ช่อง 🔎 พิมพ์ชื่อชีทกรองรายการ (ที่เลือกไว้ไม่หายตอนกรอง)
 V1.11.2: สร้าง Product — แก้ลำดับการแสดงได้ (ดับเบิลคลิกแถว → ช่อง “ลำดับการแสดง”) · ค่าเริ่มเปลี่ยนจาก 0 เป็น 1 (ผู้ใช้สั่ง) · ตารางมีคอลัมน์ ลำดับ · อ่านชีทซ้ำค่าที่แก้ยังอยู่
 V1.11.1: เชื่อมแท็บ — สร้าง Item → ส่งไปสร้าง Bundle: ไอเทมชื่อซ้ำกันแต่คนละตัว (ถุงไข่เอช I (Gift) จำนวน 2 / 4 / Storage) เดิมจับคู่ด้วยชื่อแล้วไม่กล้าเดา = ไม่เติม (ไอเทมหายจาก Bundle) — ตอนนี้ตอนสร้างจดตัวตนไอเทม (ItemKind · จำนวน · ระยะเวลา · แลกเปลี่ยน) ไว้กับ Aztek Item Id ที่ได้ แล้วใช้จับคู่ตรงตัว
@@ -4439,10 +4440,13 @@ def parse_code_sheet(rows, sheet_name):
                 elif lab.startswith('limit'):
                     v = clean_text(_wr_after(cells, j))
                     d['limit'] = v
-                elif lab == 'bundle':
+                elif lab == 'bundle' and not any('fditemnum' in clean_text(x).lower() for x in cells):
                     # เลข Bundle อยู่ "ใต้ป้าย" ในคอลัมน์เดียวกัน
+                    #   v1.11.4 ป้าย Bundle ที่เป็นหัวคอลัมน์ในแถวหัวตาราง fdItemNum = คอลัมน์ Aztek Item Id ไม่ใช่เลข Bundle
                     for r2 in range(r + 1, min(r + 3, end_r)):
                         rw = list(rows[r2] or [])
+                        if any('fditemnum' in clean_text(x).lower() for x in rw):
+                            break         # v1.11.4 ถึงหัวตารางแล้ว = ใต้นี้เป็น Aztek Item Id ของไอเทม ไม่ใช่เลข Bundle
                         b = src_int(rw[j]) if j < len(rw) else None
                         if b:
                             d['bundle'] = b
