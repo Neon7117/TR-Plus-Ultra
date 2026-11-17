@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.11.5: WR Master — เลข Bundle = เลขแรกใต้ป้าย Bundle (คอลัมน์เดียวกัน) ไม่ว่าจะห่างกี่แถว ถึงแถวหัวตาราง fdItemNum (เลขอยู่บนแถว fdItemNum ก็นับ) · ป้ายอยู่แถวไหนของบล็อก CODE ก็ได้ · แถวไอเทมใต้หัวตารางไม่นับ (v1.11.4 หยุดก่อนแถว fdItemNum เลยหาเลขที่อยู่บนแถวนั้นไม่เจอ)
 V1.11.4: WR Master — ชีทที่ป้าย Bundle ว่าง แล้วหัวตาราง fdItemNum อยู่แถวถัดไปเลย: เดิมหยิบ Aztek Item Id ไอเทมแรกในตารางมาเป็นเลข Bundle (เช่น 2989) → ส่งต่อจากสร้าง Bundle ไม่เติมเลขจริง (57xx) เพราะคิดว่ามีเลขแล้ว — ตอนนี้หาใต้ป้ายถึงแค่ก่อนหัวตาราง
 V1.11.3: หน้าต่างเลือกชีท (ทุกแท็บ) — ไม่ดึงชีทที่ซ่อนไว้ในไฟล์ (Hidden / Very hidden) มาให้เลือก · ช่อง 🔎 พิมพ์ชื่อชีทกรองรายการ (ที่เลือกไว้ไม่หายตอนกรอง)
 V1.11.2: สร้าง Product — แก้ลำดับการแสดงได้ (ดับเบิลคลิกแถว → ช่อง “ลำดับการแสดง”) · ค่าเริ่มเปลี่ยนจาก 0 เป็น 1 (ผู้ใช้สั่ง) · ตารางมีคอลัมน์ ลำดับ · อ่านชีทซ้ำค่าที่แก้ยังอยู่
@@ -4396,6 +4397,34 @@ def _wr_after(cells, j, want_num=False):
     return None
 
 
+def _wr_is_head(row):
+    return any('fditemnum' in clean_text(x).lower() for x in (row or []))
+
+
+def wr_bundle_below(rows, r0, end_r):
+    """v1.11.5 เลข Bundle ของบล็อก CODE (แถว r0 ถึงก่อน end_r)
+    ป้าย “Bundle” อยู่แถวไหนก็ได้ในบล็อก (ถึงแถวหัวตาราง fdItemNum) · เลข = เลขแรกใต้ป้ายในคอลัมน์เดียวกัน
+    ห่างกี่แถวก็ได้ (ไฟล์เก่าเว้น 2 แถว · ต้นฉบับไม่เว้น / เลขอยู่บนแถว fdItemNum) — แต่ไม่ลงไปถึงแถวไอเทมใต้หัวตาราง
+    (เลขพวกนั้นคือ Aztek Item Id) · ไม่มีเลข = '' (ให้ตัวเชื่อม/ผู้ใช้เติม)"""
+    for r in range(r0, end_r):
+        cells = list(rows[r] or [])
+        head = _wr_is_head(cells)
+        for j, c in enumerate(cells):
+            if clean_text(c).lower().rstrip(':') != 'bundle' or head:
+                continue          # ป้าย Bundle ในแถว fdItemNum = หัวคอลัมน์ Aztek Item Id
+            for r2 in range(r + 1, end_r):
+                rw = list(rows[r2] or [])
+                b = src_int(rw[j]) if j < len(rw) else None
+                if b:
+                    return b
+                if _wr_is_head(rw):
+                    return ''     # ถึงหัวตารางแล้ว ใต้นี้เป็นไอเทม
+            return ''
+        if head:
+            return ''             # ผ่านหัวตารางแล้วยังไม่เจอป้าย = ไม่มี
+    return ''
+
+
 def parse_code_sheet(rows, sheet_name):
     """คืน (codes, warnings) — แต่ละตัวพร้อมเอาไปกรอกหน้าสร้าง Item Code
 
@@ -4440,18 +4469,8 @@ def parse_code_sheet(rows, sheet_name):
                 elif lab.startswith('limit'):
                     v = clean_text(_wr_after(cells, j))
                     d['limit'] = v
-                elif lab == 'bundle' and not any('fditemnum' in clean_text(x).lower() for x in cells):
-                    # เลข Bundle อยู่ "ใต้ป้าย" ในคอลัมน์เดียวกัน
-                    #   v1.11.4 ป้าย Bundle ที่เป็นหัวคอลัมน์ในแถวหัวตาราง fdItemNum = คอลัมน์ Aztek Item Id ไม่ใช่เลข Bundle
-                    for r2 in range(r + 1, min(r + 3, end_r)):
-                        rw = list(rows[r2] or [])
-                        if any('fditemnum' in clean_text(x).lower() for x in rw):
-                            break         # v1.11.4 ถึงหัวตารางแล้ว = ใต้นี้เป็น Aztek Item Id ของไอเทม ไม่ใช่เลข Bundle
-                        b = src_int(rw[j]) if j < len(rw) else None
-                        if b:
-                            d['bundle'] = b
-                            break
 
+        d['bundle'] = wr_bundle_below(rows, r0, end_r) or ''
         # ชื่อที่ทีมใช้: "Master Code 30/09/2026 Code 1 HYPE2X5M9P1K"
         #   วันที่ = วันเริ่มในเอกสาร · Code n = ลำดับโค้ดในชีทนี้ (บนลงล่าง)
         d['no'] = len(out) + 1
