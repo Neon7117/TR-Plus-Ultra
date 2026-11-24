@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.11.6: สร้าง Item — ☁ ใส่รูปจาก Drive: เปิดโฟลเดอร์รูปบน Google Drive ใน Chrome ของเครื่องมือ (ล็อกอินบัญชีบริษัทครั้งแรกครั้งเดียว) หารูปชื่อ all_<fdPosition>_<fdItemKind> ทุกโฟลเดอร์ย่อย โหลดมาใส่ให้ทุกแถวที่ยังไม่มีรูป · ชื่อซ้ำ = ใช้ไฟล์ใหม่สุด · ไม่เจอ = ปล่อยว่าง + เตือน · อ่าน fdPosition / fdItemKind จากชีทเก็บไว้กับแถว
 V1.11.5: WR Master — เลข Bundle = เลขแรกใต้ป้าย Bundle (คอลัมน์เดียวกัน) ไม่ว่าจะห่างกี่แถว ถึงแถวหัวตาราง fdItemNum (เลขอยู่บนแถว fdItemNum ก็นับ) · ป้ายอยู่แถวไหนของบล็อก CODE ก็ได้ · แถวไอเทมใต้หัวตารางไม่นับ (v1.11.4 หยุดก่อนแถว fdItemNum เลยหาเลขที่อยู่บนแถวนั้นไม่เจอ)
 V1.11.4: WR Master — ชีทที่ป้าย Bundle ว่าง แล้วหัวตาราง fdItemNum อยู่แถวถัดไปเลย: เดิมหยิบ Aztek Item Id ไอเทมแรกในตารางมาเป็นเลข Bundle (เช่น 2989) → ส่งต่อจากสร้าง Bundle ไม่เติมเลขจริง (57xx) เพราะคิดว่ามีเลขแล้ว — ตอนนี้หาใต้ป้ายถึงแค่ก่อนหัวตาราง
 V1.11.3: หน้าต่างเลือกชีท (ทุกแท็บ) — ไม่ดึงชีทที่ซ่อนไว้ในไฟล์ (Hidden / Very hidden) มาให้เลือก · ช่อง 🔎 พิมพ์ชื่อชีทกรองรายการ (ที่เลือกไว้ไม่หายตอนกรอง)
@@ -3242,6 +3243,9 @@ def row_to_item(r, type_name=DEFAULT_TYPE, suffix=DEFAULT_SUFFIX, price='', mail
         'img': '',            # รูปไอเทม — ไฟล์ต้นฉบับไม่มีรูป ต้องเลือกเองในหน้าแก้ไข
         'repair': item_is_repair(name or cname),   # v1.6.1 ชื่อมี “ซ่อมแซม” = ติ๊ก ซ่อมแซมได้
     }
+    for k_ in ('pos', 'ikind'):              # v1.11.6 fdPosition / fdItemKind (ชื่อรูปบน Drive)
+        if r.get(k_):
+            d[k_] = r[k_]
     if r.get('chk'):          # v1.4.0 ผลตรวจติดไปกับคิวด้วย — ผูกกับค่าของไอเทม (แก้ช่องนั้นแล้วหายเอง)
         d['chk'] = [dict(c, v=(d.get(c['f']) if c.get('f') in d else c.get('v'))) for c in chk_active(r)]
     return d
@@ -3448,13 +3452,15 @@ def parse_master_rows(rows, seen=None, dups=None):
                                   lambda h: 'duration' in h])
                 move_col = findin([is_move_header])
                 amt_col = findin([lambda h: h == 'amt', lambda h: h == 'amount', lambda h: h == 'จำนวน'])
+                pos_col = findin([lambda h: 'fdposition' in h])          # v1.11.6 ไว้หาชื่อรูป all_<pos>_<itemkind>
+                ik_col = findin([lambda h: 'fditemkind' in h])
                 if move_col is None:      # บางไฟล์เขียน Itemmove ไว้แถวบนของหัวตาราง
                     for j in span:
                         if j < len(top) and is_move_header(top[j]):
                             move_col = j
                             break
                 tables.append({'kind': a, 'name': name_col, 'dur': dur_col,
-                               'move': move_col, 'desc': desc_col, 'amt': amt_col})
+                               'move': move_col, 'desc': desc_col, 'amt': amt_col, 'pos': pos_col, 'ik': ik_col})
                 all_tables.append(tables[-1])
             prev = cells
             continue
@@ -3558,6 +3564,10 @@ def parse_master_rows(rows, seen=None, dups=None):
                      'raw': name.strip(), 'cname': cname,
                      'amount': amount, 'has_qty': has_qty, 'desc': dsc,
                      'amt': amt, 'amt_raw': amt_raw, 'pcs': pcs or '1'}
+            for k_, c_ in (('pos', t.get('pos')), ('ikind', t.get('ik'))):      # v1.11.6
+                v_ = num_str(cells[c_]).strip() if c_ is not None and c_ < len(cells) else ''
+                if re.fullmatch(r'\d+', v_):
+                    row_d[k_] = v_
             if chk:
                 row_d['chk'] = chk
             t.setdefault('rows', []).append(row_d)
@@ -27346,6 +27356,409 @@ def sheet_filter_install():
 
 
 sheet_filter_install()
+
+
+# ============================================================================
+#  [22] สร้าง Item — ☁ ใส่รูปจาก Google Drive (v1.11.6) — ของใหม่ วางปุ่มข้าง “ล้างคิว” (หาจากข้อความปุ่ม)
+#      ผู้ใช้เลือก: เครื่องมือเปิด Drive ใน Chrome ของมันเอง (ล็อกอินบัญชีบริษัทครั้งแรก) แล้วโหลดเอง
+#                  ชื่อซ้ำ = ใช้ไฟล์ใหม่สุด · ไม่เจอ = ปล่อยว่าง + เตือน
+#      ชื่อรูป = all_<fdPosition>_<fdItemKind>.png (ตามคลิป: all_250_4979.png) — ค้นทุกโฟลเดอร์ย่อยของลิงก์ที่ให้
+#      อ่านรายชื่อไฟล์จากหน้า embeddedfolderview (หน้ารายการไฟล์แบบเรียบง่ายของ Drive) แล้วโหลดผ่าน session ของ Chrome
+#      ไม่แตะเว็บ aztek · ไม่ทับรูปที่ใส่ไว้แล้ว · แถวที่กด “เอารูปออก” เอง (img_off) ไม่ใส่ให้
+# ============================================================================
+import html as _html
+DRIVE_PIC_PREF = 'drive_pic_url'
+DRIVE_EMBED = 'https://drive.google.com/embeddedfolderview?id=%s#list'
+DRIVE_DL = ('https://drive.usercontent.google.com/download?id=%s&export=download',
+            'https://drive.google.com/uc?id=%s&export=download')
+DRIVE_PIC_DIR = os.path.join(DATA_DIR, 'drive_pics')
+DRIVE_MAX_FOLDERS = 400
+_DRIVE_TH_MON = {'ม.ค.': 1, 'ก.พ.': 2, 'มี.ค.': 3, 'เม.ย.': 4, 'พ.ค.': 5, 'มิ.ย.': 6, 'ก.ค.': 7, 'ส.ค.': 8, 'ก.ย.': 9,
+                 'ต.ค.': 10, 'พ.ย.': 11, 'ธ.ค.': 12}
+_DRIVE_EN_MON = {m: i for i, m in enumerate(('jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct',
+                                             'nov', 'dec'), 1)}
+
+
+def drive_folder_id(url):
+    u = str(url or '').strip()
+    m = re.search(r'/folders/([A-Za-z0-9_-]{10,})', u) or re.search(r'[?&]id=([A-Za-z0-9_-]{10,})', u)
+    if m:
+        return m.group(1)
+    return u if re.fullmatch(r'[A-Za-z0-9_-]{20,}', u) else ''
+
+
+def drive_pic_stem(d):
+    """แถวในคิว -> ชื่อรูปที่ต้องหา (ไม่มีนามสกุล) · ไม่มี fdPosition/fdItemKind = ''"""
+    pos, ik = str(d.get('pos') or '').strip(), str(d.get('ikind') or '').strip()
+    return 'all_%s_%s' % (pos, ik) if re.fullmatch(r'\d+', pos) and re.fullmatch(r'\d+', ik) else ''
+
+
+def drive_stem_of(fname):
+    n = str(fname or '').strip()
+    m = re.fullmatch(r'(.+?)(?:\s*\(\d+\))?\.(png|jpe?g|webp)', n, re.I)
+    return m.group(1).strip().lower() if m else ''
+
+
+def drive_parse_listing(html):
+    """หน้า embeddedfolderview -> (โฟลเดอร์ [(id, ชื่อ)], ไฟล์ [(id, ชื่อ, เวลาแก้ไข)])"""
+    folders, files, seen = [], [], set()
+    for m in re.finditer(r'<div[^>]*class="flip-entry"[^>]*id="entry-([A-Za-z0-9_-]+)"(.*?)(?=<div[^>]*class="flip-entry"|$)',
+                         html or '', re.S):
+        fid, blk = m.group(1), m.group(2)
+        t = re.search(r'class="flip-entry-title"[^>]*>(.*?)</div>', blk, re.S)
+        title = _html.unescape(re.sub(r'<[^>]+>', '', t.group(1))).strip() if t else ''
+        mod = re.search(r'class="flip-entry-last-modified"[^>]*>(?:\s*<div[^>]*>)?(.*?)</', blk, re.S)
+        mod = _html.unescape(re.sub(r'<[^>]+>', '', mod.group(1))).strip() if mod else ''
+        if fid in seen:
+            continue
+        seen.add(fid)
+        if re.search(r'/drive/(?:u/\d+/)?folders/', blk):
+            folders.append((fid, title))
+        else:
+            files.append((fid, title, mod))
+    return folders, files
+
+
+def drive_mod_time(txt, now=None):
+    """ข้อความ “แก้ไขล่าสุด” ของ Drive -> datetime (อ่านไม่ออก = None)
+    รองรับ 10:31 AM · Nov 6 · Sep 16, 2025 · 16/9/2025 · 16 ก.ย. 2568 · 10:31"""
+    now = now or datetime.now()
+    s = str(txt or '').strip()
+    if not s:
+        return None
+    m = re.fullmatch(r'(\d{1,2}):(\d{2})\s*(am|pm|AM|PM)?', s)
+    if m:
+        h = int(m.group(1)) % 12 + (12 if (m.group(3) or '').lower() == 'pm' else 0) if m.group(3) else int(m.group(1))
+        return now.replace(hour=min(h, 23), minute=int(m.group(2)), second=0, microsecond=0)
+    m = re.fullmatch(r'([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2})(?:,\s*(\d{4}))?', s)
+    if m and m.group(1).lower() in _DRIVE_EN_MON:
+        try:
+            return datetime(int(m.group(3) or now.year), _DRIVE_EN_MON[m.group(1).lower()], int(m.group(2)))
+        except ValueError:
+            return None
+    m = re.fullmatch(r'(\d{1,2})\s+(\S+?)\s*(\d{4})?', s)
+    if m and m.group(2) in _DRIVE_TH_MON:
+        y = int(m.group(3) or now.year + 543)
+        try:
+            return datetime(y - 543 if y > 2400 else y, _DRIVE_TH_MON[m.group(2)], int(m.group(1)))
+        except ValueError:
+            return None
+    m = re.fullmatch(r'(\d{1,2})/(\d{1,2})/(\d{2,4})', s)
+    if m:
+        y = int(m.group(3))
+        y = y + 2000 if y < 100 else (y - 543 if y > 2400 else y)
+        try:
+            return datetime(y, int(m.group(2)), int(m.group(1)))
+        except ValueError:
+            return None
+    return None
+
+
+def drive_pick_newest(cands, now=None):
+    """[(id, ชื่อ, เวลาแก้ไข), …] ชื่อเดียวกัน -> ตัวใหม่สุด (เวลาอ่านไม่ออกถือว่าเก่าสุด · เท่ากัน = ตัวแรก)"""
+    best, bt = None, None
+    for c in cands:
+        t = drive_mod_time(c[2], now) or datetime.min
+        if best is None or t > bt:
+            best, bt = c, t
+    return best
+
+
+def drive_is_image(b):
+    return bool(b) and (b[:8] == b'\x89PNG\r\n\x1a\n' or b[:3] == b'\xff\xd8\xff' or (b[:4] == b'RIFF' and b[8:12] == b'WEBP'))
+
+
+class DriveNeedLogin(Exception):
+    pass
+
+
+async def drive_open(page, url, say, wait_login=300):
+    """เปิดหน้า Drive · ยังไม่ล็อกอิน = รอให้ผู้ใช้ล็อกอินในหน้าต่าง Chrome (ไม่เกิน wait_login วิ) แล้วเปิดซ้ำ"""
+    await page.goto(url, wait_until='domcontentloaded', timeout=60000)
+    t0 = time.time()
+    told = False
+    while 'accounts.google.com' in (page.url or '') or 'ServiceLogin' in (page.url or ''):
+        if not told:
+            told = True
+            say('🔐 ล็อกอินบัญชี Google (บัญชีที่เข้าโฟลเดอร์รูปได้) ในหน้าต่าง Chrome ที่เปิดขึ้นมา — ล็อกอินเสร็จจะทำต่อเอง')
+        if time.time() - t0 > wait_login:
+            raise DriveNeedLogin('รอล็อกอินเกิน %d นาที' % (wait_login // 60))
+        await page.wait_for_timeout(1500)
+    if told:
+        await page.goto(url, wait_until='domcontentloaded', timeout=60000)
+    return await page.content()
+
+
+async def drive_index(page, root_id, say, cancel=lambda: False):
+    """ไล่ทุกโฟลเดอร์ย่อย -> {ชื่อรูป(ไม่มีนามสกุล, ตัวเล็ก): [(id, ชื่อ, เวลาแก้ไข, โฟลเดอร์)]}"""
+    idx, todo, done = {}, [(root_id, '')], set()
+    while todo and len(done) < DRIVE_MAX_FOLDERS:
+        if cancel():
+            break
+        fid, path = todo.pop(0)
+        if fid in done:
+            continue
+        done.add(fid)
+        html = await drive_open(page, DRIVE_EMBED % fid, say)
+        folders, files = drive_parse_listing(html)
+        if fid == root_id and not folders and not files and 'flip-entr' not in html:
+            raise RuntimeError('เปิดโฟลเดอร์ไม่ได้ — บัญชีที่ล็อกอินใน Chrome ของเครื่องมือไม่มีสิทธิ์ หรือลิงก์ผิด')
+        for f_id, title, mod in files:
+            st = drive_stem_of(title)
+            if st:
+                idx.setdefault(st, []).append((f_id, title, mod, path))
+        for f_id, title in folders:
+            todo.append((f_id, (path + '/' if path else '') + title))
+        say('☁ อ่านรายชื่อรูปบน Drive… %d โฟลเดอร์ · เจอรูป %d ไฟล์' % (len(done), sum(len(v) for v in idx.values())))
+    return idx
+
+
+async def drive_download(page, fid):
+    for u in DRIVE_DL:
+        try:
+            r = await page.request.get(u % fid, timeout=60000)
+            b = await r.body()
+        except Exception:
+            continue
+        if r.ok and drive_is_image(b):
+            return b
+    return None
+
+
+def drive_fill_queue(rows, got):
+    """got {ชื่อรูป: path} -> ใส่รูปให้แถวที่ยังไม่มีรูป · คืน (ใส่แล้ว [(แถว, path)], ไม่เจอ [แถว], ไม่มีเลขตำแหน่ง [แถว])"""
+    put, miss, nokey = [], [], []
+    for d in rows:
+        if d.get('img') or d.get('img_off'):
+            continue
+        st = drive_pic_stem(d)
+        if not st:
+            nokey.append(d)
+        elif got.get(st.lower()):
+            d['img'] = got[st.lower()]
+            put.append((d, d['img']))
+        else:
+            miss.append(d)
+    return put, miss, nokey
+
+
+def drive_pics_ui(app):
+    """ปุ่ม ☁ ใส่รูปจาก Drive ข้าง “ล้างคิว” ในแท็บสร้าง Item"""
+    b = None
+    try:
+        for w in app.tab_create.winfo_children():
+            stack = [w]
+            while stack and b is None:
+                x = stack.pop()
+                if isinstance(x, tk.Button) and str(x.cget('text')).strip() == 'ล้างคิว':
+                    b = x
+                stack.extend(x.winfo_children())
+            if b is not None:
+                break
+    except Exception:
+        b = None
+    if b is None:
+        try:
+            app.log('วางปุ่ม ☁ ใส่รูปจาก Drive ไม่ได้ — หาปุ่ม ล้างคิว ไม่เจอ', 'WARN')
+        except Exception:
+            pass
+        return None
+    btn = app._btn(b.master, '☁  ใส่รูปจาก Drive', lambda: drive_pics_start(app))
+    btn.pack(side='left', padx=(8, 0), ipadx=8, ipady=4, after=b)
+    app._drive_btn = btn
+    return btn
+
+
+def drive_pics_ask(app):
+    """ถามลิงก์โฟลเดอร์รูป (จำไว้) -> folder id หรือ None"""
+    prefs = getattr(app, 'prefs', None) or {}
+    top = tk.Toplevel(app.root)
+    top.title('ใส่รูปจาก Google Drive')
+    top.configure(bg=C['bg'])
+    top.transient(app.root)
+    box = {'v': None}
+    tk.Label(top, text='ลิงก์โฟลเดอร์รูปไอเทมบน Google Drive', bg=C['bg'], fg=C['fg'],
+             font=('Segoe UI', 11, 'bold')).pack(anchor='w', padx=16, pady=(14, 2))
+    tk.Label(top, text='เครื่องมือจะหารูปชื่อ all_<fdPosition>_<fdItemKind> (เช่น all_250_4979.png) ทุกโฟลเดอร์ย่อย\n'
+                       'แล้วใส่ให้แถวที่ยังไม่มีรูป · ครั้งแรกต้องล็อกอินบัญชีที่เข้าโฟลเดอร์นี้ได้ ในหน้าต่าง Chrome ที่เปิดขึ้น',
+             bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), justify='left').pack(anchor='w', padx=16)
+    e = app._entry(top, width=70)
+    e.insert(0, prefs.get(DRIVE_PIC_PREF) or '')
+    e.pack(fill='x', padx=16, pady=8, ipady=3)
+    err = tk.Label(top, text='', bg=C['bg'], fg=C['err'], font=('Segoe UI', 9))
+    err.pack(anchor='w', padx=16)
+    bar = tk.Frame(top, bg=C['bg'])
+    bar.pack(fill='x', padx=16, pady=(4, 14))
+
+    def ok():
+        fid = drive_folder_id(e.get())
+        if not fid:
+            return err.config(text='ลิงก์ไม่ใช่โฟลเดอร์ Drive (ต้องมี /folders/… )')
+        prefs[DRIVE_PIC_PREF] = e.get().strip()
+        try:
+            save_prefs(prefs)
+        except Exception:
+            pass
+        box['v'] = fid
+        top.destroy()
+    app._btn(bar, 'เริ่มหารูป', ok, primary=True).pack(side='right', ipadx=12, ipady=3)
+    app._btn(bar, 'ยกเลิก', top.destroy).pack(side='right', padx=(0, 8), ipadx=10, ipady=3)
+    e.bind('<Return>', lambda ev: ok())
+    try:
+        top.grab_set()
+    except Exception:
+        pass
+    e.focus_set()
+    top.wait_window()
+    return box['v']
+
+
+def drive_pics_start(app):
+    if chrome_held_ask(app, lambda: drive_pics_start(app)):
+        return
+    if app.c_running or app.running or getattr(app, 'b_running', False) or getattr(app, 'w_running', False):
+        return messagebox.showinfo('กำลังทำงาน', 'มีงานอื่นใช้ Chrome อยู่ — รอให้เสร็จก่อนนะ')
+    todo = [d for d in app.cq if not d.get('img') and not d.get('img_off')]
+    if not app.cq:
+        return messagebox.showinfo('คิวว่าง', 'นำเข้าไฟล์ต้นฉบับก่อน แล้วค่อยใส่รูป')
+    if not todo:
+        return messagebox.showinfo('มีรูปครบแล้ว', 'ทุกแถวในคิวมีรูปแล้ว (หรือกดเอารูปออกไว้)')
+    if not any(drive_pic_stem(d) for d in todo):
+        return messagebox.showwarning('ไม่รู้ชื่อรูป', 'แถวที่ยังไม่มีรูป ไม่มีเลข fdPosition / fdItemKind จากชีท\n'
+                                                       '(แถวที่เพิ่มเอง / ชีทที่ไม่มีคอลัมน์นี้) — ใส่รูปเองในหน้าแก้ไข')
+    fid = drive_pics_ask(app)
+    if not fid:
+        return
+    app.c_running = True
+    app._drive_cancel = False
+    try:
+        app._drive_btn.config(state='disabled')
+    except Exception:
+        pass
+    app.log('☁ ใส่รูปจาก Drive: หา %d แถวที่ยังไม่มีรูป' % len(todo), 'STEP')
+    q = queue.Queue()
+    threading.Thread(target=drive_pics_thread, args=(app, fid, todo, q), daemon=True).start()
+    app.root.after(200, lambda: drive_pics_poll(app, todo, q))
+
+
+def drive_pics_poll(app, todo, q):
+    """ของจากเธรดโหลดรูป -> หน้าจอ (แตะ Tk ในเธรดหลักเท่านั้น)"""
+    try:
+        while True:
+            it = q.get_nowait()
+            if it[0] == 'log':
+                app.log(it[1], it[2])
+            elif it[0] == 'prog':
+                app.set_progress(*it[1:])
+            elif it[0] == 'done':
+                return drive_pics_done(app, todo, it[1])
+    except queue.Empty:
+        pass
+    app.root.after(200, lambda: drive_pics_poll(app, todo, q))
+
+
+def drive_pics_thread(app, fid, todo, q):
+    res = {'got': {}, 'err': '', 'idx': 0}
+
+    def say(t):
+        q.put(('log', t, 'INFO'))
+
+    async def work():
+        kw = dict(launch_kwargs(False))
+        kw['ignore_default_args'] = ['--enable-automation']        # ให้ Google ยอมให้ล็อกอินในหน้าต่างนี้
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch_persistent_context(**kw)
+            page = browser.pages[0] if browser.pages else await browser.new_page()
+            try:
+                idx = await drive_index(page, fid, say, lambda: app._drive_cancel)
+                res['idx'] = sum(len(v) for v in idx.values())
+                want = sorted({drive_pic_stem(d).lower() for d in todo if drive_pic_stem(d)})
+                os.makedirs(DRIVE_PIC_DIR, exist_ok=True)
+                for k, st in enumerate(want, 1):
+                    cands = idx.get(st) or []
+                    if not cands:
+                        continue
+                    best = drive_pick_newest(cands)
+                    if len(cands) > 1:
+                        say('☁ %s มี %d ไฟล์ — ใช้ตัวใหม่สุด (%s · %s)' % (st, len(cands), best[3] or 'โฟลเดอร์หลัก', best[2] or '?'))
+                    b = await drive_download(page, best[0])
+                    if not b:
+                        say('☁ โหลด %s ไม่ได้ (ไม่ใช่ไฟล์รูป/ไม่มีสิทธิ์)' % best[1])
+                        continue
+                    ext = os.path.splitext(best[1])[1].lower() or '.png'
+                    out = os.path.join(DRIVE_PIC_DIR, st + ext)
+                    with open(out, 'wb') as f:
+                        f.write(b)
+                    res['got'][st] = out
+                    q.put(('prog', k, len(want), st))
+            finally:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+    try:
+        asyncio.run(work())
+    except DriveNeedLogin as ex:
+        res['err'] = 'ยังไม่ได้ล็อกอิน Google (%s) — กดใหม่แล้วล็อกอินในหน้าต่าง Chrome' % ex
+    except Exception as ex:
+        res['err'] = str(ex)[:200]
+    finally:
+        app.c_running = False
+        q.put(('done', res))
+
+
+def drive_pics_done(app, todo, res):
+    try:
+        app._drive_btn.config(state='normal')
+    except Exception:
+        pass
+    if res['err'] and not res['got']:
+        app.log('☁ ใส่รูปจาก Drive ไม่สำเร็จ: %s' % res['err'], 'ERR')
+        return messagebox.showwarning('ใส่รูปจาก Drive', res['err'])
+    put, miss, nokey = drive_fill_queue(todo, res['got'])
+    try:
+        app._c_refresh()
+    except Exception:
+        pass
+    app.log('☁ ใส่รูปจาก Drive: ใส่แล้ว %d แถว · ไม่เจอรูป %d · ไม่มีเลขตำแหน่ง %d (รูปบน Drive %d ไฟล์)'
+            % (len(put), len(miss), len(nokey), res['idx']), 'OK' if put and not miss else 'WARN')
+    for d in miss:
+        app.log('   ⚠ ไม่เจอรูป %s.png — %s (ItemKind %s)' % (drive_pic_stem(d), d.get('name', ''), d.get('kind', '')), 'WARN')
+    for d in nokey:
+        app.log('   ⚠ ไม่รู้ชื่อรูป (ไม่มี fdPosition/fdItemKind) — %s (ItemKind %s)' % (d.get('name', ''), d.get('kind', '')), 'WARN')
+    msg = 'ใส่รูปให้ %d แถว' % len(put)
+    if miss:
+        msg += '\n\n⚠ ไม่เจอรูปบน Drive %d แถว:\n%s' % (len(miss), '\n'.join(
+            '· %s.png  (%s)' % (drive_pic_stem(d), d.get('name', '')[:30]) for d in miss[:8]))
+        if len(miss) > 8:
+            msg += '\n· … อีก %d แถว (ดูใน Log)' % (len(miss) - 8)
+    if nokey:
+        msg += '\n\n⚠ ไม่รู้ชื่อรูป %d แถว (ไม่มี fdPosition / fdItemKind) — ใส่เองในหน้าแก้ไข' % len(nokey)
+    if res['err']:
+        msg += '\n\n(หยุดกลางทาง: %s)' % res['err']
+    (messagebox.showinfo if not miss and not nokey else messagebox.showwarning)('ใส่รูปจาก Drive', msg)
+
+
+def drive_pics_install():
+    if getattr(App._build_ui, '_drive', False):
+        return
+    b0 = App._build_ui
+
+    def build(self, *a, **k):
+        r = b0(self, *a, **k)
+        try:
+            drive_pics_ui(self)
+        except Exception as ex:
+            try:
+                self.log('วางปุ่ม ☁ ใส่รูปจาก Drive ไม่ได้: %s' % str(ex)[:80], 'WARN')
+            except Exception:
+                pass
+        return r
+    build._drive = True
+    App._build_ui = build
+
+
+drive_pics_install()
 
 
 if __name__ == '__main__':
