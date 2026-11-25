@@ -11,6 +11,8 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.12.1: สร้าง Item — ☁ ใส่รูปจาก Drive ทำแบบในคลิป: เปิดลิงก์โฟลเดอร์ แล้วพิมพ์ all_<fdPosition>_<fdItemKind> ในช่องค้นหา Drive ทีละรูป เอาไฟล์ชื่อตรงเป๊ะแล้วโหลด (เดิมไล่อ่านรายชื่อทุกโฟลเดอร์ก่อน = ช้ามาก) · ชื่อซ้ำ = ใหม่สุดจากวันที่ในผลค้นหา · อ่านวันที่ไม่ได้ = โหลดมาเทียบ ไม่เหมือนกันเตือนให้ตรวจ
+V1.12.0: แท็บค้นหา — 🚀 ออโต้จากลิงก์ชีท: วางลิงก์ Google Sheet (ไม่ต้องโหลดไฟล์) → เลือกชีทครั้งเดียว → ค้นหา → สรุปให้ยืนยัน 1 ครั้ง → ตัวที่ไม่เจอเข้าคิว + ใส่รูปจาก Drive + สร้าง Item → ส่งไปสร้าง Bundle (ไม่มีจุดต้องดู = กดใช้ข้อมูลให้) → สร้าง Bundle · เจอปัญหา = หยุดถามแล้วไปต่อ
 V1.11.6: สร้าง Item — ☁ ใส่รูปจาก Drive: เปิดโฟลเดอร์รูปบน Google Drive ใน Chrome ของเครื่องมือ (ล็อกอินบัญชีบริษัทครั้งแรกครั้งเดียว) หารูปชื่อ all_<fdPosition>_<fdItemKind> ทุกโฟลเดอร์ย่อย โหลดมาใส่ให้ทุกแถวที่ยังไม่มีรูป · ชื่อซ้ำ = ใช้ไฟล์ใหม่สุด · ไม่เจอ = ปล่อยว่าง + เตือน · อ่าน fdPosition / fdItemKind จากชีทเก็บไว้กับแถว
 V1.11.5: WR Master — เลข Bundle = เลขแรกใต้ป้าย Bundle (คอลัมน์เดียวกัน) ไม่ว่าจะห่างกี่แถว ถึงแถวหัวตาราง fdItemNum (เลขอยู่บนแถว fdItemNum ก็นับ) · ป้ายอยู่แถวไหนของบล็อก CODE ก็ได้ · แถวไอเทมใต้หัวตารางไม่นับ (v1.11.4 หยุดก่อนแถว fdItemNum เลยหาเลขที่อยู่บนแถวนั้นไม่เจอ)
 V1.11.4: WR Master — ชีทที่ป้าย Bundle ว่าง แล้วหัวตาราง fdItemNum อยู่แถวถัดไปเลย: เดิมหยิบ Aztek Item Id ไอเทมแรกในตารางมาเป็นเลข Bundle (เช่น 2989) → ส่งต่อจากสร้าง Bundle ไม่เติมเลขจริง (57xx) เพราะคิดว่ามีเลขแล้ว — ตอนนี้หาใต้ป้ายถึงแค่ก่อนหัวตาราง
@@ -27362,8 +27364,10 @@ sheet_filter_install()
 #  [22] สร้าง Item — ☁ ใส่รูปจาก Google Drive (v1.11.6) — ของใหม่ วางปุ่มข้าง “ล้างคิว” (หาจากข้อความปุ่ม)
 #      ผู้ใช้เลือก: เครื่องมือเปิด Drive ใน Chrome ของมันเอง (ล็อกอินบัญชีบริษัทครั้งแรก) แล้วโหลดเอง
 #                  ชื่อซ้ำ = ใช้ไฟล์ใหม่สุด · ไม่เจอ = ปล่อยว่าง + เตือน
-#      ชื่อรูป = all_<fdPosition>_<fdItemKind>.png (ตามคลิป: all_250_4979.png) — ค้นทุกโฟลเดอร์ย่อยของลิงก์ที่ให้
-#      อ่านรายชื่อไฟล์จากหน้า embeddedfolderview (หน้ารายการไฟล์แบบเรียบง่ายของ Drive) แล้วโหลดผ่าน session ของ Chrome
+#      ชื่อรูป = all_<fdPosition>_<fdItemKind>.png (ตามคลิป: all_250_4979.png)
+#      v1.12.1 ทำแบบในคลิป: เปิดลิงก์โฟลเดอร์ → พิมพ์ชื่อรูปในช่องค้นหา Drive ทีละรูป → เอาไฟล์ชื่อตรงเป๊ะ → โหลด
+#              (v1.11.6 ไล่อ่านรายชื่อทุกโฟลเดอร์ก่อน = ช้ามาก โฟลเดอร์จริงมีหลายพันไฟล์ · ตัวไล่ยังเก็บไว้ ไม่ได้ใช้แล้ว)
+#              ชื่อซ้ำ = อ่านวันที่แก้ไขจากแถวผลค้นหา เอาใหม่สุด · อ่านวันที่ไม่ได้ = โหลดมาเทียบ รูปเหมือนกันใช้ตัวแรก ไม่เหมือนเตือน
 #      ไม่แตะเว็บ aztek · ไม่ทับรูปที่ใส่ไว้แล้ว · แถวที่กด “เอารูปออก” เอง (img_off) ไม่ใส่ให้
 # ============================================================================
 import html as _html
@@ -27373,6 +27377,11 @@ DRIVE_DL = ('https://drive.usercontent.google.com/download?id=%s&export=download
             'https://drive.google.com/uc?id=%s&export=download')
 DRIVE_PIC_DIR = os.path.join(DATA_DIR, 'drive_pics')
 DRIVE_MAX_FOLDERS = 400
+DRIVE_FOLDER = 'https://drive.google.com/drive/folders/%s'               # v1.12.1 เปิดลิงก์ก่อน (เหมือนในคลิป)
+DRIVE_SEARCH = 'https://drive.google.com/drive/search?q=%s'              # v1.12.1 ช่องค้นหาของ Drive
+DRIVE_SEARCH_WAIT = 15                                                   # วิ — รอผลค้นหาโหลดได้นานสุด
+DRIVE_DUP_MAX = 5
+import urllib.parse as _durl                     # noqa: E402
 _DRIVE_TH_MON = {'ม.ค.': 1, 'ก.พ.': 2, 'มี.ค.': 3, 'เม.ย.': 4, 'พ.ค.': 5, 'มิ.ย.': 6, 'ก.ค.': 7, 'ส.ค.': 8, 'ก.ย.': 9,
                  'ต.ค.': 10, 'พ.ย.': 11, 'ธ.ค.': 12}
 _DRIVE_EN_MON = {m: i for i, m in enumerate(('jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct',
@@ -27525,6 +27534,102 @@ async def drive_download(page, fid):
     return None
 
 
+# ---- v1.12.1 ค้นหาใน Drive ทีละรูป (แบบในคลิป) ----
+JS_DRIVE_HITS = r"""(want) => {
+  const ok = v => /^[A-Za-z0-9_-]{20,}$/.test(v || '');
+  const out = [], seen = new Set();
+  for (const el of document.querySelectorAll('[data-id]')) {
+    const id = el.getAttribute('data-id');
+    if (!ok(id) || seen.has(id)) continue;
+    let box = false;
+    for (const x of el.querySelectorAll('[data-id]')) {
+      const v = x.getAttribute('data-id');
+      if (ok(v) && v !== id) { box = true; break; }
+    }
+    if (box) continue;
+    const bits = [el.innerText || '', el.getAttribute('aria-label') || '', el.getAttribute('data-tooltip') || ''];
+    el.querySelectorAll('[aria-label],[data-tooltip],[title]').forEach(x => bits.push(
+      x.getAttribute('aria-label') || '', x.getAttribute('data-tooltip') || '', x.getAttribute('title') || ''));
+    const text = bits.join(' ⁣ ').replace(/\s+/g, ' ');
+    if (text.toLowerCase().indexOf(want) < 0) continue;
+    seen.add(id);
+    out.push({id: id, text: text.slice(0, 2000)});
+  }
+  return out;
+}"""
+DRIVE_NO_RESULT = ('No results', 'None of your files', 'ไม่พบผลลัพธ์', 'ไม่มีผลลัพธ์', 'ไม่พบไฟล์')
+_DRIVE_DATE_RX = (r'[A-Z][a-z]{2}\s+\d{1,2},\s*\d{4}', r'\d{1,2}\s+[ก-๙]{1,4}\.[ก-๙]{1,3}\.?\s*\d{4}',
+                  r'\d{1,2}\s+[ก-๙]{1,4}\.[ก-๙]{1,3}\.?', r'(?<![\w/])\d{1,2}/\d{1,2}/\d{2,4}(?![\w/])',
+                  r'(?<![\w:])\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?(?![\w:])', r'(?<![A-Za-z])[A-Z][a-z]{2}\s+\d{1,2}(?![\d,])')
+
+
+def drive_row_date(text, now=None):
+    """ข้อความแถวผลค้นหา -> ข้อความวันที่แก้ไขตัวแรกที่อ่านออก ('' = ไม่มี เช่น หน้าแบบตาราง/กริด)"""
+    t = str(text or '')
+    for rx in _DRIVE_DATE_RX:
+        for m in re.finditer(rx, t):
+            v = m.group(0).strip()
+            if drive_mod_time(v, now):
+                return v
+    return ''
+
+
+def drive_hits_match(hits, stem, now=None):
+    """ผลค้นหา [{'id','text'}] -> ไฟล์ชื่อตรงเป๊ะ [(id, ชื่อไฟล์, วันที่แก้ไข)] (ไม่เอาชื่อยาวกว่า/ไม่ใช่รูป)"""
+    rx = re.compile(r'(?<![A-Za-z0-9_])(' + re.escape(stem) + r'(?:\s*\(\d+\))?\.(?:png|jpe?g|webp))(?![A-Za-z0-9])', re.I)
+    out = []
+    for h in hits or []:
+        m = rx.search(str(h.get('text') or ''))
+        if m and drive_stem_of(m.group(1)) == stem.lower():
+            out.append((h['id'], m.group(1), drive_row_date(h.get('text'), now)))
+    return out
+
+
+async def drive_search(page, stem, say, wait=None):
+    """พิมพ์ชื่อรูปในช่องค้นหา Drive (เปิดหน้าผลค้นหา) -> ไฟล์ชื่อตรงเป๊ะ [(id, ชื่อ, วันที่แก้ไข)]"""
+    wait = DRIVE_SEARCH_WAIT if wait is None else wait
+    await drive_open(page, DRIVE_SEARCH % _durl.quote(stem), say)
+    t0 = time.time()
+    hits = []
+    while time.time() - t0 < wait:
+        await page.wait_for_timeout(600)
+        hits = await page.evaluate(JS_DRIVE_HITS, stem.lower())
+        if drive_hits_match(hits, stem):
+            await page.wait_for_timeout(1200)            # ผลอาจทยอยขึ้น — อ่านอีกรอบให้ครบ
+            hits = await page.evaluate(JS_DRIVE_HITS, stem.lower())
+            break
+        try:
+            body = await page.evaluate('() => (document.body && document.body.innerText || "").slice(0, 20000)')
+        except Exception:
+            body = ''
+        if time.time() - t0 > 3 and any(x in body for x in DRIVE_NO_RESULT):
+            break
+    return drive_hits_match(hits, stem)
+
+
+async def drive_get_pic(page, cands, say):
+    """ไฟล์ชื่อเดียวกันหลายไฟล์ -> (ไฟล์ที่ใช้, bytes) · มีวันที่ = ใหม่สุด · ไม่มีวันที่ = โหลดมาเทียบ"""
+    if len(cands) == 1:
+        return cands[0], await drive_download(page, cands[0][0])
+    if any(drive_mod_time(c[2]) for c in cands):
+        best = drive_pick_newest(cands)
+        say('☁ %s มี %d ไฟล์ — ใช้ตัวที่แก้ไขล่าสุด (%s)' % (best[1], len(cands), best[2] or '?'))
+        return best, await drive_download(page, best[0])
+    got = []
+    for c in cands[:DRIVE_DUP_MAX]:
+        b = await drive_download(page, c[0])
+        if b:
+            got.append((c, b))
+    if not got:
+        return cands[0], None
+    if all(b == got[0][1] for _, b in got):
+        say('☁ %s มี %d ไฟล์ (อ่านวันที่ไม่ได้) — รูปเหมือนกันทุกไฟล์ ใช้ตัวแรก' % (cands[0][1], len(cands)))
+    else:
+        say('☁ ⚠ %s มี %d ไฟล์ รูปไม่เหมือนกัน และอ่านวันที่แก้ไขไม่ได้ — ใช้ตัวแรกที่ Drive เรียงให้ ตรวจรูปในคิวด้วยนะ'
+            % (cands[0][1], len(cands)))
+    return got[0]
+
+
 def drive_fill_queue(rows, got):
     """got {ชื่อรูป: path} -> ใส่รูปให้แถวที่ยังไม่มีรูป · คืน (ใส่แล้ว [(แถว, path)], ไม่เจอ [แถว], ไม่มีเลขตำแหน่ง [แถว])"""
     put, miss, nokey = [], [], []
@@ -27579,7 +27684,7 @@ def drive_pics_ask(app):
     box = {'v': None}
     tk.Label(top, text='ลิงก์โฟลเดอร์รูปไอเทมบน Google Drive', bg=C['bg'], fg=C['fg'],
              font=('Segoe UI', 11, 'bold')).pack(anchor='w', padx=16, pady=(14, 2))
-    tk.Label(top, text='เครื่องมือจะหารูปชื่อ all_<fdPosition>_<fdItemKind> (เช่น all_250_4979.png) ทุกโฟลเดอร์ย่อย\n'
+    tk.Label(top, text='เครื่องมือจะเปิดลิงก์นี้ แล้วพิมพ์ชื่อรูป all_<fdPosition>_<fdItemKind> (เช่น all_250_4979) ในช่องค้นหา Drive ทีละรูป\n'
                        'แล้วใส่ให้แถวที่ยังไม่มีรูป · ครั้งแรกต้องล็อกอินบัญชีที่เข้าโฟลเดอร์นี้ได้ ในหน้าต่าง Chrome ที่เปิดขึ้น',
              bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), justify='left').pack(anchor='w', padx=16)
     e = app._entry(top, width=70)
@@ -27670,18 +27775,20 @@ def drive_pics_thread(app, fid, todo, q):
             browser = await pw.chromium.launch_persistent_context(**kw)
             page = browser.pages[0] if browser.pages else await browser.new_page()
             try:
-                idx = await drive_index(page, fid, say, lambda: app._drive_cancel)
-                res['idx'] = sum(len(v) for v in idx.values())
+                await drive_open(page, DRIVE_FOLDER % fid, say)          # v1.12.1 เปิดลิงก์โฟลเดอร์ก่อน (เหมือนในคลิป)
                 want = sorted({drive_pic_stem(d).lower() for d in todo if drive_pic_stem(d)})
                 os.makedirs(DRIVE_PIC_DIR, exist_ok=True)
                 for k, st in enumerate(want, 1):
-                    cands = idx.get(st) or []
+                    if app._drive_cancel:
+                        break
+                    q.put(('prog', k - 1, len(want), st))
+                    say('☁ ค้นหา %s ใน Drive… (%d/%d)' % (st, k, len(want)))
+                    cands = await drive_search(page, st, say)
+                    res['idx'] += len(cands)
                     if not cands:
+                        say('☁ ไม่เจอ %s ในผลค้นหา' % st)
                         continue
-                    best = drive_pick_newest(cands)
-                    if len(cands) > 1:
-                        say('☁ %s มี %d ไฟล์ — ใช้ตัวใหม่สุด (%s · %s)' % (st, len(cands), best[3] or 'โฟลเดอร์หลัก', best[2] or '?'))
-                    b = await drive_download(page, best[0])
+                    best, b = await drive_get_pic(page, cands, say)
                     if not b:
                         say('☁ โหลด %s ไม่ได้ (ไม่ใช่ไฟล์รูป/ไม่มีสิทธิ์)' % best[1])
                         continue
@@ -27720,7 +27827,7 @@ def drive_pics_done(app, todo, res):
         app._c_refresh()
     except Exception:
         pass
-    app.log('☁ ใส่รูปจาก Drive: ใส่แล้ว %d แถว · ไม่เจอรูป %d · ไม่มีเลขตำแหน่ง %d (รูปบน Drive %d ไฟล์)'
+    app.log('☁ ใส่รูปจาก Drive: ใส่แล้ว %d แถว · ไม่เจอรูป %d · ไม่มีเลขตำแหน่ง %d (ค้นเจอบน Drive %d ไฟล์)'
             % (len(put), len(miss), len(nokey), res['idx']), 'OK' if put and not miss else 'WARN')
     for d in miss:
         app.log('   ⚠ ไม่เจอรูป %s.png — %s (ItemKind %s)' % (drive_pic_stem(d), d.get('name', ''), d.get('kind', '')), 'WARN')
@@ -27759,6 +27866,731 @@ def drive_pics_install():
 
 
 drive_pics_install()
+
+
+# ============================================================================
+#  [23] 🚀 ออโต้จากลิงก์ชีท (v1.12.0) — ลิงก์ Google Sheet → ค้นหา → ตัวที่ไม่เจอ: สร้าง Item (+รูปจาก Drive) → สร้าง Bundle
+#      ของใหม่ทั้งก้อน: กดปุ่ม/เรียกฟังก์ชันเดิมตามลำดับแบบที่คนกด · ไม่แก้โค้ดเดิม
+#      ผู้ใช้เลือก: โหลดชีทเป็น xlsx เบื้องหลังผ่าน Chrome ของเครื่องมือ (บัญชี Google เดียวกับ Drive)
+#                 เลือกชีทครั้งเดียวตอนเริ่ม · หยุดให้ดูสรุป 1 ครั้งหลังค้นหา · ใส่รูปจาก Drive ด้วย
+#                 เจอจุดที่ปกติต้องตัดสินใจเอง = หยุดถามแล้วค่อยไปต่อ
+# ============================================================================
+import urllib.parse as _urlparse                 # noqa: E402
+
+AUTO_PREF = 'auto_sheet_url'
+GSHEET_XLSX = 'https://docs.google.com/spreadsheets/d/%s/export?format=xlsx'
+GSHEET_EDIT = 'https://docs.google.com/spreadsheets/d/%s/edit'
+GSHEET_DIR = os.path.join(DATA_DIR, 'gsheet')
+AUTO = {'run': None}
+AUTO_QUIET = ('ค้นหา', 'สร้าง Item')             # ขั้นกลางทาง: เสร็จแล้วปิด Chrome ไปขั้นต่อเลย (ไม่เปิดค้าง/ไม่เด้ง)
+
+
+def gsheet_id(url):
+    m = re.search(r'/spreadsheets/(?:u/\d+/)?d/([A-Za-z0-9_-]{20,})', str(url or ''))
+    return m.group(1) if m else ''
+
+
+def gsheet_fname(cd, sid):
+    """ชื่อไฟล์จาก Content-Disposition (ชื่อชีทบน Google) -> ชื่อไฟล์ที่เซฟได้บน Windows"""
+    cd = str(cd or '')
+    nm = ''
+    m = re.search(r"filename\*\s*=\s*[A-Za-z0-9_-]+''([^;]+)", cd)
+    if m:
+        nm = _urlparse.unquote(m.group(1).strip().strip('"'))
+    if not nm:
+        m = re.search(r'filename\s*=\s*"([^"]+)"', cd) or re.search(r'filename\s*=\s*([^;]+)', cd)
+        if m:
+            nm = m.group(1).strip()
+    if nm.lower().endswith('.xlsx'):
+        nm = nm[:-5]
+    nm = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', '_', nm).strip(' ._')[:100]
+    return (nm or ('gsheet_' + str(sid)[:12])) + '.xlsx'
+
+
+def gsheet_save(data, name, folder=None):
+    folder = folder or GSHEET_DIR
+    os.makedirs(folder, exist_ok=True)
+    out = os.path.join(folder, name)
+    try:
+        with open(out, 'wb') as f:
+            f.write(data)
+    except OSError:                                # ไฟล์เดิมเปิดค้างใน Excel = เซฟชื่อใหม่
+        st, ext = os.path.splitext(name)
+        out = os.path.join(folder, '%s_%s%s' % (st, datetime.now().strftime('%H%M%S'), ext))
+        with open(out, 'wb') as f:
+            f.write(data)
+    return out
+
+
+async def gsheet_get(page, sid):
+    try:
+        r = await page.request.get(GSHEET_XLSX % sid, timeout=120000)
+        b = await r.body()
+    except Exception as ex:
+        return None, '', str(ex)[:120]
+    if r.ok and b[:2] == b'PK':
+        return b, (r.headers or {}).get('content-disposition', ''), ''
+    return None, '', 'HTTP %s' % r.status
+
+
+async def gsheet_fetch(page, sid, say, wait_login=300):
+    """โหลดชีทเป็น xlsx ด้วย Chrome ของเครื่องมือ · ยังไม่ล็อกอิน = เปิดหน้าชีทให้ล็อกอินก่อนแล้วโหลดซ้ำ"""
+    b, cd, err = await gsheet_get(page, sid)
+    if b is None:
+        say('📄 ยังโหลดชีทไม่ได้ (%s) — เปิดหน้าชีทใน Chrome…' % err)
+        await drive_open(page, GSHEET_EDIT % sid,
+                         lambda t: say(t.replace('เข้าโฟลเดอร์รูปได้', 'เปิดชีทนี้ได้')), wait_login)
+        b, cd, err = await gsheet_get(page, sid)
+    if b is None:
+        raise RuntimeError('โหลดชีทไม่ได้ (%s) — บัญชี Google ใน Chrome ของเครื่องมือไม่มีสิทธิ์เปิดชีทนี้ หรือลิงก์ผิด' % err)
+    return b, cd
+
+
+def auto_sheet_thread(app, sid, q):
+    res = {'path': '', 'err': ''}
+
+    def say(t):
+        q.put(('log', t, 'INFO'))
+
+    async def work():
+        kw = dict(launch_kwargs(False))
+        kw['ignore_default_args'] = ['--enable-automation']        # ให้ Google ยอมให้ล็อกอินในหน้าต่างนี้
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch_persistent_context(**kw)
+            page = browser.pages[0] if browser.pages else await browser.new_page()
+            try:
+                b, cd = await gsheet_fetch(page, sid, say)
+                res['path'] = gsheet_save(b, gsheet_fname(cd, sid))
+            finally:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+    try:
+        asyncio.run(work())
+    except DriveNeedLogin as ex:
+        res['err'] = 'ยังไม่ได้ล็อกอิน Google (%s)' % ex
+    except Exception as ex:
+        res['err'] = str(ex)[:220]
+    finally:
+        app.c_running = False
+        q.put(('done', res))
+
+
+class _AutoPatch:
+    """เปลี่ยนฟังก์ชันชั่วคราวระหว่างเรียกปุ่มเดิม แล้วคืนของเดิมเสมอ"""
+    def __init__(self, obj, name, fn):
+        self.obj, self.name, self.fn = obj, name, fn
+
+    def __enter__(self):
+        self.old = getattr(self.obj, self.name)
+        setattr(self.obj, self.name, self.fn)
+        return self
+
+    def __exit__(self, *a):
+        setattr(self.obj, self.name, self.old)
+        return False
+
+
+def auto_yes(app, titles):
+    """ตอบ “ใช่” ให้เฉพาะหน้าต่างยืนยันที่ชื่อตรง (ผู้ใช้ยืนยันรวดเดียวไปแล้วตอนสรุป) · หน้าต่างอื่นถามคนเหมือนเดิม"""
+    orig = messagebox.askyesno
+
+    def ask(title=None, message=None, *a, **k):
+        if title in titles:
+            try:
+                app.log('🚀 ออโต้: ตอบ “ใช่” ให้หน้าต่าง “%s” (ยืนยันไว้แล้วตอนสรุป)' % title, 'INFO')
+            except Exception:
+                pass
+            return True
+        return orig(title, message, *a, **k)
+    return _AutoPatch(messagebox, 'askyesno', ask)
+
+
+def auto_summary(results, sheets, drive_on, n_pick=0):
+    """ข้อความสรุปก่อนเริ่มสร้าง (หยุดให้ดู 1 ครั้ง) -> (ข้อความ, จำนวนที่จะสร้าง)"""
+    found = [r for r in results if not r.get('miss')]
+    miss = [r for r in results if r.get('miss')]
+    seqs = {r.get('seq') for r in results}
+    fseq = {r.get('seq') for r in found}
+    L = ['ไฟล์ชีท: %d ชีท — %s' % (len(sheets), ', '.join(clean_text(s) or str(s) for s in sheets[:6])
+                                   + (' …' if len(sheets) > 6 else '')),
+         'ค้นหา %d รายการ · เจอบนเว็บแล้ว %d · ไม่เจอ %d' % (len(seqs), len(fseq), len(miss))]
+    if n_pick:
+        L.append('ค้นหาเจอหลายตัว: เลือกไว้แล้ว %d รายการ' % n_pick)
+    L.append('')
+    if miss:
+        L.append('① สร้าง Item ใหม่ %d ตัว (ตัวที่ค้นไม่เจอ):' % len(miss))
+        for r in miss:
+            note = str(r.get('notes') or '').lstrip('✗ ').strip()
+            L.append('   · %s  (ItemKind %s)%s' % (str(r.get('name') or '')[:46], r.get('kind') or '-',
+                                                  ('  — ' + note) if note else ''))
+            if 'deep' in note.lower():
+                L.append('     ⚠ เว็บมี ItemKind นี้อยู่ แต่ระยะเวลา/แลกเปลี่ยน/จำนวน ไม่ตรง — ดูให้ชัวร์ว่าต้องสร้างใหม่จริง')
+        L.append('   ' + ('ใส่รูปจาก Google Drive ให้ก่อนสร้าง' if drive_on else 'ไม่ใส่รูปจาก Drive (ไม่มีลิงก์โฟลเดอร์)'))
+    else:
+        L.append('① ไม่ต้องสร้าง Item — ค้นหาเจอครบทุกตัว')
+    L.append('② สร้าง Bundle จากชีทชุดเดิม (เติม Aztek Item Id จากผลค้นหา + ไอเทมที่เพิ่งสร้าง)')
+    L.append('   หน้านำเข้า Bundle ไม่มีจุดต้องดู = กดใช้ข้อมูลให้เอง · มีจุดต้องดู = หยุดรอให้ตรวจ')
+    L.append('')
+    L.append('⚠ กดเริ่มแล้วจะสร้างของจริงบนเว็บ (เปิดโหมด “กดปุ่มสร้างจริง” ให้ทั้ง 2 แท็บ)')
+    L.append('ระหว่างทางเจอปัญหาจะหยุดถามก่อน · กด ■ หยุดออโต้ ได้ตลอด')
+    return '\n'.join(L), len(miss)
+
+
+def auto_confirm(app, title, text, ok_text='เริ่มสร้างเลย'):
+    top = tk.Toplevel(app.root)
+    top.title(title)
+    top.configure(bg=C['bg'])
+    top.transient(app.root)
+    top.geometry('760x520')
+    box = {'v': False}
+    tk.Label(top, text=title, bg=C['bg'], fg=C['fg'], font=('Segoe UI', 12, 'bold')).pack(anchor='w', padx=16, pady=(14, 6))
+    bar = tk.Frame(top, bg=C['bg'])
+    bar.pack(fill='x', side='bottom', padx=16, pady=(6, 14))
+    tx = scrolledtext.ScrolledText(top, bg=C['input'], fg=C['fg'], font=('Segoe UI', 10), bd=0, wrap='word')
+    tx.pack(fill='both', expand=True, padx=16)
+    tx.insert('1.0', text)
+    tx.config(state='disabled')
+
+    def ok():
+        box['v'] = True
+        top.destroy()
+    app._btn(bar, ok_text, ok, primary=True).pack(side='right', ipadx=14, ipady=4)
+    app._btn(bar, 'ยกเลิก', top.destroy).pack(side='right', padx=(0, 8), ipadx=12, ipady=4)
+    top.protocol('WM_DELETE_WINDOW', top.destroy)
+    try:
+        top.grab_set()
+    except Exception:
+        pass
+    top.wait_window()
+    return box['v']
+
+
+class AutoRun:
+    """ขั้นตอนออโต้ทั้งหมด — วิ่งบนเธรดหลัก (after) · งาน Chrome ใช้ปุ่มเดิมของแต่ละแท็บ"""
+
+    def __init__(self, app, sid, url):
+        self.app, self.sid, self.url = app, sid, url
+        self.stop = False
+        self.stage = ''
+        self.path = ''
+        self.sheets = []
+        self.expect = 0
+        self.made0 = len(getattr(app, 'made_items', []) or [])
+        self.bund0 = len(getattr(app, 'made', []) or [])
+        self.n_create = 0
+
+    # ---- ทั่วไป ----
+    def log(self, t, kind='STEP'):
+        self.app.log('🚀 ออโต้: ' + t, kind)
+
+    def status(self, t, fg=None):
+        try:
+            self.app._auto['lbl'].config(text=t, fg=fg or C['fg'])
+        except Exception:
+            pass
+
+    def after(self, ms, fn):
+        self.app.root.after(ms, lambda: self._safe(fn))
+
+    def _safe(self, fn):
+        if AUTO.get('run') is not self:
+            return
+        if self.stop:
+            return self.end('หยุดแล้ว (กด ■ หยุดออโต้)', 'WARN')
+        try:
+            fn()
+        except Exception as ex:
+            self.app.log(traceback.format_exc(), 'ERR')
+            self.end('ผิดพลาด: %s' % str(ex)[:160], 'ERR')
+
+    def wait(self, done, then, ms=700):
+        def tick():
+            if done():
+                then()
+            else:
+                self.after(ms, tick)
+        self.after(ms, tick)
+
+    def end(self, msg, kind='WARN', popup=True):
+        if AUTO.get('run') is not self:
+            return
+        AUTO['run'] = None
+        self.stage = ''
+        self.log(msg, kind)
+        self.status(('✓ ' if kind == 'OK' else '■ ') + msg, C['ok'] if kind == 'OK' else (C['err'] if kind == 'ERR' else C['warn']))
+        auto_buttons(self.app, False)
+        do0 = getattr(self, 'do0', None)
+        if do0 is not None:
+            try:
+                self.app.cv_do.set(do0[0])
+                self.app._c_do_changed()
+                self.app.bv_do.set(do0[1])
+                self.app._b_do_changed()
+            except Exception:
+                pass
+        if popup and kind in ('ERR', 'WARN'):
+            try:
+                (messagebox.showerror if kind == 'ERR' else messagebox.showwarning)('ออโต้หยุด', msg + '\n\nดูรายละเอียดในแท็บ Log')
+            except Exception:
+                pass
+
+    def ask(self, msg):
+        return messagebox.askyesno('ออโต้ — ไปต่อไหม?', msg)
+
+    # ---- ① โหลดชีท ----
+    def start(self):
+        self.stage = 'sheet'
+        self.status('1/4 โหลดชีทจาก Google…')
+        self.log('เริ่ม — โหลดชีทจากลิงก์ (Chrome ของเครื่องมือ)', 'STEP')
+        self.app.c_running = True                 # Chrome ของเครื่องมือกำลังใช้อยู่ — กันงานอื่นเปิดซ้อน
+        q = queue.Queue()
+        threading.Thread(target=auto_sheet_thread, args=(self.app, self.sid, q), daemon=True).start()
+        self.after(200, lambda: self.poll_sheet(q))
+
+    def poll_sheet(self, q):
+        try:
+            while True:
+                it = q.get_nowait()
+                if it[0] == 'log':
+                    self.app.log(it[1], it[2])
+                elif it[0] == 'done':
+                    return self.sheet_done(it[1])
+        except queue.Empty:
+            pass
+        self.after(250, lambda: self.poll_sheet(q))
+
+    def sheet_done(self, res):
+        if res['err'] or not res['path']:
+            return self.end('โหลดชีทไม่สำเร็จ: %s' % (res['err'] or '?'), 'ERR')
+        self.path = res['path']
+        self.log('โหลดชีทแล้ว → %s' % os.path.basename(self.path), 'OK')
+        self.pick()
+
+    # ---- ② เลือกชีท + ค้นหา (ปุ่มเดิมของแท็บค้นหา) ----
+    def pick(self):
+        app = self.app
+        self.stage = 'pick'
+        self.status('2/4 เลือกชีทที่จะใช้…')
+        old = app.imported
+        with _AutoPatch(filedialog, 'askopenfilename', lambda *a, **k: self.path):
+            app.pick_file()
+        src = (LINK.get('src') or {}).get('search') or {}
+        if app.imported is old or src.get('path') != self.path:
+            return self.end('ยกเลิกตอนเลือกชีท', 'INFO')
+        self.sheets = list(src.get('sheets') or [])
+        self.search()
+
+    def search(self):
+        app = self.app
+        self.stage = 'search'
+        self.status('2/4 ค้นหาไอเทมบนเว็บ…')
+        try:
+            app.tree.selection_remove(*app.tree.selection())
+        except Exception:
+            pass
+        orig = app.start
+
+        def rec(criteria):
+            self.expect = len(criteria)
+            return orig(criteria)
+        with _AutoPatch(app, 'start', rec):
+            app.run_multi()
+        try:
+            del app.start                          # คืนเมธอดเดิมของคลาส (ไม่ทิ้งของชั่วคราวไว้ในตัวแอป)
+        except Exception:
+            pass
+        if not app.running:
+            return self.end('ไม่ได้เริ่มค้นหา (ยกเลิกตอนตรวจก่อนเริ่ม)', 'INFO')
+        self.wait(lambda: not app.running, self.search_done, 800)
+
+    def search_done(self):
+        app = self.app
+        if app.cancel:
+            return self.end('ยกเลิกการค้นหา', 'WARN')
+        res = list(app.results)
+        if not res:
+            return self.end('ค้นหาไม่ได้ผลอะไรเลย — ดู Log', 'ERR')
+        got = {r.get('seq') for r in res}
+        if self.expect and len(got) < self.expect:
+            if not self.ask('ค้นหาได้ผลแค่ %d จาก %d รายการ (น่าจะมีข้อผิดพลาดกลางทาง — ดู Log)\n\n'
+                            'ไปต่อไหม? ตัวที่ไม่มีผลจะไม่ถูกสร้าง และ Bundle ที่ใช้ตัวนั้นจะหยุดให้ดู'
+                            % (len(got), self.expect)):
+                return self.end('หยุดหลังค้นหา (ค้นหาไม่ครบ)', 'WARN', popup=False)
+        if not link_dup_step(app):               # เจอหลายตัว = เลือกตอนนี้เลย (ทีหลังไม่ถามซ้ำ)
+            return self.end('ยกเลิกตอนเลือกไอเทมที่ค้นหาเจอหลายตัว', 'INFO')
+        self.confirm()
+
+    # ---- หยุดให้ดูสรุป 1 ครั้ง ----
+    def confirm(self):
+        app = self.app
+        drive_on = bool(drive_folder_id((getattr(app, 'prefs', None) or {}).get(DRIVE_PIC_PREF) or ''))
+        n_pick = len(getattr(app, 'link_pick', None) or {})
+        text, n = auto_summary(list(app.results), self.sheets, drive_on, n_pick)
+        self.status('รอยืนยันสรุปก่อนสร้าง…', C['warn'])
+        if not auto_confirm(app, '🚀 สรุปก่อนสร้าง', text):
+            return self.end('ยกเลิกที่หน้าสรุป (ยังไม่ได้สร้างอะไร)', 'INFO')
+        self.do0 = (bool(app.cv_do.get()), bool(app.bv_do.get()))   # จบออโต้แล้วคืนค่าเดิม
+        app.cv_do.set(True)
+        app._c_do_changed()
+        app.bv_do.set(True)
+        app._b_do_changed()
+        self.log('ยืนยันแล้ว — สร้าง Item %d ตัว แล้วสร้าง Bundle' % n, 'STEP')
+        self.queue_items()
+
+    # ---- ③ ตัวที่ไม่เจอ → คิวสร้าง Item → รูปจาก Drive → สร้าง ----
+    def queue_items(self):
+        app = self.app
+        if not any(r.get('miss') for r in app.results):
+            self.log('ค้นหาเจอครบ — ข้ามขั้นสร้าง Item', 'INFO')
+            return self.bundle()
+        try:
+            app.tree.selection_remove(*app.tree.selection())
+        except Exception:
+            pass
+        n0 = len(app.cq)
+        with auto_yes(app, ('ส่งเข้าคิว',)):
+            app.miss_to_queue()
+        if len(app.cq) <= n0:
+            return self.end('ส่งตัวที่ไม่เจอเข้าคิวสร้าง Item ไม่ได้ — ดู Log', 'ERR')
+        self.n_create = len(app.cq)
+        self.drive()
+
+    def drive(self):
+        app = self.app
+        todo = [d for d in app.cq if not d.get('img') and not d.get('img_off')]
+        fid = drive_folder_id((getattr(app, 'prefs', None) or {}).get(DRIVE_PIC_PREF) or '')
+        if not todo:
+            return self.create()
+        if not fid:
+            self.log('ไม่มีลิงก์โฟลเดอร์ Drive — ข้ามขั้นใส่รูป', 'WARN')
+            return self.create()
+        keyed = [d for d in todo if drive_pic_stem(d)]
+        nokey = [d for d in todo if not drive_pic_stem(d)]
+        if not keyed:
+            return self.pics_check([], [], nokey, '')
+        self.stage = 'drive'
+        self.status('3/4 ใส่รูปจาก Google Drive…')
+        app.c_running = True
+        app._drive_cancel = False
+        app.log('☁ ใส่รูปจาก Drive: หา %d แถวที่ยังไม่มีรูป' % len(keyed), 'STEP')
+        q = queue.Queue()
+        threading.Thread(target=drive_pics_thread, args=(app, fid, keyed, q), daemon=True).start()
+        self.after(200, lambda: self.poll_drive(q, keyed, nokey))
+
+    def poll_drive(self, q, keyed, nokey):
+        try:
+            while True:
+                it = q.get_nowait()
+                if it[0] == 'log':
+                    self.app.log(it[1], it[2])
+                elif it[0] == 'prog':
+                    self.app.set_progress(*it[1:])
+                elif it[0] == 'done':
+                    return self.drive_done(it[1], keyed, nokey)
+        except queue.Empty:
+            pass
+        self.after(250, lambda: self.poll_drive(q, keyed, nokey))
+
+    def drive_done(self, res, keyed, nokey):
+        app = self.app
+        if res['err'] and not res['got']:
+            app.log('☁ ใส่รูปจาก Drive ไม่สำเร็จ: %s' % res['err'], 'ERR')
+            if not self.ask('ใส่รูปจาก Drive ไม่สำเร็จ:\n%s\n\nสร้างไอเทมต่อโดยไม่มีรูปไหม?\n'
+                            '(ไม่ = หยุดไว้ก่อน ใส่รูปเองแล้วกดสร้าง Item / ส่งไปสร้าง Bundle ต่อเองได้)' % res['err']):
+                return self.end('หยุดให้ใส่รูปเอง (ไอเทมอยู่ในคิวสร้าง Item แล้ว)', 'WARN', popup=False)
+            return self.create()
+        put, miss, nk = drive_fill_queue(keyed, res['got'])
+        try:
+            app._c_refresh()
+        except Exception:
+            pass
+        app.log('☁ ใส่รูปจาก Drive: ใส่แล้ว %d แถว · ไม่เจอรูป %d · ไม่มีเลขตำแหน่ง %d (ค้นเจอบน Drive %d ไฟล์)'
+                % (len(put), len(miss), len(nk) + len(nokey), res['idx']), 'OK' if put and not miss else 'WARN')
+        self.pics_check(put, miss, nk + nokey, res['err'])
+
+    def pics_check(self, put, miss, nokey, err):
+        app = self.app
+        for d in miss:
+            app.log('   ⚠ ไม่เจอรูป %s.png — %s (ItemKind %s)' % (drive_pic_stem(d), d.get('name', ''), d.get('kind', '')), 'WARN')
+        for d in nokey:
+            app.log('   ⚠ ไม่รู้ชื่อรูป (ไม่มี fdPosition/fdItemKind) — %s (ItemKind %s)' % (d.get('name', ''), d.get('kind', '')), 'WARN')
+        if not miss and not nokey and not err:
+            return self.create()
+        msg = 'ใส่รูปให้แล้ว %d แถว' % len(put)
+        if miss:
+            msg += '\n\n⚠ ไม่เจอรูปบน Drive %d แถว:\n%s' % (len(miss), '\n'.join(
+                '· %s.png  (%s)' % (drive_pic_stem(d), d.get('name', '')[:30]) for d in miss[:8]))
+            if len(miss) > 8:
+                msg += '\n· … อีก %d แถว (ดูใน Log)' % (len(miss) - 8)
+        if nokey:
+            msg += '\n\n⚠ ไม่รู้ชื่อรูป %d แถว (ไม่มี fdPosition / fdItemKind)' % len(nokey)
+        if err:
+            msg += '\n\n(หยุดกลางทาง: %s)' % err
+        msg += ('\n\nสร้างไอเทมต่อเลยไหม? ตัวที่ไม่มีรูปจะสร้างโดยไม่มีรูป\n'
+                '(ไม่ = หยุดไว้ก่อน ใส่รูปเองในหน้าแก้ไข แล้วกดสร้าง Item / ส่งไปสร้าง Bundle ต่อเองได้)')
+        if not self.ask(msg):
+            return self.end('หยุดให้ใส่รูปเอง (ไอเทมอยู่ในคิวสร้าง Item แล้ว)', 'WARN', popup=False)
+        self.create()
+
+    def create(self):
+        app = self.app
+        self.stage = 'create'
+        self.status('3/4 สร้าง Item %d ตัว…' % len(app.cq))
+        self.made0 = len(app.made_items)
+        with auto_yes(app, ('ยืนยัน',)):
+            app.c_start()
+        if not app.c_running:
+            return self.end('ไม่ได้เริ่มสร้าง Item (ยกเลิกตอนตรวจก่อนเริ่ม) — ไอเทมอยู่ในคิวแล้ว', 'INFO')
+        self.wait(lambda: not app.c_running, self.create_done, 800)
+
+    def create_done(self):
+        app = self.app
+        if app.c_cancel:
+            return self.end('ยกเลิกการสร้าง Item', 'WARN')
+        new = app.made_items[self.made0:]
+        ok = [m for m in new if m.get('ok') and str(m.get('id') or '-') not in ('', '-')]
+        want = len(app.cq)
+        if len(ok) < want:
+            if not self.ask('สร้าง Item ได้เลข %d จาก %d ตัว (ดูแถวแดงในแท็บสร้าง Item / Log)\n\n'
+                            'ไปสร้าง Bundle ต่อไหม? Bundle ที่ขาดไอเทมจะหยุดให้ดูที่หน้านำเข้า' % (len(ok), want)):
+                return self.end('หยุดหลังสร้าง Item (สร้างไม่ครบ)', 'WARN', popup=False)
+        self.log('สร้าง Item ได้เลข %d ตัว' % len(ok), 'OK' if len(ok) >= want else 'WARN')
+        self.bundle()
+
+    # ---- ④ สร้าง Bundle (ปุ่มส่งไปสร้าง Bundle + ปุ่มสร้างเดิม) ----
+    def bundle(self):
+        app = self.app
+        self.stage = 'bundle_dlg'
+        self.status('4/4 อ่าน Bundle จากชีท…')
+        n0 = len(app.bq)
+        g = globals()
+        dup0 = g['link_dup_step']
+        g['link_dup_step'] = lambda a: True          # เลือกตัวที่ค้นหาเจอหลายตัวไว้แล้วหลังค้นหา (ไม่ถามซ้ำ)
+        try:
+            link_send(app, 'bundle', 'search')
+        finally:
+            g['link_dup_step'] = dup0
+        self.stage = 'bundle'
+        if len(app.bq) <= n0:
+            return self.end('ไม่ได้นำเข้า Bundle (กดยกเลิกที่หน้านำเข้า หรือไม่เจอบันเดิล)', 'WARN')
+        self.status('4/4 สร้าง Bundle %d อัน…' % (len(app.bq) - n0))
+        with auto_yes(app, ('ยืนยัน',)):
+            app.b_start()
+        if not app.b_running:
+            return self.end('ไม่ได้เริ่มสร้าง Bundle (ยกเลิกตอนตรวจก่อนเริ่ม) — บันเดิลอยู่ในแท็บสร้าง Bundle แล้ว', 'INFO')
+
+        def done():
+            return (not app.b_running) or (CHROME_HOLD.get('on') and CHROME_HOLD.get('what') == 'สร้าง Bundle')
+        self.wait(done, self.bundle_done, 800)
+
+    def bundle_done(self):
+        app = self.app
+        if app.b_cancel:
+            return self.end('ยกเลิกการสร้าง Bundle', 'WARN')
+        nb = len(app.made) - self.bund0
+        ni = len(app.made_items) - self.made0 if self.n_create else 0
+        self.end('เสร็จครบ — สร้าง Item %d · สร้าง Bundle %d (ดูผลในแท็บสร้าง Item / สร้าง Bundle)' % (ni, nb), 'OK')
+
+
+def auto_bundle_check(dlg):
+    """หน้านำเข้า Bundle ตอนออโต้: ไม่มีจุดต้องดู = กด “ใช้ข้อมูลนี้” ให้ · มี = หยุดรอให้คนตรวจ (ดูครั้งเดียว)"""
+    run = AUTO.get('run')
+    if run is None or run.stage != 'bundle_dlg' or getattr(dlg, '_auto_seen', False):
+        return
+    try:
+        if not dlg.top.winfo_exists():
+            return
+    except Exception:
+        return
+    cl = lambda s: clean_text(s) or str(s or '')
+    names = {cl(s[0]) for s in (getattr(dlg, 'sheets', None) or [])}
+    want = {cl(s) for s in run.sheets} & names
+    why = []
+    if not want or {cl(s) for s in dlg._selected()} != want:
+        dlg._auto_try = getattr(dlg, '_auto_try', 0) + 1
+        if dlg._auto_try < 4:                      # ยังเลือกชีทไม่ครบ — ดูใหม่อีกทีสักพัก
+            try:
+                dlg.top.after(1500, lambda: auto_bundle_check(dlg))
+            except Exception:
+                pass
+            return
+        why.append('ชีทที่เลือกในหน้านี้ไม่ตรงกับตอนค้นหา')
+    dlg._auto_seen = True
+    if not dlg.bundles:
+        why.append('ไม่เจอบันเดิลในชีทที่เลือก')
+    nid = sum(1 for b in dlg.bundles for it in b.get('items', []) if not str(it.get('id') or '').strip())
+    if nid:
+        why.append('ไอเทมไม่มี Aztek Item Id %d แถว' % nid)
+    if dlg.warns:
+        why.append('%d จุดที่ต้องดู เช่น %s' % (len(dlg.warns), str(dlg.warns[0])[:80]))
+    try:
+        if str(dlg.split_hint.cget('text')).strip() and dlg.v_split.get() == dlg.SPLIT_NORMAL:
+            why.append('ชีทมีคอลัมน์ Day — เลือกรูปแบบบันเดิ้ลเอง')
+    except Exception:
+        pass
+    if why:
+        run.log('หยุดรอที่หน้านำเข้า Bundle: %s — ตรวจแล้วกด “ใช้ข้อมูลนี้” เพื่อไปต่อ (ยกเลิก = หยุดออโต้)'
+                % ' · '.join(why), 'WARN')
+        run.status('รอตรวจหน้านำเข้า Bundle (กด ใช้ข้อมูลนี้ เพื่อไปต่อ)', C['warn'])
+        return
+    run.log('หน้านำเข้า Bundle: %d บันเดิล ไม่มีจุดต้องดู → กด “ใช้ข้อมูลนี้” ให้' % len(dlg.bundles), 'INFO')
+    dlg._ok()
+
+
+def auto_buttons(app, running):
+    w = getattr(app, '_auto', None) or {}
+    try:
+        w['go'].config(state='disabled' if running else 'normal')
+        w['stop'].config(state='normal' if running else 'disabled')
+    except Exception:
+        pass
+
+
+def auto_start(app):
+    if AUTO.get('run') is not None:
+        return messagebox.showinfo('ออโต้', 'ออโต้กำลังทำงานอยู่')
+    if chrome_held_ask(app, lambda: auto_start(app)):
+        return
+    if app.running or app.c_running or getattr(app, 'b_running', False) or getattr(app, 'w_running', False):
+        return messagebox.showinfo('กำลังทำงาน', 'มีงานอื่นใช้ Chrome อยู่ — รอให้เสร็จก่อนนะ')
+    if not XLSX_OK:
+        return messagebox.showerror('ออโต้', 'เครื่องนี้อ่านไฟล์ Excel ไม่ได้')
+    w = app._auto
+    url = w['e'].get().strip()
+    sid = gsheet_id(url)
+    if not sid:
+        w['lbl'].config(text='ลิงก์ไม่ใช่ Google Sheet (ต้องเป็นลิงก์ docs.google.com/spreadsheets/d/…)', fg=C['err'])
+        return
+    prefs = app.prefs
+    prefs[AUTO_PREF] = url
+    try:
+        save_prefs(prefs)
+    except Exception:
+        pass
+    if app.cq or app.bq:
+        if not messagebox.askyesno(
+                'เริ่มออโต้',
+                'คิวสร้าง Item มีค้างอยู่ %d รายการ · แท็บสร้าง Bundle มีค้างอยู่ %d อัน\n\n'
+                'ออโต้จะสร้างทุกอย่างที่อยู่ในคิว — ล้างของเดิมออกก่อนแล้วเริ่มไหม?\n'
+                '(ไม่ = ยังไม่เริ่ม)' % (len(app.cq), len(app.bq))):
+            return
+        app.cq = []
+        app._c_refresh()
+        app.bq = []
+        app._b_refresh()
+        app.log('🚀 ออโต้: ล้างคิวสร้าง Item / รายการ Bundle เดิมออกแล้ว', 'INFO')
+    if not drive_folder_id(prefs.get(DRIVE_PIC_PREF) or ''):
+        if not drive_pics_ask(app):
+            app.log('🚀 ออโต้: ไม่ได้ใส่ลิงก์โฟลเดอร์รูป Drive — จะข้ามขั้นใส่รูป', 'WARN')
+    run = AutoRun(app, sid, url)
+    AUTO['run'] = run
+    auto_buttons(app, True)
+    try:
+        app.nb.select(app.tab_log)
+    except Exception:
+        pass
+    app.log('=' * 46, 'STEP')
+    run.start()
+
+
+def auto_stop(app):
+    run = AUTO.get('run')
+    if run is None:
+        return
+    run.stop = True
+    st = run.stage
+    if st == 'search':
+        app.cancel = True
+    elif st == 'drive':
+        app._drive_cancel = True
+    elif st == 'create':
+        app.c_cancel = True
+    elif st == 'bundle':
+        app.b_cancel = True
+    run.log('กำลังหยุด… (งานที่ค้างอยู่จะหยุดหลังไอเทมที่ทำอยู่)', 'WARN')
+    if st in ('pick', 'bundle_dlg', ''):
+        run.end('หยุดแล้ว (กด ■ หยุดออโต้)', 'WARN', popup=False)
+
+
+def auto_ui(app):
+    """การ์ด 🚀 ออโต้ ในแท็บค้นหา ใต้การ์ด “ค้นหาหลายตัวจาก Excel”"""
+    p = app.tab_search
+    anchor = app.btn_multi.master.master
+    inner = app._card(p, '🚀 ออโต้จากลิงก์ชีท — ค้นหา → สร้าง Item (+รูปจาก Drive) → สร้าง Bundle')
+    try:
+        inner.master.pack_configure(after=anchor)
+    except Exception:
+        pass
+    tk.Label(inner, text='ลิงก์ Google Sheet', bg=C['bg'], fg=C['dim'],
+             font=('Segoe UI', 9)).grid(row=0, column=0, sticky='w')
+    e = app._entry(inner, 58)
+    e.insert(0, (getattr(app, 'prefs', None) or {}).get(AUTO_PREF) or '')
+    e.grid(row=0, column=1, sticky='we', padx=(8, 0), ipady=4)
+    go = app._btn(inner, '🚀  เริ่มออโต้', lambda: auto_start(app), primary=True)
+    go.grid(row=0, column=2, padx=(10, 0), ipadx=12, ipady=3)
+    st = app._btn(inner, '■  หยุดออโต้', lambda: auto_stop(app))
+    st.config(state='disabled', fg=C['err'])
+    st.grid(row=0, column=3, padx=(8, 0), ipadx=8, ipady=3)
+    lbl = tk.Label(inner, text='วางลิงก์ → เลือกชีท → ค้นหา → ดูสรุปแล้วกดยืนยัน 1 ครั้ง → สร้างให้จนจบ '
+                               '(เจอจุดต้องตัดสินใจจะหยุดถาม)', bg=C['bg'], fg=C['dim'],
+                   font=('Segoe UI', 9), anchor='w', justify='left')
+    lbl.grid(row=1, column=0, columnspan=4, sticky='w', pady=(6, 0))
+    inner.grid_columnconfigure(1, weight=1)
+    e.bind('<Return>', lambda ev: auto_start(app))
+    app._auto = {'e': e, 'go': go, 'stop': st, 'lbl': lbl}
+    return inner
+
+
+async def auto_finish_chrome(app, browser, what, headless=False):
+    """ตอนออโต้: ขั้นค้นหา / สร้าง Item เสร็จแล้วปิด Chrome ไปขั้นต่อเลย · นอกออโต้ = เหมือนเดิมทุกอย่าง"""
+    if AUTO.get('run') is not None and what in AUTO_QUIET:
+        try:
+            app.log('🚀 ออโต้: %s เสร็จ — ปิด Chrome แล้วไปขั้นต่อไป' % what, 'INFO')
+        except Exception:
+            pass
+        try:
+            await browser.close()
+        except Exception:
+            pass
+        return
+    return await _auto_fc0(app, browser, what, headless)
+
+
+def auto_install():
+    global finish_chrome, _auto_fc0
+    if getattr(App._build_ui, '_auto', False):
+        return
+    _auto_fc0 = finish_chrome
+    finish_chrome = auto_finish_chrome
+    b0 = App._build_ui
+
+    def build(self, *a, **k):
+        r = b0(self, *a, **k)
+        try:
+            auto_ui(self)
+        except Exception as ex:
+            try:
+                self.log('วางการ์ด 🚀 ออโต้ไม่ได้: %s' % str(ex)[:80], 'WARN')
+            except Exception:
+                pass
+        return r
+    build._auto = True
+    App._build_ui = build
+    s0 = LinkBundleImportDialog._show
+
+    def show(self, bs, ws, note):
+        s0(self, bs, ws, note)
+        if AUTO.get('run') is not None:
+            try:
+                self.top.after(500, lambda: auto_bundle_check(self))
+            except Exception:
+                pass
+    LinkBundleImportDialog._show = show
+
+
+auto_install()
 
 
 if __name__ == '__main__':
