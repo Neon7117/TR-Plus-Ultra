@@ -11,6 +11,7 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.13.1: แท็บค้นหา — ปุ่มออโต้ (🚀 เริ่ม / ⏸ พัก / ▶ ไปต่อ / ■ หยุด + ติ๊กพักทุกขั้น) ย้ายลงมาแถวล่าง ชิดซ้ายใต้ช่องลิงก์ (เดิมอยู่ขวาสุด ไกลจากช่องลิงก์มาก) · เอาการ์ด “ค้นหาทีละตัว” ออก (ไม่ได้ใช้ — ทีละตัวทำมือไวกว่า)
 V1.13.0: 🚀 ออโต้ — ⏸ พัก / ▶ ไปต่อ: พักเมื่อขั้นที่ทำอยู่จบ แล้วทำต่อจากเดิมได้ ไม่ต้องเริ่มใหม่ · ติ๊ก “พักให้ดูก่อนทุกขั้น” พักเองทุกหัวต่อขั้น · ตอนพักเปิด Chrome ค้างไว้ให้ตรวจ (กด ▶ จะปิดให้แล้วไปต่อ) · คิวสร้าง Item ติ๊ก ✓ รายแถวที่สร้างแล้ว — กดต่อไม่สร้างซ้ำ · ตรวจไอเทม: เลขไอเทมเดียวกันแต่ชื่อไม่ตรงกัน / ชื่อเดียวกันแต่คนละเลขไอเทม = ⛔ แดง และออโต้หยุดทันทีก่อนเริ่มสร้าง (เดิมเป็น ⚠ เหลืองแล้วไปต่อ)
 V1.12.2: สร้าง Item — ☁ ใส่รูปจาก Drive: ชื่อไฟล์เติม 0 นำหน้าให้ครบ 3 หลัก เช่น fdPosition 301 + fdItemKind 4 = all_301_004.png (เดิมค้น all_301_4.png เลยหาไม่เจอ) · fdItemKind 33 = 033 · ถ้าแบบเติม 0 ไม่เจอ จะลองแบบไม่เติมให้อัตโนมัติ (เผื่อไฟล์เก่า)
 V1.12.1: สร้าง Item — ☁ ใส่รูปจาก Drive ทำแบบในคลิป: เปิดลิงก์โฟลเดอร์ แล้วพิมพ์ all_<fdPosition>_<fdItemKind> ในช่องค้นหา Drive ทีละรูป เอาไฟล์ชื่อตรงเป๊ะแล้วโหลด (เดิมไล่อ่านรายชื่อทุกโฟลเดอร์ก่อน = ช้ามาก) · ชื่อซ้ำ = ใหม่สุดจากวันที่ในผลค้นหา · อ่านวันที่ไม่ได้ = โหลดมาเทียบ ไม่เหมือนกันเตือนให้ตรวจ
@@ -6589,18 +6590,7 @@ class App:
     def _build_search(self):
         p = self.tab_search
 
-        s1 = self._card(p, 'ค้นหาทีละตัว')
-        tk.Label(s1, text='ItemKind / Aztek Item Id', bg=C['bg'], fg=C['dim'],
-                 font=('Segoe UI', 9)).grid(row=0, column=0, sticky='w')
-        tk.Label(s1, text='ชื่อไอเทม (ไม่บังคับ)', bg=C['bg'], fg=C['dim'],
-                 font=('Segoe UI', 9)).grid(row=0, column=1, sticky='w', padx=(12, 0))
-        self.v_kind = self._entry(s1, 24)
-        self.v_kind.grid(row=1, column=0, sticky='w', ipady=4)
-        self.v_name = self._entry(s1, 34)
-        self.v_name.grid(row=1, column=1, sticky='w', padx=(12, 0), ipady=4)
-        self.btn_single = self._btn(s1, '🔍  ค้นหา', self.run_single, primary=True)
-        self.btn_single.grid(row=1, column=2, padx=(14, 0), ipadx=18, ipady=3)
-
+        # v1.13.1 เอาการ์ด “ค้นหาทีละตัว” ออก (ผู้ใช้ไม่ได้ใช้ — ทีละตัวทำมือไวกว่า)
         s2 = self._card(p, 'ค้นหาหลายตัวจาก Excel')
         self._btn(s2, '⬇  โหลด Template', self.download_template).grid(row=0, column=0, ipadx=10, ipady=4)
         self._btn(s2, '📂  เลือกไฟล์', self.pick_file).grid(row=0, column=1, padx=8, ipadx=10, ipady=4)
@@ -11845,15 +11835,6 @@ class App:
         self.log('พร้อมใช้งาน', 'OK')
 
     # ---------- run ----------
-    def run_single(self):
-        kind = self.v_kind.get().strip()
-        name = self.v_name.get().strip()
-        if not kind and not name:
-            return messagebox.showwarning('ค้นหา', 'กรอก ItemKind หรือชื่อไอเทมอย่างน้อยหนึ่งช่อง')
-        c = {'kind': kind, 'name': name}
-        c.update(self.deep_criteria())
-        self.start([c])
-
     def run_multi(self):
         if not self.imported:
             return
@@ -11879,7 +11860,6 @@ class App:
         self.running = True
         self.cancel = False
         self.clear_results()
-        self.btn_single.config(state='disabled')
         self.btn_multi.config(state='disabled')
         self.btn_cancel.config(state='normal')
         self.nb.select(self.tab_log)
@@ -11903,7 +11883,6 @@ class App:
             self.running = False
 
             def _rst():
-                self.btn_single.config(state='normal')
                 self.btn_multi.config(state='normal' if self.imported else 'disabled')
                 self.btn_cancel.config(state='disabled')
                 if self.results:
@@ -28740,28 +28719,31 @@ def auto_ui(app):
     e = app._entry(inner, 58)
     e.insert(0, (getattr(app, 'prefs', None) or {}).get(AUTO_PREF) or '')
     e.grid(row=0, column=1, sticky='we', padx=(8, 0), ipady=4)
-    go = app._btn(inner, '🚀  เริ่มออโต้', lambda: auto_start(app), primary=True)
-    go.grid(row=0, column=2, padx=(10, 0), ipadx=12, ipady=3)
-    pa = app._btn(inner, '⏸  พัก', lambda: auto_pause(app))      # v1.13.0
+    # v1.13.1 ปุ่มย้ายลงมาแถวล่าง ชิดซ้ายใต้ช่องลิงก์ (เดิมอยู่ขวาสุด ไกลจากช่องลิงก์มาก)
+    bar = tk.Frame(inner, bg=C['bg'])
+    bar.grid(row=1, column=0, columnspan=2, sticky='w', pady=(8, 0))
+    go = app._btn(bar, '🚀  เริ่มออโต้', lambda: auto_start(app), primary=True)
+    go.pack(side='left', ipadx=12, ipady=3)
+    pa = app._btn(bar, '⏸  พัก', lambda: auto_pause(app))      # v1.13.0
     pa.config(state='disabled', fg=C['warn'])
-    pa.grid(row=0, column=3, padx=(8, 0), ipadx=8, ipady=3)
-    co = app._btn(inner, '▶  ไปต่อ', lambda: auto_resume(app))     # v1.13.0
+    pa.pack(side='left', padx=(8, 0), ipadx=8, ipady=3)
+    co = app._btn(bar, '▶  ไปต่อ', lambda: auto_resume(app))     # v1.13.0
     co.config(state='disabled', fg=C['ok'])
-    co.grid(row=0, column=4, padx=(6, 0), ipadx=8, ipady=3)
-    st = app._btn(inner, '■  หยุดออโต้', lambda: auto_stop(app))
+    co.pack(side='left', padx=(6, 0), ipadx=8, ipady=3)
+    st = app._btn(bar, '■  หยุดออโต้', lambda: auto_stop(app))
     st.config(state='disabled', fg=C['err'])
-    st.grid(row=0, column=5, padx=(8, 0), ipadx=8, ipady=3)
+    st.pack(side='left', padx=(8, 0), ipadx=8, ipady=3)
     hv = tk.BooleanVar(value=bool((getattr(app, 'prefs', None) or {}).get(AUTO_HOLD_PREF)))
     AUTO['hold'] = bool(hv.get())
-    hc = tk.Checkbutton(inner, text='พักให้ดูก่อนทุกขั้น', variable=hv,
+    hc = tk.Checkbutton(bar, text='พักให้ดูก่อนทุกขั้น', variable=hv,
                         command=lambda: auto_hold_changed(app), bg=C['bg'], fg=C['warn'],
                         selectcolor=C['bg'], activebackground=C['bg'], activeforeground=C['warn'],
                         font=('Segoe UI', 9))
-    hc.grid(row=1, column=0, columnspan=2, sticky='w', pady=(6, 0))
+    hc.pack(side='left', padx=(16, 0))
     lbl = tk.Label(inner, text='วางลิงก์ → เลือกชีท → ค้นหา → ดูสรุปแล้วกดยืนยัน 1 ครั้ง → สร้างให้จนจบ '
                                '·  ⏸ พัก = พักเมื่อขั้นที่ทำอยู่จบ แล้วกด ▶ ไปต่อ (ไม่ต้องเริ่มใหม่)',
                    bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w', justify='left')
-    lbl.grid(row=2, column=0, columnspan=6, sticky='w', pady=(4, 0))
+    lbl.grid(row=2, column=0, columnspan=2, sticky='w', pady=(6, 0))
     inner.grid_columnconfigure(1, weight=1)
     e.bind('<Return>', lambda ev: auto_start(app))
     app._auto = {'e': e, 'go': go, 'stop': st, 'lbl': lbl,
