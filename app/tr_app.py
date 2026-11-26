@@ -11,6 +11,8 @@ V1.5.10: สร้าง Bundle (1 ไอเทม 1 บันเดิ้ล) �
 V1.5.11: สร้าง Bundle — เน้นถูก: รอตัวเลือก Tier โหลด · ของไม่ครบไม่กดสร้าง · ไม่สำเร็จห้ามข้าม (ลองใหม่/ถามคน) · รอเลข Bundle นานขึ้น · ชื่อไอเทมในโหมดแยก
 V1.6.0 : แท็บใหม่ 🗓 Check in Booster — สร้าง Premium Check In จากชีท (Slug · Tag · Bundle Free/Premium/Instant · รูปตามไอเทม)
 V1.6.1 : สร้าง Item — ชื่อมีคำว่า “ซ่อมแซม” ติ๊ก “ซ่อมแซมได้” ให้ · หน้าแก้ไขมีติ๊ก ซ่อมแซมได้
+V1.13.0: 🚀 ออโต้ — ⏸ พัก / ▶ ไปต่อ: พักเมื่อขั้นที่ทำอยู่จบ แล้วทำต่อจากเดิมได้ ไม่ต้องเริ่มใหม่ · ติ๊ก “พักให้ดูก่อนทุกขั้น” พักเองทุกหัวต่อขั้น · ตอนพักเปิด Chrome ค้างไว้ให้ตรวจ (กด ▶ จะปิดให้แล้วไปต่อ) · คิวสร้าง Item ติ๊ก ✓ รายแถวที่สร้างแล้ว — กดต่อไม่สร้างซ้ำ · ตรวจไอเทม: เลขไอเทมเดียวกันแต่ชื่อไม่ตรงกัน / ชื่อเดียวกันแต่คนละเลขไอเทม = ⛔ แดง และออโต้หยุดทันทีก่อนเริ่มสร้าง (เดิมเป็น ⚠ เหลืองแล้วไปต่อ)
+V1.12.2: สร้าง Item — ☁ ใส่รูปจาก Drive: ชื่อไฟล์เติม 0 นำหน้าให้ครบ 3 หลัก เช่น fdPosition 301 + fdItemKind 4 = all_301_004.png (เดิมค้น all_301_4.png เลยหาไม่เจอ) · fdItemKind 33 = 033 · ถ้าแบบเติม 0 ไม่เจอ จะลองแบบไม่เติมให้อัตโนมัติ (เผื่อไฟล์เก่า)
 V1.12.1: สร้าง Item — ☁ ใส่รูปจาก Drive ทำแบบในคลิป: เปิดลิงก์โฟลเดอร์ แล้วพิมพ์ all_<fdPosition>_<fdItemKind> ในช่องค้นหา Drive ทีละรูป เอาไฟล์ชื่อตรงเป๊ะแล้วโหลด (เดิมไล่อ่านรายชื่อทุกโฟลเดอร์ก่อน = ช้ามาก) · ชื่อซ้ำ = ใหม่สุดจากวันที่ในผลค้นหา · อ่านวันที่ไม่ได้ = โหลดมาเทียบ ไม่เหมือนกันเตือนให้ตรวจ
 V1.12.0: แท็บค้นหา — 🚀 ออโต้จากลิงก์ชีท: วางลิงก์ Google Sheet (ไม่ต้องโหลดไฟล์) → เลือกชีทครั้งเดียว → ค้นหา → สรุปให้ยืนยัน 1 ครั้ง → ตัวที่ไม่เจอเข้าคิว + ใส่รูปจาก Drive + สร้าง Item → ส่งไปสร้าง Bundle (ไม่มีจุดต้องดู = กดใช้ข้อมูลให้) → สร้าง Bundle · เจอปัญหา = หยุดถามแล้วไปต่อ
 V1.11.6: สร้าง Item — ☁ ใส่รูปจาก Drive: เปิดโฟลเดอร์รูปบน Google Drive ใน Chrome ของเครื่องมือ (ล็อกอินบัญชีบริษัทครั้งแรกครั้งเดียว) หารูปชื่อ all_<fdPosition>_<fdItemKind> ทุกโฟลเดอร์ย่อย โหลดมาใส่ให้ทุกแถวที่ยังไม่มีรูป · ชื่อซ้ำ = ใช้ไฟล์ใหม่สุด · ไม่เจอ = ปล่อยว่าง + เตือน · อ่าน fdPosition / fdItemKind จากชีทเก็บไว้กับแถว
@@ -3366,10 +3368,45 @@ def master_dup_check(rows, dups):
                                            'แถวนั้นจะไม่ถูกสร้าง/ค้นหา' % (s_['kind'], fmt(s_['dur']),
                                                                          fmt(r.get('dur')))))
             elif nm(s_['raw']).replace('gift', '') != nm(r.get('raw')).replace('gift', ''):
-                chk_add(r, chk_new('warn', 'fdItemNum %s มีอีกแถวชื่อ “%s” — ใช้ชื่อแถวนี้'
-                                   % (s_['kind'], str(s_['raw'])[:40])))
+                # v1.13.0 ยกเป็น ⛔ (เดิม ⚠) — ชีทให้ชื่อคนละชื่อกับ fdItemNum เดียวกัน
+                # เครื่องมือใช้ชื่อแถวแรก = อีกแถวจะได้ชื่อผิดไปเลย ต้องแก้ชีทก่อน
+                chk_add(r, chk_new('stop', 'fdItemNum %s มีอีกแถวชื่อ “%s” (แถวนี้ “%s”) — '
+                                           'เลขไอเทมเดียวกันแต่ชื่อไม่ตรงกัน เครื่องมือใช้ชื่อแถวนี้ '
+                                           'อีกแถวจะได้ชื่อผิด → แก้ในชีทก่อน'
+                                   % (s_['kind'], str(s_['raw'])[:40], str(r.get('raw') or '')[:40])))
             break
     master_dur_split_check(rows)
+    master_name_clash_check(rows)
+
+
+def master_name_clash_check(rows):
+    """v1.13.0 ชื่อเดียวกัน (ตัด Gift / ช่องว่าง / N ชิ้น ออกแล้ว) แต่ fdItemNum คนละเลข
+    = ชีทวางชื่อผิดแถว (เคสจริง: 126811 กับ 126805 ได้ชื่อ “ตรากระต่ายอวกาศ” เหมือนกัน)
+    → ⛔ ทุกแถวในกลุ่ม ให้หยุดไปแก้ชีทก่อน · ไม่เปลี่ยนค่าให้เอง"""
+    def key(r):
+        t = re.sub(r'\s+', '', str(r.get('raw') or r.get('name') or '')).lower()
+        t = t.replace('(gift)', '').replace('gift', '').replace('(storage)', '').replace('storage', '')
+        t = re.sub(r'\d+(?:ชิ้น|อัน)$', '', t)
+        t = re.sub(r'\(\d+วัน\)$', '', t)
+        return t
+    grp = {}
+    for r in rows:
+        k = key(r)
+        if k:
+            grp.setdefault(k, []).append(r)
+    for k, rs in grp.items():
+        kinds = []
+        for r in rs:
+            kk = str(r.get('kind') or '').strip()
+            if kk and kk not in kinds:
+                kinds.append(kk)
+        if len(kinds) < 2:
+            continue
+        for r in rs:
+            oth = ', '.join(x for x in kinds if x != str(r.get('kind') or '').strip())
+            chk_add(r, chk_new('stop', 'ชื่อนี้ซ้ำกับ fdItemNum %s (แถวนี้ %s) — ชื่อเดียวกันแต่เลขไอเทมคนละเลข '
+                                       'น่าจะวางชื่อผิดแถวในชีท → เช็กชีทก่อน'
+                               % (oth, str(r.get('kind') or '').strip())))
 
 
 def master_dur_split_check(rows):
@@ -6898,16 +6935,23 @@ class App:
         # คิดใหม่ทุกครั้ง — แก้ ItemKind หรือชื่อแล้วคำเตือนจะหายไปเอง
         nwarn = mark_suspects(self.cq)
         self.c_tree.tag_configure('stop', background=C['row_bad_bg'], foreground=C['row_bad_fg'])
+        self.c_tree.tag_configure('made', foreground=C['ok'])        # v1.13.0 แถวที่สร้างไปแล้ว
         nstop = sum(1 for d in self.cq if chk_tag(d, c_dyn_checks(d)) == 'stop')
         self.c_tree.delete(*self.c_tree.get_children())
         for i, d in enumerate(self.cq, 1):
             tg = chk_tag(d, c_dyn_checks(d))
+            if d.get('made'):
+                tg = 'made'                            # v1.13.0 สร้างไปแล้ว — ไม่ทำซ้ำ
             self.c_tree.insert('', 'end', tags=(tg,) if tg else (), values=(
-                i, '⛔' if tg == 'stop' else ('⚠' if d.get('warn') else ''), d['kind'], d['name'], d['type'],
+                i, '✓' if d.get('made') else ('⛔' if tg == 'stop' else ('⚠' if d.get('warn') else '')),
+                d['kind'], d['name'], d['type'],
                 d['price'] or '—', (d['dur'] + ' วัน') if d['dur'] else 'ถาวร',
                 d['qty'] or '—', 'ได้' if d['trade'] else 'ไม่ได้',
                 self._c_img_cell(d)))
-        self.c_count.config(text=('คิวว่าง' if not self.cq else f'ในคิว {len(self.cq)} ไอเทม'))
+        n_made = sum(1 for d in self.cq if d.get('made'))
+        self.c_count.config(text=('คิวว่าง' if not self.cq else
+                                  (f'ในคิว {len(self.cq)} ไอเทม'
+                                   + (f' · สร้างแล้ว {n_made} ✓' if n_made else ''))))
         stop_txt = (f'⛔  {nstop} แถวน่าจะผิด (แดง) — คลิกที่แถวดูเหตุผล · ดับเบิลคลิกแก้ · '
                     'ก่อนกดเริ่มจะถามอีกที' if nstop else '')
         self.c_warn.config(
@@ -7262,7 +7306,17 @@ class App:
         if not self.cq:
             return messagebox.showwarning('คิวว่าง', 'ยังไม่มีไอเทมในคิว — นำเข้าไฟล์ต้นฉบับก่อน')
         # v1.4.0 ตรวจก่อนเริ่ม: ⛔ เด้งถาม (กลับไปแก้ / ข้ามตัวที่มีปัญหา / ทำต่อทั้งหมด) · ⚠ ลง Log
-        run = self._precheck('สร้าง Item', 'ไอเทม', list(self.cq),
+        # v1.13.0 แถวที่สร้างสำเร็จไปแล้ว (✓ ในคิว) ไม่เอามาทำซ้ำ — กันไอเทมซ้ำบนเว็บตอนกด ▶ ไปต่อ
+        todo = [d for d in self.cq if not d.get('made')]
+        n_made = len(self.cq) - len(todo)
+        if n_made:
+            self.log('ข้ามไอเทมที่สร้างไปแล้ว %d รายการ (✓ ในคิว) — ทำต่อ %d รายการ'
+                     % (n_made, len(todo)), 'INFO')
+        if not todo:
+            return messagebox.showinfo('สร้างครบแล้ว',
+                                       'ไอเทมในคิวสร้างไปแล้วทั้ง %d รายการ (✓)\n\n'
+                                       'ถ้าจะสร้างซ้ำ ให้ลบออกจากคิวแล้วนำเข้าใหม่' % len(self.cq))
+        run = self._precheck('สร้าง Item', 'ไอเทม', todo,
                              lambda d: chk_active(d) + c_dyn_checks(d),
                              lambda d: '%s %s' % (d.get('kind', ''), d.get('name', '')))
         if run is None:
@@ -7334,6 +7388,9 @@ class App:
                     try:
                         if await self._c_one(page, d, do, hold):
                             okc += 1
+                            if do:
+                                d['made'] = True       # v1.13.0 ติ๊กกันสร้างซ้ำ (กด ▶ ไปต่อ จะข้ามแถวนี้)
+                                self.root.after(0, self._c_refresh)
                         else:
                             errc += 1
                     except Exception as ex:
@@ -27396,10 +27453,36 @@ def drive_folder_id(url):
     return u if re.fullmatch(r'[A-Za-z0-9_-]{20,}', u) else ''
 
 
+def drive_pad3(n):
+    """เลขหลักเดียว/สองหลัก -> เติม 0 นำหน้าให้ครบหลักร้อย · 4 -> 004 · 33 -> 033 · 5377 -> 5377"""
+    s = str(n or '').strip()
+    s = re.sub(r'\.0+$', '', s)
+    return str(int(s)).zfill(3) if re.fullmatch(r'\d+', s) else ''
+
+
 def drive_pic_stem(d):
-    """แถวในคิว -> ชื่อรูปที่ต้องหา (ไม่มีนามสกุล) · ไม่มี fdPosition/fdItemKind = ''"""
-    pos, ik = str(d.get('pos') or '').strip(), str(d.get('ikind') or '').strip()
-    return 'all_%s_%s' % (pos, ik) if re.fullmatch(r'\d+', pos) and re.fullmatch(r'\d+', ik) else ''
+    """แถวในคิว -> ชื่อรูปที่ต้องหา (ไม่มีนามสกุล) · ไม่มี fdPosition/fdItemKind = ''
+
+    ชื่อไฟล์ใน Drive เติม 0 นำหน้าให้ครบ 3 หลัก เช่น fdPosition 301 + fdItemKind 4
+    = all_301_004.png (ไม่ใช่ all_301_4.png)
+    """
+    pos, ik = drive_pad3(d.get('pos')), drive_pad3(d.get('ikind'))
+    return 'all_%s_%s' % (pos, ik) if pos and ik else ''
+
+
+def drive_stem_alts(stem):
+    """ชื่อที่จะลองค้นใน Drive เรียงตามลำดับ — แบบเติม 0 ก่อน แล้วค่อยแบบไม่เติม (ไฟล์เก่า)"""
+    m = re.fullmatch(r'(.*?_)(\d+)_(\d+)', str(stem or '').strip())
+    if not m:
+        return [stem] if stem else []
+    pre, a, b = m.group(1), m.group(2), m.group(3)
+    out = []
+    for aa in (a.zfill(3), str(int(a))):
+        for bb in (b.zfill(3), str(int(b))):
+            n = '%s%s_%s' % (pre, aa, bb)
+            if n not in out:
+                out.append(n)
+    return out
 
 
 def drive_stem_of(fname):
@@ -27586,7 +27669,21 @@ def drive_hits_match(hits, stem, now=None):
 
 
 async def drive_search(page, stem, say, wait=None):
-    """พิมพ์ชื่อรูปในช่องค้นหา Drive (เปิดหน้าผลค้นหา) -> ไฟล์ชื่อตรงเป๊ะ [(id, ชื่อ, วันที่แก้ไข)]"""
+    """พิมพ์ชื่อรูปในช่องค้นหา Drive -> ไฟล์ชื่อตรงเป๊ะ [(id, ชื่อ, วันที่แก้ไข)]
+
+    ลองชื่อแบบเติม 0 ให้ครบ 3 หลักก่อน (all_301_004) ถ้าไม่เจอค่อยลองแบบไม่เติม (all_301_4)
+    """
+    for i, s in enumerate(drive_stem_alts(stem)):
+        cands = await drive_search_one(page, s, say, wait)
+        if cands:
+            if i:
+                say('☁ เจอแบบไม่เติม 0: %s' % s)
+            return cands
+    return []
+
+
+async def drive_search_one(page, stem, say, wait=None):
+    """ค้นหาชื่อเดียว (ไม่ลองชื่อสำรอง)"""
     wait = DRIVE_SEARCH_WAIT if wait is None else wait
     await drive_open(page, DRIVE_SEARCH % _durl.quote(stem), say)
     t0 = time.time()
@@ -27881,7 +27978,11 @@ AUTO_PREF = 'auto_sheet_url'
 GSHEET_XLSX = 'https://docs.google.com/spreadsheets/d/%s/export?format=xlsx'
 GSHEET_EDIT = 'https://docs.google.com/spreadsheets/d/%s/edit'
 GSHEET_DIR = os.path.join(DATA_DIR, 'gsheet')
-AUTO = {'run': None}
+AUTO = {'run': None, 'hold': False}      # hold = ติ๊ก “พักให้ดูก่อนทุกขั้น” (v1.13.0)
+AUTO_HOLD_PREF = 'auto_hold_each'
+AUTO_STAGE_TH = {'sheet': 'โหลดชีท', 'pick': 'เลือกชีท', 'search': 'ค้นหาไอเทมบนเว็บ',
+                 'drive': 'ใส่รูปจาก Drive', 'create': 'สร้าง Item',
+                 'bundle_dlg': 'ตั้งค่า Bundle', 'bundle': 'สร้าง Bundle', 'paused': 'พักอยู่'}
 AUTO_QUIET = ('ค้นหา', 'สร้าง Item')             # ขั้นกลางทาง: เสร็จแล้วปิด Chrome ไปขั้นต่อเลย (ไม่เปิดค้าง/ไม่เด้ง)
 
 
@@ -28073,6 +28174,10 @@ class AutoRun:
     def __init__(self, app, sid, url):
         self.app, self.sid, self.url = app, sid, url
         self.stop = False
+        self.pause_req = False          # v1.13.0 กด ⏸ ไว้ — จะพักเมื่อขั้นที่ทำอยู่จบ
+        self.paused = False             # v1.13.0 พักอยู่ รอกด ▶ ไปต่อ
+        self.resume_fn = None           # v1.13.0 ขั้นถัดไปที่ค้างไว้ (fn, ชื่อขั้น)
+        self.hold_each = bool(AUTO.get('hold'))   # v1.13.0 ติ๊ก “พักให้ดูก่อนทุกขั้น”
         self.stage = ''
         self.path = ''
         self.sheets = []
@@ -28105,6 +28210,59 @@ class AutoRun:
             self.app.log(traceback.format_exc(), 'ERR')
             self.end('ผิดพลาด: %s' % str(ex)[:160], 'ERR')
 
+    def step(self, fn, label):
+        """หัวต่อขั้น (v1.13.0) — สั่งพักไว้ หรือติ๊กพักทุกขั้น = หยุดตรงนี้ รอกด ▶ ไปต่อ
+
+        พักที่หัวต่อขั้นเท่านั้น ไม่พักกลางคัน — กลางคันฟอร์มบนเว็บอาจกรอกค้างอยู่ครึ่งๆ
+        Chrome เปิดค้างไว้ให้ตรวจ (auto_finish_chrome ไม่ปิดถ้ากำลังจะพัก)
+        """
+        if self.stop:
+            return
+        if self.pause_req or self.hold_each:
+            self.pause_req = False
+            self.paused = True
+            self.resume_fn = (fn, label)
+            self.stage = 'paused'
+            self.log('พักไว้ก่อนขั้น “%s” — ตรวจได้เลย เสร็จแล้วกด ▶ ไปต่อ' % label, 'WARN')
+            self.status('⏸ พักอยู่ — ขั้นถัดไป: %s  (กด ▶ ไปต่อ)' % label, C['warn'])
+            auto_buttons(self.app, True, paused=True)
+            return
+        fn()
+
+    def _stop_rows(self):
+        """แถว ⛔ ในคิวสร้าง Item -> ข้อความสรุปรายแถว (v1.13.0)"""
+        out = []
+        for i, d in enumerate(self.app.cq, 1):
+            cs = [c for c in (chk_active(d) + c_dyn_checks(d)) if c['lv'] == 'stop']
+            for c in cs:
+                out.append('แถว #%d  %s %s — %s' % (i, d.get('kind', ''),
+                                                   str(d.get('name', ''))[:34], c['msg']))
+        return out
+
+    def resume(self):
+        """กด ▶ ไปต่อ — ทำขั้นที่ค้างไว้ต่อจากเดิม (ไม่เริ่มใหม่)"""
+        if not self.paused or not self.resume_fn:
+            return
+        fn, label = self.resume_fn
+        if CHROME_HOLD['on']:
+            # Chrome ที่เปิดค้างไว้ให้ตรวจใช้โปรไฟล์เดียวกับขั้นถัดไป — ต้องปิดก่อน
+            self.log('ปิดหน้า Chrome ที่เปิดค้างไว้ให้ตรวจก่อน แล้วค่อยไปต่อ…', 'INFO')
+            self.status('⏸ กำลังปิด Chrome ที่เปิดค้าง แล้วไปต่อ…', C['warn'])
+            CHROME_HOLD['close'] = True
+            th = CHROME_HOLD.get('thread')
+
+            def _wait(n=0):
+                if (CHROME_HOLD['on'] or (th is not None and th.is_alive())) and n < 150:
+                    self.app.root.after(200, lambda: _wait(n + 1))
+                    return
+                self.app.root.after(300, self.resume)
+            return _wait()
+        self.resume_fn = None
+        self.paused = False
+        self.log('ไปต่อ — ขั้น “%s”' % label, 'STEP')
+        auto_buttons(self.app, True)
+        self.after(120, fn)
+
     def wait(self, done, then, ms=700):
         def tick():
             if done():
@@ -28118,6 +28276,8 @@ class AutoRun:
             return
         AUTO['run'] = None
         self.stage = ''
+        self.paused = False
+        self.resume_fn = None
         self.log(msg, kind)
         self.status(('✓ ' if kind == 'OK' else '■ ') + msg, C['ok'] if kind == 'OK' else (C['err'] if kind == 'ERR' else C['warn']))
         auto_buttons(self.app, False)
@@ -28166,7 +28326,7 @@ class AutoRun:
             return self.end('โหลดชีทไม่สำเร็จ: %s' % (res['err'] or '?'), 'ERR')
         self.path = res['path']
         self.log('โหลดชีทแล้ว → %s' % os.path.basename(self.path), 'OK')
-        self.pick()
+        self.step(self.pick, 'เลือกชีท')
 
     # ---- ② เลือกชีท + ค้นหา (ปุ่มเดิมของแท็บค้นหา) ----
     def pick(self):
@@ -28180,7 +28340,7 @@ class AutoRun:
         if app.imported is old or src.get('path') != self.path:
             return self.end('ยกเลิกตอนเลือกชีท', 'INFO')
         self.sheets = list(src.get('sheets') or [])
-        self.search()
+        self.step(self.search, 'ค้นหาไอเทมบนเว็บ')
 
     def search(self):
         app = self.app
@@ -28220,7 +28380,7 @@ class AutoRun:
                 return self.end('หยุดหลังค้นหา (ค้นหาไม่ครบ)', 'WARN', popup=False)
         if not link_dup_step(app):               # เจอหลายตัว = เลือกตอนนี้เลย (ทีหลังไม่ถามซ้ำ)
             return self.end('ยกเลิกตอนเลือกไอเทมที่ค้นหาเจอหลายตัว', 'INFO')
-        self.confirm()
+        self.step(self.confirm, 'สรุปก่อนสร้าง')
 
     # ---- หยุดให้ดูสรุป 1 ครั้ง ----
     def confirm(self):
@@ -28237,14 +28397,14 @@ class AutoRun:
         app.bv_do.set(True)
         app._b_do_changed()
         self.log('ยืนยันแล้ว — สร้าง Item %d ตัว แล้วสร้าง Bundle' % n, 'STEP')
-        self.queue_items()
+        self.step(self.queue_items, 'ส่งเข้าคิวสร้าง Item')
 
     # ---- ③ ตัวที่ไม่เจอ → คิวสร้าง Item → รูปจาก Drive → สร้าง ----
     def queue_items(self):
         app = self.app
         if not any(r.get('miss') for r in app.results):
             self.log('ค้นหาเจอครบ — ข้ามขั้นสร้าง Item', 'INFO')
-            return self.bundle()
+            return self.step(self.bundle, 'สร้าง Bundle')
         try:
             app.tree.selection_remove(*app.tree.selection())
         except Exception:
@@ -28255,17 +28415,25 @@ class AutoRun:
         if len(app.cq) <= n0:
             return self.end('ส่งตัวที่ไม่เจอเข้าคิวสร้าง Item ไม่ได้ — ดู Log', 'ERR')
         self.n_create = len(app.cq)
-        self.drive()
+        bad = self._stop_rows()                 # v1.13.0 ⛔ = หยุดทันที ไม่ไปต่อ
+        if bad:
+            for ln in bad[:10]:
+                self.log('   ⛔ ' + ln, 'ERR')
+            if len(bad) > 10:
+                self.log('   … อีก %d แถว' % (len(bad) - 10), 'ERR')
+            return self.end('เจอ %d แถวที่น่าจะผิด (แถวแดงในคิวสร้าง Item) — หยุดไว้ก่อน '
+                            'ไปแก้ในชีทแล้วเริ่มใหม่' % len(bad), 'ERR')
+        self.step(self.drive, 'ใส่รูปจาก Drive')
 
     def drive(self):
         app = self.app
         todo = [d for d in app.cq if not d.get('img') and not d.get('img_off')]
         fid = drive_folder_id((getattr(app, 'prefs', None) or {}).get(DRIVE_PIC_PREF) or '')
         if not todo:
-            return self.create()
+            return self.step(self.create, 'สร้าง Item')
         if not fid:
             self.log('ไม่มีลิงก์โฟลเดอร์ Drive — ข้ามขั้นใส่รูป', 'WARN')
-            return self.create()
+            return self.step(self.create, 'สร้าง Item')
         keyed = [d for d in todo if drive_pic_stem(d)]
         nokey = [d for d in todo if not drive_pic_stem(d)]
         if not keyed:
@@ -28300,7 +28468,7 @@ class AutoRun:
             if not self.ask('ใส่รูปจาก Drive ไม่สำเร็จ:\n%s\n\nสร้างไอเทมต่อโดยไม่มีรูปไหม?\n'
                             '(ไม่ = หยุดไว้ก่อน ใส่รูปเองแล้วกดสร้าง Item / ส่งไปสร้าง Bundle ต่อเองได้)' % res['err']):
                 return self.end('หยุดให้ใส่รูปเอง (ไอเทมอยู่ในคิวสร้าง Item แล้ว)', 'WARN', popup=False)
-            return self.create()
+            return self.step(self.create, 'สร้าง Item')
         put, miss, nk = drive_fill_queue(keyed, res['got'])
         try:
             app._c_refresh()
@@ -28317,7 +28485,7 @@ class AutoRun:
         for d in nokey:
             app.log('   ⚠ ไม่รู้ชื่อรูป (ไม่มี fdPosition/fdItemKind) — %s (ItemKind %s)' % (d.get('name', ''), d.get('kind', '')), 'WARN')
         if not miss and not nokey and not err:
-            return self.create()
+            return self.step(self.create, 'สร้าง Item')
         msg = 'ใส่รูปให้แล้ว %d แถว' % len(put)
         if miss:
             msg += '\n\n⚠ ไม่เจอรูปบน Drive %d แถว:\n%s' % (len(miss), '\n'.join(
@@ -28332,7 +28500,7 @@ class AutoRun:
                 '(ไม่ = หยุดไว้ก่อน ใส่รูปเองในหน้าแก้ไข แล้วกดสร้าง Item / ส่งไปสร้าง Bundle ต่อเองได้)')
         if not self.ask(msg):
             return self.end('หยุดให้ใส่รูปเอง (ไอเทมอยู่ในคิวสร้าง Item แล้ว)', 'WARN', popup=False)
-        self.create()
+        self.step(self.create, 'สร้าง Item')
 
     def create(self):
         app = self.app
@@ -28357,7 +28525,7 @@ class AutoRun:
                             'ไปสร้าง Bundle ต่อไหม? Bundle ที่ขาดไอเทมจะหยุดให้ดูที่หน้านำเข้า' % (len(ok), want)):
                 return self.end('หยุดหลังสร้าง Item (สร้างไม่ครบ)', 'WARN', popup=False)
         self.log('สร้าง Item ได้เลข %d ตัว' % len(ok), 'OK' if len(ok) >= want else 'WARN')
-        self.bundle()
+        self.step(self.bundle, 'สร้าง Bundle')
 
     # ---- ④ สร้าง Bundle (ปุ่มส่งไปสร้าง Bundle + ปุ่มสร้างเดิม) ----
     def bundle(self):
@@ -28439,11 +28607,14 @@ def auto_bundle_check(dlg):
     dlg._ok()
 
 
-def auto_buttons(app, running):
+def auto_buttons(app, running, paused=False):
     w = getattr(app, '_auto', None) or {}
     try:
         w['go'].config(state='disabled' if running else 'normal')
         w['stop'].config(state='normal' if running else 'disabled')
+        # v1.13.0 ⏸ พัก กดได้ตอนกำลังวิ่ง · ▶ ไปต่อ กดได้ตอนพักอยู่
+        w['pause'].config(state='normal' if (running and not paused) else 'disabled')
+        w['cont'].config(state='normal' if paused else 'disabled')
     except Exception:
         pass
 
@@ -28495,11 +28666,52 @@ def auto_start(app):
     run.start()
 
 
+def auto_pause(app):
+    """⏸ พัก — v1.13.0 พักเมื่อขั้นที่ทำอยู่จบ (ไม่ตัดกลางคัน) แล้วรอกด ▶ ไปต่อ"""
+    run = AUTO.get('run')
+    if run is None or run.paused:
+        return
+    run.pause_req = True
+    run.log('สั่งพักแล้ว — จะพักเมื่อขั้น “%s” ที่ทำอยู่จบ (ไม่ตัดกลางคัน)'
+            % AUTO_STAGE_TH.get(run.stage, run.stage or '—'), 'WARN')
+    run.status('⏸ กำลังจะพัก — รอขั้นที่ทำอยู่จบก่อน…', C['warn'])
+
+
+def auto_resume(app):
+    """▶ ไปต่อ — v1.13.0 ทำต่อจากขั้นที่ค้างไว้"""
+    run = AUTO.get('run')
+    if run is None:
+        return
+    if not run.paused:
+        run.pause_req = False
+        return run.status('ยังไม่ได้พัก — กำลังทำงานอยู่', C['dim'])
+    run.resume()
+
+
+def auto_hold_changed(app):
+    """ติ๊ก “พักให้ดูก่อนทุกขั้น” — มีผลกับรอบที่กำลังวิ่งอยู่ด้วย"""
+    try:
+        AUTO['hold'] = bool(app._auto['hold_var'].get())
+    except Exception:
+        return
+    run = AUTO.get('run')
+    if run is not None:
+        run.hold_each = AUTO['hold']
+    try:
+        prefs = app.prefs
+        prefs[AUTO_HOLD_PREF] = AUTO['hold']
+        save_prefs(prefs)
+    except Exception:
+        pass
+
+
 def auto_stop(app):
     run = AUTO.get('run')
     if run is None:
         return
     run.stop = True
+    if run.paused:                        # v1.13.0 พักอยู่ = ไม่มีงานค้างบนเว็บ จบได้เลย
+        return run.end('หยุดแล้ว (กด ■ หยุดออโต้ ตอนพักอยู่)', 'WARN', popup=False)
     st = run.stage
     if st == 'search':
         app.cancel = True
@@ -28530,21 +28742,43 @@ def auto_ui(app):
     e.grid(row=0, column=1, sticky='we', padx=(8, 0), ipady=4)
     go = app._btn(inner, '🚀  เริ่มออโต้', lambda: auto_start(app), primary=True)
     go.grid(row=0, column=2, padx=(10, 0), ipadx=12, ipady=3)
+    pa = app._btn(inner, '⏸  พัก', lambda: auto_pause(app))      # v1.13.0
+    pa.config(state='disabled', fg=C['warn'])
+    pa.grid(row=0, column=3, padx=(8, 0), ipadx=8, ipady=3)
+    co = app._btn(inner, '▶  ไปต่อ', lambda: auto_resume(app))     # v1.13.0
+    co.config(state='disabled', fg=C['ok'])
+    co.grid(row=0, column=4, padx=(6, 0), ipadx=8, ipady=3)
     st = app._btn(inner, '■  หยุดออโต้', lambda: auto_stop(app))
     st.config(state='disabled', fg=C['err'])
-    st.grid(row=0, column=3, padx=(8, 0), ipadx=8, ipady=3)
+    st.grid(row=0, column=5, padx=(8, 0), ipadx=8, ipady=3)
+    hv = tk.BooleanVar(value=bool((getattr(app, 'prefs', None) or {}).get(AUTO_HOLD_PREF)))
+    AUTO['hold'] = bool(hv.get())
+    hc = tk.Checkbutton(inner, text='พักให้ดูก่อนทุกขั้น', variable=hv,
+                        command=lambda: auto_hold_changed(app), bg=C['bg'], fg=C['warn'],
+                        selectcolor=C['bg'], activebackground=C['bg'], activeforeground=C['warn'],
+                        font=('Segoe UI', 9))
+    hc.grid(row=1, column=0, columnspan=2, sticky='w', pady=(6, 0))
     lbl = tk.Label(inner, text='วางลิงก์ → เลือกชีท → ค้นหา → ดูสรุปแล้วกดยืนยัน 1 ครั้ง → สร้างให้จนจบ '
-                               '(เจอจุดต้องตัดสินใจจะหยุดถาม)', bg=C['bg'], fg=C['dim'],
-                   font=('Segoe UI', 9), anchor='w', justify='left')
-    lbl.grid(row=1, column=0, columnspan=4, sticky='w', pady=(6, 0))
+                               '·  ⏸ พัก = พักเมื่อขั้นที่ทำอยู่จบ แล้วกด ▶ ไปต่อ (ไม่ต้องเริ่มใหม่)',
+                   bg=C['bg'], fg=C['dim'], font=('Segoe UI', 9), anchor='w', justify='left')
+    lbl.grid(row=2, column=0, columnspan=6, sticky='w', pady=(4, 0))
     inner.grid_columnconfigure(1, weight=1)
     e.bind('<Return>', lambda ev: auto_start(app))
-    app._auto = {'e': e, 'go': go, 'stop': st, 'lbl': lbl}
+    app._auto = {'e': e, 'go': go, 'stop': st, 'lbl': lbl,
+                 'pause': pa, 'cont': co, 'hold_var': hv}
     return inner
 
 
 async def auto_finish_chrome(app, browser, what, headless=False):
     """ตอนออโต้: ขั้นค้นหา / สร้าง Item เสร็จแล้วปิด Chrome ไปขั้นต่อเลย · นอกออโต้ = เหมือนเดิมทุกอย่าง"""
+    _r = AUTO.get('run')
+    # v1.13.0 กำลังจะพัก = เปิด Chrome ค้างไว้ให้ตรวจ (ไม่ปิด ไม่เด้ง popup)
+    if _r is not None and (_r.pause_req or _r.hold_each) and what in AUTO_QUIET:
+        try:
+            app.log('🚀 ออโต้: %s เสร็จ — พักอยู่ เปิด Chrome ค้างไว้ให้ตรวจ' % what, 'INFO')
+        except Exception:
+            pass
+        return
     if AUTO.get('run') is not None and what in AUTO_QUIET:
         try:
             app.log('🚀 ออโต้: %s เสร็จ — ปิด Chrome แล้วไปขั้นต่อไป' % what, 'INFO')
